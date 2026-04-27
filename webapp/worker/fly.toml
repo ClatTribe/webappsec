@@ -1,0 +1,37 @@
+# Fly.io deployment for the Strix worker.
+# Runs as a privileged machine so it can mount the Docker socket and spawn the Strix sandbox.
+
+app = "strix-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LOG_LEVEL = "INFO"
+  WORKER_CONCURRENCY = "1"
+
+# Worker is a long-running process, not an HTTP server.
+# Disable HTTP services and rely on a single always-on machine.
+[processes]
+  worker = "strix-worker"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2
+
+# Mount the host Docker daemon into the worker so it can spawn the Strix sandbox container.
+# Fly.io supports privileged machines via `flyctl machine update --privileged` after launch.
+# Alternative: use Docker-in-Docker with a sidecar dind container.
+
+# Cleanup: scans run inside spawned sandbox containers; the worker tracks them and reaps on
+# completion. A periodic reap also runs to remove orphaned `strix-scan-*` containers.
+
+# To launch the first time:
+#   flyctl launch --no-deploy
+#   flyctl secrets set SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+#                      SUPABASE_DB_URL=... STRIX_LLM=... LLM_API_KEY=...
+#   flyctl machine update --privileged <machine-id>
+#   flyctl deploy
