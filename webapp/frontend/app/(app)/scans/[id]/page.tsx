@@ -1,8 +1,25 @@
 import { notFound } from 'next/navigation';
-import { ChevronRight, Target } from 'lucide-react';
+import {
+  ChevronRight,
+  Target,
+  Cpu,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  DollarSign,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import ScanLiveView from '@/components/scan/scan-live-view';
+
+function formatTokens(n: number | null | undefined): string {
+  if (n == null) return '—';
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
+}
 
 interface Props {
   params: { id: string };
@@ -42,14 +59,42 @@ export default async function ScanDetailPage({ params }: Props) {
           {scan.llm_provider && (
             <span className="font-mono">{scan.llm_provider}</span>
           )}
-          {scan.total_cost != null && Number(scan.total_cost) > 0 && (
-            <span>${Number(scan.total_cost).toFixed(2)}</span>
-          )}
           {scan.created_at && (
             <span>{new Date(scan.created_at).toLocaleString()}</span>
           )}
         </div>
       </header>
+
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile
+          icon={DollarSign}
+          label="Cost"
+          value={
+            scan.total_cost != null && Number(scan.total_cost) > 0
+              ? `$${Number(scan.total_cost).toFixed(4)}`
+              : '$0.0000'
+          }
+          accent="amber"
+        />
+        <StatTile
+          icon={ArrowDownToLine}
+          label="Input tokens"
+          value={formatTokens(scan.total_input_tokens)}
+          accent="cyan"
+        />
+        <StatTile
+          icon={ArrowUpFromLine}
+          label="Output tokens"
+          value={formatTokens(scan.total_output_tokens)}
+          accent="violet"
+        />
+        <StatTile
+          icon={Cpu}
+          label="Agents"
+          value={scan.agents_count != null ? String(scan.agents_count) : '0'}
+          accent="emerald"
+        />
+      </section>
 
       <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-4">
         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
@@ -78,6 +123,38 @@ export default async function ScanDetailPage({ params }: Props) {
       )}
 
       <ScanLiveView scanId={params.id} initialStatus={scan.status} />
+    </div>
+  );
+}
+
+const ACCENTS = {
+  amber: 'text-amber-300/90 ring-amber-500/20',
+  cyan: 'text-cyan-300/90 ring-cyan-500/20',
+  violet: 'text-violet-300/90 ring-violet-500/20',
+  emerald: 'text-emerald-300/90 ring-emerald-500/20',
+} as const;
+
+function StatTile({
+  icon: Icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  accent: keyof typeof ACCENTS;
+}) {
+  const cls = ACCENTS[accent];
+  return (
+    <div className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
+      <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+        <Icon className={`h-3 w-3 ${cls.split(' ')[0]}`} strokeWidth={2.25} />
+        {label}
+      </div>
+      <div className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-neutral-100">
+        {value}
+      </div>
     </div>
   );
 }
