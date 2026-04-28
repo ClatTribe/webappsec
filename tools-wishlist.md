@@ -10,6 +10,20 @@ Read this alongside [`Architecture.md`](Architecture.md) (how the worker drives 
 
 ## Strix
 
+### Priority 0 — make the scan readable to a human
+
+The scan UI today shows technical exhaust (agent IDs, tool-call counts, raw URLs) but nothing that tells a developer or product owner *what was actually checked*. We tried to render this from `events.jsonl` and the answer was effectively "an agent named `WorkerScanProcessorAgent` ran 13 tool calls" — true, but useless. These are the upstream changes that would let us replace that with a real security report.
+
+| | Item | Why we want it | What we do today | Proposed shape |
+|---|---|---|---|---|
+| 🔴 | **Test plan event at scan start** | A reader needs to know what *categories* the scan intends to cover before it starts. "We're testing for SQL injection on /search and SSRF on /api/scans" is the answer to the question "what is this scan doing?" | We echo the user's free-text instruction back. It says nothing about coverage. | Emit `run.test_plan` after `run.configured` with `{categories: ["sqli", "ssrf", "auth"], targets: [{value, planned_checks: [...]}]}`. Strix's planner already decomposes the instruction into sub-goals — surface them. |
+| 🔴 | **Semantic checkpoint events** (`check.started` / `check.completed`) | Tells the user what was *attempted*, not just what was found. A scan that tested 8 attack classes and found 2 vulns is more reassuring than a scan that found 2 vulns with no idea what else was tried. | Nothing — we can only show the findings (one side of the ledger). | `check.started {category: "sqli", surface: "/search?q=", method: "GET"}` and `check.completed {category, surface, result: "vulnerable" \| "not_vulnerable" \| "inconclusive", confidence: 0.0-1.0}`. Worker pipes these into `scan_events`; UI renders coverage. |
+| 🔴 | **Findings tagged with semantic category, not just CWE** | We bucket findings into 14 categories (SQLi / SSRF / IDOR / etc.) for the UI. Today we infer the category from CWE + title keywords — which works, but our category list is private and may drift from Strix's mental model. | `categoriseFinding` in [`findings-summary.tsx`](webapp/frontend/components/scan/findings-summary.tsx) does ad-hoc CWE+keyword bucketing. | Add `category` (string) and `category_label` (human-readable) to the report dict in `add_vulnerability_report`. Pre-defined enum: `sqli`, `xss`, `cmd_injection`, `ssrf`, `auth`, `authz`, `idor`, `crypto`, `info_disclosure`, `csrf`, `path_traversal`, `misconfig`, `race_condition`, `open_redirect`, `other`. |
+| 🟠 | **Plain-language `run.summary` event at scan end** | A one-paragraph English summary the user can scan in 10 seconds. The LLM already wrote one to `penetration_test_report.md` — surface it as an event, not just a markdown blob we have to re-parse. | Worker stores the markdown report as an artifact. UI doesn't read it. | `run.summary {text: "Scanned login + 12 API endpoints. Found 1 critical SSRF, 2 medium misconfigurations. Authentication and authorization checks passed.", duration_seconds, tested_categories, ...}`. |
+| 🟠 | **Per-agent task category tag** | Same idea but per agent. When Strix spawns sub-agents (`auth-attacker`, `ssrf-scanner`), each should declare what it's responsible for — not just a free-text task. | We render `agent.created.payload.task` verbatim, which is just the user's instruction echoed back. | Add `category` (one of the same enum) to `agent.created.payload`. Sub-agents that probe a single attack class should always set this. |
+
+---
+
 ### Priority 1 — kill the stdout-scraping path
 
 | | Item | Why we want it | What we do today | Proposed shape |
