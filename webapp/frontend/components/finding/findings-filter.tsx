@@ -141,27 +141,28 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
               </button>
             ))}
           </div>
-          {targetOptions.length > 1 && (
-            <div className="relative inline-flex items-center">
-              <TargetIcon
-                className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
-                strokeWidth={2.25}
-              />
-              <select
-                value={targetFilter}
-                onChange={(e) => setTargetFilter(e.target.value)}
-                className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
-              >
-                <option value={ALL_TARGETS}>All targets</option>
-                {targetOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
-            </div>
-          )}
+          <div className="relative inline-flex items-center">
+            <TargetIcon
+              className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
+              strokeWidth={2.25}
+            />
+            <select
+              value={targetFilter}
+              onChange={(e) => setTargetFilter(e.target.value)}
+              disabled={targetOptions.length === 0}
+              className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value={ALL_TARGETS}>
+                {targetOptions.length === 0 ? 'No targets' : 'All targets'}
+              </option>
+              {targetOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
           <span className="rounded-md bg-red-500/10 px-2 py-0.5 text-red-300 ring-1 ring-red-500/30">
