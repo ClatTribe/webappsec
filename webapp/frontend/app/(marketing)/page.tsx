@@ -22,18 +22,7 @@ import type { LucideIcon } from 'lucide-react';
 
 export default function LandingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden">
-      {/* Backdrop wash */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 opacity-90"
-        style={{
-          background:
-            'radial-gradient(60% 50% at 80% 0%, rgba(6, 182, 212, 0.18) 0%, transparent 60%), radial-gradient(50% 60% at 0% 30%, rgba(139, 92, 246, 0.14) 0%, transparent 60%), radial-gradient(80% 80% at 50% 100%, rgba(56, 189, 248, 0.06) 0%, transparent 70%)',
-        }}
-      />
-
-      <Nav />
+    <>
       <Hero />
       <Logos />
       <PainPoints />
@@ -41,49 +30,7 @@ export default function LandingPage() {
       <AiTriageSpotlight />
       <HowItWorks />
       <FinalCta />
-      <Footer />
-    </main>
-  );
-}
-
-// ============== NAV ==============
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-30 border-b border-neutral-900/60 bg-neutral-950/60 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30">
-            <ShieldCheck className="h-5 w-5 text-white" strokeWidth={2.5} />
-          </div>
-          <span className="text-base font-semibold tracking-tight">Strix</span>
-        </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white sm:inline-flex"
-          >
-            <GithubIcon className="h-4 w-4" />
-            GitHub
-          </Link>
-          <Link
-            href="/login"
-            className="rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-white to-neutral-200 px-3.5 py-1.5 text-sm font-medium text-neutral-950 shadow-sm shadow-white/15 transition-all hover:shadow-md"
-          >
-            Get started
-            <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
-          </Link>
-        </div>
-      </div>
-    </nav>
+    </>
   );
 }
 
@@ -640,43 +587,3 @@ function FinalCta() {
   );
 }
 
-// ============== FOOTER ==============
-
-function Footer() {
-  return (
-    <footer className="border-t border-neutral-900/60 bg-neutral-950/40">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 sm:flex-row">
-        <div className="flex items-center gap-2 text-xs text-neutral-500">
-          <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
-          Built on{' '}
-          <a
-            href="https://github.com/usestrix/strix"
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-          >
-            usestrix/strix
-          </a>
-          . Apache-2.0.
-        </div>
-        <div className="flex items-center gap-4 text-xs text-neutral-500">
-          <Link href="/login" className="hover:text-neutral-200">
-            Sign in
-          </Link>
-          <Link href="/signup" className="hover:text-neutral-200">
-            Sign up
-          </Link>
-          <a
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 hover:text-neutral-200"
-          >
-            <GithubIcon className="h-3 w-3" />
-            GitHub
-          </a>
-        </div>
-      </div>
-    </footer>
-  );
-}

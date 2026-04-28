@@ -6,6 +6,17 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
 const PUBLIC_PATHS = ['/', '/login', '/signup', '/forgot-password'];
+const PUBLIC_PREFIXES = [
+  '/pricing',
+  '/about',
+  '/security',
+  '/privacy',
+  '/terms',
+  '/contact',
+  '/changelog',
+  '/blog',
+  '/.well-known',
+];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -38,6 +49,7 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isPublic =
     PUBLIC_PATHS.includes(path) ||
+    PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`)) ||
     path.startsWith('/api/integrations/oauth/') ||
     path.startsWith('/_next') ||
     path.startsWith('/favicon');
