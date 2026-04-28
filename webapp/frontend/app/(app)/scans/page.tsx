@@ -1,24 +1,38 @@
 import Link from 'next/link';
-import { Plus, Activity, CheckCircle2, XCircle, Pause, ArrowRight } from 'lucide-react';
+import {
+  Plus,
+  Activity,
+  CheckCircle2,
+  XCircle,
+  Pause,
+  ArrowRight,
+  Target as TargetIcon,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
-import type { ScanStatus } from '@/lib/supabase/types';
+import type { Scan, ScanStatus } from '@/lib/supabase/types';
 
-const STATUS_THEME: Record<ScanStatus, { Icon: LucideIcon; color: string; tag: string }> = {
-  queued: { Icon: Pause, color: 'text-neutral-400', tag: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40' },
-  running: { Icon: Activity, color: 'text-blue-400', tag: 'bg-blue-500/15 text-blue-200 ring-blue-500/30' },
-  completed: { Icon: CheckCircle2, color: 'text-emerald-400', tag: 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/30' },
-  failed: { Icon: XCircle, color: 'text-red-400', tag: 'bg-red-500/15 text-red-200 ring-red-500/30' },
-  cancelled: { Icon: XCircle, color: 'text-neutral-500', tag: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40' },
+const STATUS_THEME: Record<ScanStatus, { Icon: LucideIcon; tag: string }> = {
+  queued: { Icon: Pause, tag: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40' },
+  running: { Icon: Activity, tag: 'bg-blue-500/15 text-blue-200 ring-blue-500/30' },
+  completed: { Icon: CheckCircle2, tag: 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/30' },
+  failed: { Icon: XCircle, tag: 'bg-red-500/15 text-red-200 ring-red-500/30' },
+  cancelled: { Icon: XCircle, tag: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40' },
+};
+
+type ScanWithTarget = Scan & {
+  targets?: { id: string; name: string; type: string } | null;
 };
 
 export default async function ScansListPage() {
   const supabase = createClient();
-  const { data: scans } = await supabase
+  const { data } = await supabase
     .from('scans')
-    .select('*')
+    .select('*, targets(id, name, type)')
     .order('created_at', { ascending: false })
     .limit(50);
+
+  const scans = (data as ScanWithTarget[]) ?? [];
 
   return (
     <div className="space-y-6">
@@ -26,7 +40,8 @@ export default async function ScansListPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Scans</h1>
           <p className="mt-1.5 text-sm text-neutral-400">
-            Every scan run by your organization. Click a row to see findings and the live timeline.
+            Every scan run by your organization. Click a scan to see findings and the live timeline,
+            or click a target to see all the scans for that asset.
           </p>
         </div>
         <Link
@@ -39,10 +54,11 @@ export default async function ScansListPage() {
       </header>
 
       <div className="overflow-hidden rounded-xl border border-neutral-800/80 bg-neutral-900/20">
-        {scans?.length ? (
+        {scans.length > 0 ? (
           <table className="w-full text-sm">
             <thead className="border-b border-neutral-800/80 bg-neutral-900/40">
               <tr className="text-left text-[10.5px] uppercase tracking-wider text-neutral-500">
+                <th className="px-5 py-3 font-semibold">Target</th>
                 <th className="px-5 py-3 font-semibold">Run</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold">Mode</th>
@@ -57,6 +73,19 @@ export default async function ScansListPage() {
                 const Icon = theme.Icon;
                 return (
                   <tr key={scan.id} className="group transition-colors hover:bg-neutral-900/40">
+                    <td className="px-5 py-3.5">
+                      {scan.targets ? (
+                        <Link
+                          href={`/targets/${scan.targets.id}`}
+                          className="inline-flex items-center gap-1.5 text-neutral-200 transition-colors hover:text-cyan-300"
+                        >
+                          <TargetIcon className="h-3.5 w-3.5 text-cyan-400/70" strokeWidth={2} />
+                          <span className="font-medium">{scan.targets.name}</span>
+                        </Link>
+                      ) : (
+                        <span className="text-neutral-500">—</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3.5">
                       <Link
                         href={`/scans/${scan.id}`}
@@ -78,9 +107,11 @@ export default async function ScansListPage() {
                       ${scan.total_cost?.toFixed(2) ?? '0.00'}
                     </td>
                     <td className="px-5 py-3.5 text-neutral-400">
-                      {scan.started_at
-                        ? new Date(scan.started_at).toLocaleString()
-                        : <span className="text-neutral-600">—</span>}
+                      {scan.started_at ? (
+                        new Date(scan.started_at).toLocaleString()
+                      ) : (
+                        <span className="text-neutral-600">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <Link
