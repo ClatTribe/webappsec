@@ -15,8 +15,24 @@ import {
   Eye,
   Loader2,
   RotateCcw,
+  Zap,
+  Clock,
+  Eye as EyeIcon,
+  Ban,
+  Sparkles,
+  Globe,
+  Lock,
+  ShieldOff,
+  Repeat,
 } from 'lucide-react';
-import type { Finding, FindingStatus, Severity } from '@/lib/supabase/types';
+import type { LucideIcon } from 'lucide-react';
+import type {
+  AiReachability,
+  AiUrgency,
+  Finding,
+  FindingStatus,
+  Severity,
+} from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 
 const SEVERITY_THEME: Record<
@@ -70,6 +86,50 @@ const SEVERITY_THEME: Record<
     pill: 'bg-neutral-700/40 text-neutral-200 ring-1 ring-neutral-600/40',
     tagline: 'Worth noting — not directly exploitable.',
   },
+};
+
+const URGENCY_THEME: Record<
+  AiUrgency,
+  { label: string; banner: string; pill: string; Icon: LucideIcon; intent: string }
+> = {
+  fix_now: {
+    label: 'Fix now',
+    banner: 'border-red-500/30 bg-red-950/40',
+    pill: 'bg-red-600/20 text-red-200 ring-1 ring-red-500/40',
+    Icon: Zap,
+    intent: 'AI flags this as urgent — confirmed real and reachable.',
+  },
+  fix_soon: {
+    label: 'Fix soon',
+    banner: 'border-orange-500/30 bg-orange-950/30',
+    pill: 'bg-orange-500/20 text-orange-200 ring-1 ring-orange-400/40',
+    Icon: Clock,
+    intent: 'AI flags this as real but not immediately critical.',
+  },
+  monitor: {
+    label: 'Monitor',
+    banner: 'border-amber-500/25 bg-amber-950/20',
+    pill: 'bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30',
+    Icon: EyeIcon,
+    intent: 'AI says: needs human review or upstream change to act on.',
+  },
+  dismiss: {
+    label: 'Dismiss',
+    banner: 'border-neutral-700/40 bg-neutral-900/40',
+    pill: 'bg-neutral-700/40 text-neutral-300 ring-1 ring-neutral-600/40',
+    Icon: Ban,
+    intent: 'AI assessed this as a likely false positive.',
+  },
+};
+
+const REACHABILITY_THEME: Record<
+  AiReachability,
+  { label: string; Icon: LucideIcon; color: string }
+> = {
+  external_unauthenticated: { label: 'Public — no auth', Icon: Globe, color: 'text-red-300' },
+  external_authenticated: { label: 'Any signed-in user', Icon: Globe, color: 'text-orange-300' },
+  internal_only: { label: 'Internal / privileged only', Icon: Lock, color: 'text-amber-300' },
+  unreachable: { label: 'Unreachable', Icon: ShieldOff, color: 'text-neutral-400' },
 };
 
 const STATUS_THEME: Record<
@@ -152,6 +212,9 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
   const theme = SEVERITY_THEME[finding.severity];
   const statusTheme = STATUS_THEME[finding.status];
+  const ai = finding.ai_assessment ?? null;
+  const urgencyTheme = ai ? URGENCY_THEME[ai.urgency] : null;
+  const reachTheme = ai ? REACHABILITY_THEME[ai.reachability] : null;
   const { summary, sections } = parseFindingMarkdown(finding.description_md);
   const Icon = theme.Icon;
   const StatusIcon = statusTheme.Icon;
@@ -159,6 +222,8 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
     finding.status === 'fixed' ||
     finding.status === 'false_positive' ||
     finding.status === 'wont_fix';
+  // AI says "dismiss" → treat the card as low-priority visual weight.
+  const aiDismissed = ai?.urgency === 'dismiss';
 
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
@@ -185,7 +250,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   return (
     <div
       className={`group relative overflow-hidden rounded-xl border border-neutral-800/80 bg-gradient-to-b ${theme.cardBg} transition-all hover:border-neutral-700/80 ${
-        isResolved ? 'opacity-70 saturate-50' : ''
+        isResolved || aiDismissed ? 'opacity-70 saturate-50' : ''
       }`}
     >
       <div className={`severity-stripe h-[3px] bg-gradient-to-r ${theme.stripe}`} />
@@ -201,6 +266,18 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
+              {urgencyTheme && (() => {
+                const UIcon = urgencyTheme.Icon;
+                return (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${urgencyTheme.pill}`}
+                    title={ai?.reasoning ?? undefined}
+                  >
+                    <UIcon className="h-3 w-3" strokeWidth={2.5} />
+                    AI · {urgencyTheme.label}
+                  </span>
+                );
+              })()}
               <span
                 className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${theme.pill}`}
               >
@@ -212,6 +289,15 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
                 {statusTheme.label}
               </span>
+              {(finding.times_seen ?? 1) > 1 && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-900/60 px-2 py-0.5 text-[10px] font-semibold text-neutral-300 ring-1 ring-neutral-800"
+                  title="Same fingerprint detected across multiple scans"
+                >
+                  <Repeat className="h-3 w-3" strokeWidth={2.5} />
+                  seen {finding.times_seen}×
+                </span>
+              )}
               {finding.cvss != null && (
                 <span className="rounded-md bg-neutral-900/60 px-2 py-0.5 font-mono text-[10px] text-neutral-300 ring-1 ring-neutral-800">
                   CVSS {finding.cvss}
@@ -257,6 +343,56 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
       {expanded && (
         <div className="space-y-6 border-t border-neutral-800/60 bg-neutral-950/30 px-6 py-6">
+          {ai && urgencyTheme && reachTheme && (() => {
+            const UIcon = urgencyTheme.Icon;
+            const RIcon = reachTheme.Icon;
+            return (
+              <section className={`rounded-lg border ${urgencyTheme.banner} p-4`}>
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-black/30 ring-1 ring-white/5">
+                    <Sparkles className="h-3.5 w-3.5 text-violet-300" strokeWidth={2.25} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">
+                        AI assessment
+                      </span>
+                      <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${urgencyTheme.pill}`}>
+                        <UIcon className="h-3 w-3" strokeWidth={2.5} />
+                        {urgencyTheme.label}
+                      </span>
+                      <span className={`inline-flex items-center gap-1 text-[11px] ${reachTheme.color}`}>
+                        <RIcon className="h-3 w-3" strokeWidth={2.5} />
+                        {reachTheme.label}
+                      </span>
+                      <span className="text-[10.5px] text-neutral-500">
+                        confidence {Math.round(ai.confidence * 100)}%
+                      </span>
+                      {ai.is_likely_false_positive && (
+                        <span className="rounded-md bg-neutral-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase text-neutral-300 ring-1 ring-neutral-600/40">
+                          likely FP
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-[13px] leading-relaxed text-neutral-200">
+                      {ai.reasoning}
+                    </p>
+                    {ai.recommended_action && (
+                      <p className="mt-2 text-[12.5px] text-neutral-400">
+                        <span className="font-medium text-neutral-300">Recommended:</span>{' '}
+                        {ai.recommended_action}
+                      </p>
+                    )}
+                    <p className="mt-2 text-[10px] text-neutral-600">
+                      Assessed by {ai.model ?? 'LLM'}
+                      {finding.ai_assessed_at &&
+                        ` · ${new Date(finding.ai_assessed_at).toLocaleString()}`}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
           {finding.target && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-neutral-500">Target:</span>
