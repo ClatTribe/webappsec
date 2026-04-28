@@ -172,29 +172,38 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
           </div>
         ) : (
           visible.map((f) => (
-            <div key={f.id}>
-              <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px] text-neutral-500">
-                {f.targets && f.target_id && (
-                  <span className="inline-flex items-center gap-1.5">
-                    <TargetIcon className="h-3 w-3" strokeWidth={2} />
-                    <Link
-                      href={`/targets/${f.target_id}`}
-                      className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
-                    >
-                      {f.targets.name}
-                    </Link>
-                  </span>
+            <div
+              key={f.id}
+              className="rounded-xl border border-neutral-800/80 bg-neutral-900/20"
+            >
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-neutral-800/60 px-4 py-2 text-[11px]">
+                {f.targets && f.target_id ? (
+                  <Link
+                    href={`/targets/${f.target_id}`}
+                    className="inline-flex items-center gap-1.5 transition-colors hover:text-cyan-300"
+                  >
+                    <TargetIcon className="h-3.5 w-3.5 text-cyan-400/70" strokeWidth={2.25} />
+                    <span className="font-semibold text-neutral-200">{f.targets.name}</span>
+                    {f.targets.value && (
+                      <span className="font-mono text-neutral-500">· {f.targets.value}</span>
+                    )}
+                  </Link>
+                ) : (
+                  <span className="text-neutral-600">no target</span>
                 )}
+                <span className="text-neutral-700">|</span>
                 {f.scans?.run_name && (
-                  <span className="inline-flex items-center gap-1.5">
+                  <Link
+                    href={`/scans/${f.scan_id}`}
+                    className="inline-flex items-center gap-1.5 text-neutral-400 transition-colors hover:text-cyan-300"
+                  >
                     <ScanLine className="h-3 w-3" strokeWidth={2} />
-                    Scan{' '}
-                    <Link
-                      href={`/scans/${f.scan_id}`}
-                      className="font-medium text-neutral-400 transition-colors hover:text-cyan-300"
-                    >
-                      {f.scans.run_name}
-                    </Link>
+                    Scan {f.scans.run_name}
+                  </Link>
+                )}
+                {(f.times_seen ?? 1) > 1 && (
+                  <span className="ml-auto rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-300">
+                    seen in {f.times_seen} scans
                   </span>
                 )}
               </div>
