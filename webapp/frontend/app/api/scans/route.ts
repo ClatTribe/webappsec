@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 const Body = z.object({
+  target_id: z.string().uuid().optional(),
   targets: z.array(z.string().min(1)).min(1).max(10),
   scan_mode: z.enum(['quick', 'standard', 'deep']).default('standard'),
   scope_mode: z.enum(['auto', 'diff', 'full']).default('auto'),
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
     .insert({
       org_id: orgId,
       user_id: user.id,
+      target_id: body.target_id ?? null,  // ensure_target_for_scan trigger fills if null
       run_name: runName,
       status: 'queued',
       scan_mode: body.scan_mode,
