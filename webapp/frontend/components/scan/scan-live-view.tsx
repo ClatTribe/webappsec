@@ -1,21 +1,81 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Activity, ShieldAlert, ShieldCheck, ShieldX, Pause } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
+import FindingCard from '@/components/finding/finding-card';
+import EventRow from '@/components/scan/event-row';
 
 interface Props {
   scanId: string;
   initialStatus: ScanStatus;
 }
 
+const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
+
+const SEVERITY_PILL: Record<string, string> = {
+  critical: 'bg-red-600/15 text-red-200 ring-1 ring-red-500/40',
+  high: 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/40',
+  medium: 'bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/40',
+  low: 'bg-lime-500/15 text-lime-200 ring-1 ring-lime-400/40',
+  info: 'bg-neutral-700/40 text-neutral-200 ring-1 ring-neutral-600/40',
+};
+
+const STATUS_THEME: Record<
+  ScanStatus,
+  { label: string; Icon: LucideIcon; ring: string; tag: string; dot: string; tagline: (n: number) => string }
+> = {
+  queued: {
+    label: 'Queued',
+    Icon: Pause,
+    ring: 'ring-neutral-700/60',
+    tag: 'bg-neutral-700/40 text-neutral-300',
+    dot: 'bg-neutral-500',
+    tagline: () => 'Waiting for a worker to pick it up.',
+  },
+  running: {
+    label: 'Running',
+    Icon: Activity,
+    ring: 'ring-blue-500/40',
+    tag: 'bg-blue-500/20 text-blue-200',
+    dot: 'bg-blue-500 status-dot-pulse',
+    tagline: (n) => (n === 0 ? 'Agent is investigating — findings stream in as they appear.' : 'Agent is still investigating…'),
+  },
+  completed: {
+    label: 'Completed',
+    Icon: ShieldCheck,
+    ring: 'ring-emerald-500/40',
+    tag: 'bg-emerald-500/20 text-emerald-200',
+    dot: 'bg-emerald-500',
+    tagline: (n) => (n === 0 ? 'Scan finished cleanly with no findings.' : `${n} finding${n === 1 ? '' : 's'} produced.`),
+  },
+  failed: {
+    label: 'Failed',
+    Icon: ShieldX,
+    ring: 'ring-red-500/40',
+    tag: 'bg-red-500/20 text-red-200',
+    dot: 'bg-red-500',
+    tagline: () => 'Scan ended without finishing — check the timeline below.',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    Icon: ShieldAlert,
+    ring: 'ring-neutral-600/60',
+    tag: 'bg-neutral-700/40 text-neutral-300',
+    dot: 'bg-neutral-500',
+    tagline: () => 'Scan was cancelled.',
+  },
+};
+
 export default function ScanLiveView({ scanId, initialStatus }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [showEvents, setShowEvents] = useState(false);
 
-  // Initial fetch
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -41,135 +101,146 @@ export default function ScanLiveView({ scanId, initialStatus }: Props) {
     };
   }, [scanId, supabase]);
 
-  // Realtime subscriptions
   useEffect(() => {
     const channel = supabase
       .channel(`scan:${scanId}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'scan_events',
-          filter: `scan_id=eq.${scanId}`,
-        },
-        (payload) => {
-          setEvents((prev) => [...prev, payload.new as ScanEvent]);
-        },
+        { event: 'INSERT', schema: 'public', table: 'scan_events', filter: `scan_id=eq.${scanId}` },
+        (payload) => setEvents((prev) => [...prev, payload.new as ScanEvent]),
       )
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'findings',
-          filter: `scan_id=eq.${scanId}`,
-        },
-        (payload) => {
-          setFindings((prev) => [...prev, payload.new as Finding]);
-        },
+        { event: 'INSERT', schema: 'public', table: 'findings', filter: `scan_id=eq.${scanId}` },
+        (payload) => setFindings((prev) => [...prev, payload.new as Finding]),
       )
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'scans',
-          filter: `id=eq.${scanId}`,
-        },
-        (payload) => {
-          setStatus((payload.new as { status: ScanStatus }).status);
-        },
+        { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scanId}` },
+        (payload) => setStatus((payload.new as { status: ScanStatus }).status),
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
   }, [scanId, supabase]);
 
+  const sortedFindings = [...findings].sort((a, b) => {
+    const sa = SEVERITY_ORDER.indexOf(a.severity as (typeof SEVERITY_ORDER)[number]);
+    const sb = SEVERITY_ORDER.indexOf(b.severity as (typeof SEVERITY_ORDER)[number]);
+    return sa - sb;
+  });
+
+  const counts = SEVERITY_ORDER.map((s) => ({
+    severity: s,
+    count: findings.filter((f) => f.severity === s).length,
+  }));
+
+  const theme = STATUS_THEME[status];
+  const StatusIcon = theme.Icon;
+
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <section className="rounded-md border border-neutral-800 p-4">
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          Live events
-          <StatusBadge status={status} />
-        </h2>
-        <div className="mt-3 max-h-[60vh] overflow-y-auto font-mono text-xs">
-          {events.length === 0 ? (
-            <div className="text-neutral-500">Waiting for events...</div>
-          ) : (
-            events.map((e) => (
-              <div key={e.id} className="border-l-2 border-neutral-800 py-1 pl-3">
-                <span className="text-neutral-500">{new Date(e.created_at).toLocaleTimeString()}</span>{' '}
-                <span className="text-neutral-400">{e.event_type}</span>{' '}
-                {e.payload && (
-                  <pre className="mt-1 whitespace-pre-wrap text-neutral-300">
-                    {JSON.stringify(e.payload, null, 2)}
-                  </pre>
-                )}
+    <div className="space-y-6">
+      {/* Hero status card */}
+      <section
+        className={`relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-gradient-to-b from-neutral-900/50 via-neutral-950/30 to-neutral-950/0 p-6 ring-1 ${theme.ring}`}
+      >
+        <div className="flex items-center gap-4">
+          <div
+            className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-neutral-900/70 ${theme.tag} ring-1 ring-inset ring-white/5`}
+          >
+            <StatusIcon className="h-6 w-6" strokeWidth={2} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${theme.tag}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
+                {theme.label}
+              </span>
+            </div>
+            <p className="mt-1.5 text-sm text-neutral-300">{theme.tagline(findings.length)}</p>
+          </div>
+        </div>
+
+        {/* Severity stat row */}
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {counts.map((c) => (
+            <div
+              key={c.severity}
+              className={`rounded-lg px-3 py-2 ${
+                c.count > 0 ? SEVERITY_PILL[c.severity] : 'bg-neutral-900/40 ring-1 ring-neutral-800/80'
+              }`}
+            >
+              <div className={`text-xl font-semibold ${c.count > 0 ? '' : 'text-neutral-600'}`}>
+                {c.count}
               </div>
-            ))
-          )}
+              <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">
+                {c.severity}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
-      <section className="rounded-md border border-neutral-800 p-4">
-        <h2 className="text-sm font-medium">
-          Findings ({findings.length})
-        </h2>
-        <div className="mt-3 max-h-[60vh] space-y-3 overflow-y-auto">
-          {findings.length === 0 ? (
-            <div className="text-neutral-500 text-sm">No findings yet.</div>
-          ) : (
-            findings.map((f) => (
-              <div
-                key={f.id}
-                className="rounded-md border border-neutral-800 bg-neutral-900/50 p-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">{f.title}</div>
-                  <SeverityBadge severity={f.severity} />
-                </div>
-                <div className="mt-1 text-xs text-neutral-400">
-                  {f.target}
-                  {f.endpoint ? ` ${f.endpoint}` : ''}
-                </div>
-              </div>
-            ))
+      {/* Findings */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
+            Findings
+          </h2>
+          {findings.length > 0 && (
+            <span className="text-xs text-neutral-500">
+              {findings.length} total · click any to expand
+            </span>
           )}
         </div>
+        {sortedFindings.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/20 px-6 py-12 text-center">
+            <div className="text-sm text-neutral-400">
+              {status === 'queued' && 'Scan is queued. Findings will appear here as they arrive.'}
+              {status === 'running' && 'Agent is investigating — findings appear here in real time.'}
+              {status === 'completed' && 'No findings — scan completed cleanly.'}
+              {status === 'failed' && 'Scan ended without producing findings.'}
+              {status === 'cancelled' && 'Scan was cancelled.'}
+            </div>
+          </div>
+        ) : (
+          sortedFindings.map((f) => <FindingCard key={f.id} finding={f} />)
+        )}
+      </section>
+
+      {/* Live activity (collapsible) */}
+      <section className="overflow-hidden rounded-xl border border-neutral-800/80 bg-neutral-900/30">
+        <button
+          type="button"
+          onClick={() => setShowEvents((v) => !v)}
+          className="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-neutral-900/50"
+        >
+          <div className="flex items-center gap-2.5">
+            <Activity className="h-4 w-4 text-neutral-400" strokeWidth={2} />
+            <span className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
+              Live activity
+            </span>
+            <span className="rounded-md bg-neutral-800 px-2 py-0.5 text-[10px] font-medium text-neutral-400">
+              {events.length} events
+            </span>
+          </div>
+          <span className="text-xs text-neutral-500">
+            {showEvents ? 'Hide timeline ▲' : 'Show timeline ▼'}
+          </span>
+        </button>
+        {showEvents && (
+          <div className="max-h-[60vh] overflow-y-auto border-t border-neutral-800/60 bg-neutral-950/40">
+            {events.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-neutral-500">
+                Waiting for events…
+              </div>
+            ) : (
+              events.map((e) => <EventRow key={e.id} event={e} />)
+            )}
+          </div>
+        )}
       </section>
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: ScanStatus }) {
-  const colors: Record<ScanStatus, string> = {
-    queued: 'bg-neutral-700',
-    running: 'bg-blue-600',
-    completed: 'bg-green-600',
-    failed: 'bg-red-600',
-    cancelled: 'bg-neutral-600',
-  };
-  return (
-    <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${colors[status]}`}>
-      {status}
-    </span>
-  );
-}
-
-function SeverityBadge({ severity }: { severity: Finding['severity'] }) {
-  const colors: Record<Finding['severity'], string> = {
-    critical: 'bg-red-700',
-    high: 'bg-orange-600',
-    medium: 'bg-yellow-600',
-    low: 'bg-lime-700',
-    info: 'bg-neutral-700',
-  };
-  return (
-    <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${colors[severity]}`}>
-      {severity}
-    </span>
   );
 }

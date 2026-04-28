@@ -1,14 +1,24 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import {
+  LayoutDashboard,
+  ScanLine,
+  ShieldAlert,
+  Plug,
+  Users,
+  Settings,
+  LogOut,
+  ShieldCheck,
+} from 'lucide-react';
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/scans', label: 'Scans' },
-  { href: '/findings', label: 'Findings' },
-  { href: '/integrations', label: 'Integrations' },
-  { href: '/team', label: 'Team' },
-  { href: '/settings', label: 'Settings' },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/scans', label: 'Scans', icon: ScanLine },
+  { href: '/findings', label: 'Findings', icon: ShieldAlert },
+  { href: '/integrations', label: 'Integrations', icon: Plug },
+  { href: '/team', label: 'Team', icon: Users },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -18,38 +28,86 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Pull profile + org for the header.
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: orgs } = await supabase.from('organizations').select('*').limit(5);
+  const org = orgs?.[0];
+  const initials = (profile?.full_name ?? user.email ?? '?')
+    .split(/[\s@]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s: string) => s[0]?.toUpperCase())
+    .join('');
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-60 flex-col border-r border-neutral-800 px-4 py-6">
-        <Link href="/dashboard" className="mb-8 text-xl font-semibold">
-          Strix
+      <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-neutral-800/80 bg-neutral-950/40 backdrop-blur-xl">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2.5 px-5 pb-3 pt-6"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20">
+            <ShieldCheck className="h-5 w-5 text-white" strokeWidth={2.5} />
+          </div>
+          <span className="text-base font-semibold tracking-tight">Strix</span>
         </Link>
-        <nav className="flex flex-col gap-1">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="rounded-md px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white"
-            >
-              {item.label}
-            </Link>
-          ))}
+
+        {org && (
+          <div className="mx-3 mt-3 rounded-lg border border-neutral-800/80 bg-neutral-900/40 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500">Organization</div>
+            <div className="mt-0.5 truncate text-sm font-medium text-neutral-100">{org.name}</div>
+            {org.plan && (
+              <div className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 ring-1 ring-cyan-500/20">
+                {org.plan}
+              </div>
+            )}
+          </div>
+        )}
+
+        <nav className="mt-6 flex flex-col gap-0.5 px-3">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-neutral-50"
+              >
+                <Icon className="h-4 w-4 transition-colors group-hover:text-cyan-300" strokeWidth={2} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
-        <div className="mt-auto pt-6 text-xs text-neutral-500">
-          <div>{profile?.full_name ?? user.email}</div>
-          <div className="mt-1 text-neutral-600">{orgs?.[0]?.name}</div>
-          <form action="/api/auth/signout" method="post" className="mt-3">
-            <button type="submit" className="text-neutral-400 hover:text-white">
-              Sign out
-            </button>
-          </form>
+
+        <div className="mt-auto px-3 pb-5">
+          <div className="rounded-lg border border-neutral-800/80 bg-neutral-900/40 p-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 text-xs font-semibold text-white shadow-md shadow-violet-500/20">
+                {initials || 'U'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-neutral-100">
+                  {profile?.full_name ?? user.email}
+                </div>
+                <div className="truncate text-[11px] text-neutral-500">{user.email}</div>
+              </div>
+            </div>
+            <form action="/api/auth/signout" method="post" className="mt-2.5">
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-neutral-800/80 px-2 py-1.5 text-xs text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-100"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       </aside>
-      <main className="flex-1 px-8 py-8">{children}</main>
+
+      <main className="flex-1 px-10 py-8">
+        <div className="mx-auto max-w-6xl">{children}</div>
+      </main>
     </div>
   );
 }
