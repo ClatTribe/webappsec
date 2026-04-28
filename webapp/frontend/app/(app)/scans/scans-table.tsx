@@ -50,34 +50,35 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
 
   return (
     <div className="space-y-3">
-      {targetOptions.length > 1 && (
-        <div className="flex items-center justify-between rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-3">
-          <div className="relative inline-flex items-center">
-            <TargetIcon
-              className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
-              strokeWidth={2.25}
-            />
-            <select
-              value={targetFilter}
-              onChange={(e) => setTargetFilter(e.target.value)}
-              className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
-            >
-              <option value={ALL_TARGETS}>All targets</option>
-              {targetOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-            <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
-          </div>
-          <div className="text-[11px] text-neutral-500">
-            {targetFilter === ALL_TARGETS
-              ? `${scans.length} scan${scans.length === 1 ? '' : 's'} total`
-              : `${visible.length} of ${scans.length} scan${scans.length === 1 ? '' : 's'}`}
-          </div>
+      <div className="flex items-center justify-between rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-3">
+        <div className="relative inline-flex items-center">
+          <TargetIcon
+            className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
+            strokeWidth={2.25}
+          />
+          <select
+            value={targetFilter}
+            onChange={(e) => setTargetFilter(e.target.value)}
+            disabled={targetOptions.length === 0}
+            className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value={ALL_TARGETS}>
+              {targetOptions.length === 0 ? 'No targets' : 'All targets'}
+            </option>
+            {targetOptions.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
         </div>
-      )}
+        <div className="text-[11px] text-neutral-500">
+          {targetFilter === ALL_TARGETS
+            ? `${scans.length} scan${scans.length === 1 ? '' : 's'} total`
+            : `${visible.length} of ${scans.length} scan${scans.length === 1 ? '' : 's'}`}
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-neutral-800/80 bg-neutral-900/20">
         {visible.length > 0 ? (
