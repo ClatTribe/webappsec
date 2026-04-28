@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -224,11 +226,38 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
                 _ingest_finding(sb, scan_id, vuln_file)
 
 
+def _extract_meta_field(lines: list[str], label: str) -> str | None:
+    """Pull a value out of `**Label:** value` lines in Strix's vuln markdown."""
+    needle = f"**{label}:**".lower()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith(needle):
+            value = stripped[len(needle):].strip().strip("*").strip()
+            return value or None
+    return None
+
+
+def _compute_fingerprint(*, cwe: str | None, endpoint: str | None, target: str | None, title: str) -> str:
+    """Stable hash so the same issue across scans collapses to one row.
+
+    Inputs are intentionally loose: CWE + (endpoint or target) + a normalised
+    title prefix. Two LLM rewordings of the same finding produce the same
+    fingerprint as long as the CWE and locator are stable.
+    """
+    norm_title = re.sub(r"\s+", " ", title.lower().strip())[:80]
+    norm_loc = (endpoint or target or "").lower().strip()
+    norm_cwe = (cwe or "").upper().strip()
+    payload = f"{norm_cwe}|{norm_loc}|{norm_title}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
 def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
     """Convert a Strix vulnerability markdown into a row in `findings`.
 
-    For Phase 0 we use a coarse parser; Phase 1 should switch Strix to emit a structured
-    JSON finding through the event sink instead of (or alongside) markdown.
+    Beyond the title/severity, we now extract every structured field Strix
+    writes in its `**Field:** value` header block (CWE, CVE, CVSS, target,
+    endpoint, method) so the DB row carries searchable metadata and so the
+    fingerprint can be computed from CWE + endpoint + title.
     """
     try:
         text = vuln_file.read_text()
@@ -238,17 +267,29 @@ def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
         # Severity line looks like `**Severity:** HIGH` (per Strix's tracer).
         # The earlier `split(":", 1)` split inside `**Severity:**` and produced
         # `"** high"`, which fails the DB severity-enum check and gets silently
-        # swallowed by the broad `except` below — so every finding got lost.
-        # Match on the literal prefix and strip any leftover bold markers.
-        severity = "info"
-        for line in lines:
-            stripped = line.strip()
-            if stripped.lower().startswith("**severity:**"):
-                value = stripped[len("**Severity:**"):].strip()
-                value = value.strip("*").strip().lower()
-                if value:
-                    severity = value
-                break
+        # swallowed. We now match on the literal prefix and strip leftover bold.
+        sev_raw = _extract_meta_field(lines, "Severity")
+        severity = (sev_raw or "info").lower()
+
+        cvss_raw = _extract_meta_field(lines, "CVSS")
+        try:
+            cvss = float(cvss_raw) if cvss_raw else None
+        except ValueError:
+            cvss = None
+
+        cwe = _extract_meta_field(lines, "CWE")
+        cve = _extract_meta_field(lines, "CVE")
+        target = _extract_meta_field(lines, "Target")
+        endpoint = _extract_meta_field(lines, "Endpoint")
+        method = _extract_meta_field(lines, "Method")
+        # Strix sometimes writes "N/A" for unknown fields — treat those as missing.
+        for var_name in ("endpoint", "method", "cve"):
+            if locals()[var_name] and locals()[var_name].strip().lower() in {"n/a", "none", "-"}:
+                locals()[var_name] = None  # noqa: PLW0127  (assign to local for clarity)
+
+        fingerprint = _compute_fingerprint(
+            cwe=cwe, endpoint=endpoint, target=target, title=title,
+        )
 
         sb.insert_finding(
             scan_id=scan_id,
@@ -257,6 +298,13 @@ def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
             severity=severity,
             payload={
                 "description_md": text,
+                "cvss": cvss,
+                "cwe": cwe,
+                "cve": cve,
+                "target": target,
+                "endpoint": endpoint,
+                "method": method,
+                "fingerprint": fingerprint,
             },
         )
     except Exception as e:  # noqa: BLE001

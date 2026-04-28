@@ -112,4 +112,26 @@ export interface Finding {
   triage_notes: string | null;
   fingerprint: string | null;
   created_at: string;
+  times_seen?: number | null;
+  last_seen_at?: string | null;
+  last_seen_scan_id?: string | null;
+  ai_assessment?: AiAssessment | null;
+  ai_assessed_at?: string | null;
+}
+
+export type AiUrgency = 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss';
+export type AiReachability =
+  | 'external_unauthenticated'
+  | 'external_authenticated'
+  | 'internal_only'
+  | 'unreachable';
+
+export interface AiAssessment {
+  urgency: AiUrgency;
+  reachability: AiReachability;
+  confidence: number;
+  is_likely_false_positive: boolean;
+  reasoning: string;
+  recommended_action: string;
+  model?: string;
 }

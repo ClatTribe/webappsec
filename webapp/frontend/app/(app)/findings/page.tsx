@@ -1,27 +1,10 @@
 import Link from 'next/link';
-import { ShieldAlert, ScanLine } from 'lucide-react';
+import { ShieldAlert, ScanLine, Sparkles, Zap, Clock, Eye, Ban } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
-import FindingCard from '@/components/finding/finding-card';
 import FindingsFilter from '@/components/finding/findings-filter';
 import type { Finding } from '@/lib/supabase/types';
 
-const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
-
-const STATUS_RANK: Record<string, number> = {
-  open: 0,
-  triaged_real: 1,
-  fixed: 2,
-  wont_fix: 3,
-  false_positive: 4,
-};
-
-const COUNT_PILL: Record<string, string> = {
-  critical: 'bg-red-600/15 text-red-200 ring-1 ring-red-500/40',
-  high: 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/40',
-  medium: 'bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/40',
-  low: 'bg-lime-500/15 text-lime-200 ring-1 ring-lime-400/40',
-  info: 'bg-neutral-700/40 text-neutral-200 ring-1 ring-neutral-600/40',
-};
+const RESOLVED = new Set(['fixed', 'false_positive', 'wont_fix']);
 
 export default async function FindingsPage() {
   const supabase = createClient();
@@ -31,29 +14,25 @@ export default async function FindingsPage() {
     .order('created_at', { ascending: false })
     .limit(200);
 
-  const findings = ((data as (Finding & { scans?: { run_name: string; status: string } | null })[]) ?? []).slice();
+  const findings = ((data as (Finding & { scans?: { run_name: string; status: string } | null })[]) ?? []);
 
-  // Sort: by triage state (open first, resolved last), then by severity within each.
-  findings.sort((a, b) => {
-    const sa = STATUS_RANK[a.status] ?? 99;
-    const sb = STATUS_RANK[b.status] ?? 99;
-    if (sa !== sb) return sa - sb;
-    const va = SEVERITY_ORDER.indexOf(a.severity as (typeof SEVERITY_ORDER)[number]);
-    const vb = SEVERITY_ORDER.indexOf(b.severity as (typeof SEVERITY_ORDER)[number]);
-    return va - vb;
-  });
-
-  // Severity counts only count *open* findings — resolved ones shouldn't drive
-  // the "I have N criticals" gut-check at the top.
-  const openFindings = findings.filter((f) => f.status === 'open');
-  const counts = SEVERITY_ORDER.map((s) => ({
-    severity: s,
-    count: openFindings.filter((f) => f.severity === s).length,
-  }));
-
-  const resolvedCount = findings.filter((f) =>
-    ['fixed', 'false_positive', 'wont_fix'].includes(f.status),
+  const open = findings.filter((f) => !RESOLVED.has(f.status));
+  const fixNow = open.filter(
+    (f) => f.ai_assessment?.urgency === 'fix_now',
   ).length;
+  const fixSoon = open.filter(
+    (f) => f.ai_assessment?.urgency === 'fix_soon',
+  ).length;
+  const monitor = open.filter(
+    (f) => f.ai_assessment?.urgency === 'monitor',
+  ).length;
+  const dismissed = open.filter(
+    (f) => f.ai_assessment?.urgency === 'dismiss',
+  ).length;
+  const unassessed = open.filter((f) => !f.ai_assessment).length;
+  const totalAssessed = findings.filter((f) => f.ai_assessment).length;
+
+  const urgentTotal = fixNow + fixSoon;
 
   return (
     <div className="space-y-8">
@@ -61,39 +40,57 @@ export default async function FindingsPage() {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Findings</h1>
-            <p className="mt-1.5 text-sm text-neutral-400">
-              Vulnerabilities found across your scans. Click a card to read what the issue is, why it
-              matters, and how to fix it. Use the triage buttons inside each finding to mark it
-              fixed, a false positive, or won&apos;t-fix.
+            <p className="mt-1.5 max-w-2xl text-sm text-neutral-400">
+              Each finding is rated by an LLM for reachability, false-positive likelihood, and
+              urgency. The default view shows only what the AI considers worth fixing now — toggle
+              to <em>All</em> to see everything including dismissed false positives.
             </p>
           </div>
         </div>
 
         {findings.length > 0 && (
           <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {counts.map((c) => (
-                <div
-                  key={c.severity}
-                  className={`rounded-xl px-4 py-3 ${
-                    c.count > 0 ? COUNT_PILL[c.severity] : 'bg-neutral-900/30 ring-1 ring-neutral-800'
-                  }`}
-                >
-                  <div className={`text-2xl font-semibold ${c.count > 0 ? '' : 'text-neutral-600'}`}>
-                    {c.count}
-                  </div>
-                  <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">
-                    open · {c.severity}
-                  </div>
-                </div>
-              ))}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <UrgencyTile
+                label="Fix now"
+                value={fixNow}
+                Icon={Zap}
+                tone="red"
+                description="Real, reachable, high impact"
+              />
+              <UrgencyTile
+                label="Fix soon"
+                value={fixSoon}
+                Icon={Clock}
+                tone="orange"
+                description="Real but lower impact"
+              />
+              <UrgencyTile
+                label="Monitor"
+                value={monitor}
+                Icon={Eye}
+                tone="amber"
+                description="Needs human review"
+              />
+              <UrgencyTile
+                label="Dismissed"
+                value={dismissed}
+                Icon={Ban}
+                tone="neutral"
+                description="AI flagged false positive"
+              />
             </div>
-            {resolvedCount > 0 && (
-              <div className="text-xs text-neutral-500">
-                {resolvedCount} resolved finding{resolvedCount === 1 ? '' : 's'} (fixed / wont-fix /
-                false positive) — toggle below to see them.
+            <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] text-neutral-500">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3 text-violet-400/80" strokeWidth={2.25} />
+                {totalAssessed} of {findings.length} findings assessed by AI
+                {unassessed > 0 && ` · ${unassessed} pending`}
               </div>
-            )}
+              <div>
+                Of {findings.length} reported by the scanner, <strong className="text-neutral-300">{urgentTotal}</strong> are
+                worth your time today.
+              </div>
+            </div>
           </>
         )}
       </header>
@@ -116,6 +113,63 @@ export default async function FindingsPage() {
       ) : (
         <FindingsFilter findings={findings} />
       )}
+    </div>
+  );
+}
+
+const TONE: Record<string, { tile: string; pill: string; iconBg: string }> = {
+  red: {
+    tile: 'border-red-500/30 bg-gradient-to-b from-red-500/10 to-red-500/0',
+    pill: 'text-red-200',
+    iconBg: 'bg-red-500/20 text-red-200',
+  },
+  orange: {
+    tile: 'border-orange-500/30 bg-gradient-to-b from-orange-500/10 to-orange-500/0',
+    pill: 'text-orange-200',
+    iconBg: 'bg-orange-500/20 text-orange-200',
+  },
+  amber: {
+    tile: 'border-amber-500/30 bg-gradient-to-b from-amber-500/10 to-amber-500/0',
+    pill: 'text-amber-200',
+    iconBg: 'bg-amber-500/20 text-amber-200',
+  },
+  neutral: {
+    tile: 'border-neutral-800 bg-neutral-900/30',
+    pill: 'text-neutral-300',
+    iconBg: 'bg-neutral-800 text-neutral-400',
+  },
+};
+
+function UrgencyTile({
+  label,
+  value,
+  Icon,
+  tone,
+  description,
+}: {
+  label: string;
+  value: number;
+  Icon: typeof Zap;
+  tone: keyof typeof TONE;
+  description: string;
+}) {
+  const t = TONE[tone];
+  return (
+    <div className={`rounded-xl border ${t.tile} px-4 py-3.5`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className={`text-3xl font-semibold tracking-tight ${value > 0 ? t.pill : 'text-neutral-600'}`}>
+            {value}
+          </div>
+          <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+            {label}
+          </div>
+          <div className="text-[10.5px] text-neutral-500">{description}</div>
+        </div>
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset ring-white/5 ${t.iconBg}`}>
+          <Icon className="h-4 w-4" strokeWidth={2.25} />
+        </div>
+      </div>
     </div>
   );
 }
