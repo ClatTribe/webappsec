@@ -75,10 +75,9 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             exit_code = await proc.wait()
             await asyncio.gather(stdout_task, stderr_task)
 
-        # Strix uses 0 for success. Argparse uses 2 for usage errors, which the
-        # earlier version of this code conflated with success — so a missing
-        # `-t` would mark the scan "completed" with no findings.
-        if exit_code == 0:
+        # Strix's exit code convention: 0 = completed with no findings,
+        # 2 = completed with findings. Anything else is a real failure.
+        if exit_code in (0, 2):
             final_status = "completed"
         else:
             final_status = "failed"
@@ -233,13 +232,22 @@ def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
     """
     try:
         text = vuln_file.read_text()
-        # Extract title from first # header.
         lines = text.splitlines()
         title = next((l[2:].strip() for l in lines if l.startswith("# ")), vuln_file.stem)
+
+        # Severity line looks like `**Severity:** HIGH` (per Strix's tracer).
+        # The earlier `split(":", 1)` split inside `**Severity:**` and produced
+        # `"** high"`, which fails the DB severity-enum check and gets silently
+        # swallowed by the broad `except` below — so every finding got lost.
+        # Match on the literal prefix and strip any leftover bold markers.
         severity = "info"
         for line in lines:
-            if line.lower().startswith("**severity:**"):
-                severity = line.split(":", 1)[1].strip().lower()
+            stripped = line.strip()
+            if stripped.lower().startswith("**severity:**"):
+                value = stripped[len("**Severity:**"):].strip()
+                value = value.strip("*").strip().lower()
+                if value:
+                    severity = value
                 break
 
         sb.insert_finding(
