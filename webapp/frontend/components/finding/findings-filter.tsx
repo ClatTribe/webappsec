@@ -11,6 +11,8 @@ type FindingWithScan = Finding & {
   targets?: { name: string; value: string; type: string } | null;
 };
 
+const ALL_TARGETS = '__all__';
+
 const RESOLVED_STATUSES = new Set(['fixed', 'false_positive', 'wont_fix']);
 
 const URGENCY_RANK: Record<AiUrgency, number> = {
@@ -49,12 +51,29 @@ const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
 ];
 
 export default function FindingsFilter({ findings }: { findings: FindingWithScan[] }) {
-  // Default to "Open" — users land on /findings expecting to see their findings,
-  // not a curated "AI urgent" subset. Urgent is still one click away.
   const [view, setView] = useState<ViewMode>('open');
+  const [targetFilter, setTargetFilter] = useState<string>(ALL_TARGETS);
+
+  // Distinct targets present in this list, name-sorted, for the filter dropdown.
+  const targetOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const f of findings) {
+      if (f.target_id && f.targets?.name) {
+        seen.set(f.target_id, f.targets.name);
+      }
+    }
+    return Array.from(seen, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [findings]);
+
+  const targetFiltered = useMemo(() => {
+    if (targetFilter === ALL_TARGETS) return findings;
+    return findings.filter((f) => f.target_id === targetFilter);
+  }, [findings, targetFilter]);
 
   const sorted = useMemo(() => {
-    const arr = [...findings];
+    const arr = [...targetFiltered];
     arr.sort((a, b) => {
       const ua = URGENCY_RANK[a.ai_assessment?.urgency ?? 'monitor'];
       const ub = URGENCY_RANK[b.ai_assessment?.urgency ?? 'monitor'];
@@ -64,7 +83,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
       return sa - sb;
     });
     return arr;
-  }, [findings]);
+  }, [targetFiltered]);
 
   const visible = useMemo(() => {
     return sorted.filter((f) => {
@@ -87,7 +106,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     let dismiss = 0;
     let unassessed = 0;
     let resolved = 0;
-    for (const f of findings) {
+    for (const f of targetFiltered) {
       if (RESOLVED_STATUSES.has(f.status)) {
         resolved++;
         continue;
@@ -99,27 +118,50 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
       else unassessed++;
     }
     return { urgent, monitor, dismiss, unassessed, resolved };
-  }, [findings]);
+  }, [targetFiltered]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-3">
-        <div className="inline-flex rounded-lg bg-neutral-950/60 p-1 ring-1 ring-neutral-800">
-          {VIEW_MODES.map((m) => (
-            <button
-              key={m.value}
-              type="button"
-              onClick={() => setView(m.value)}
-              title={m.help}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                view === m.value
-                  ? 'bg-neutral-800 text-neutral-50 shadow-sm'
-                  : 'text-neutral-400 hover:text-neutral-100'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg bg-neutral-950/60 p-1 ring-1 ring-neutral-800">
+            {VIEW_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setView(m.value)}
+                title={m.help}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  view === m.value
+                    ? 'bg-neutral-800 text-neutral-50 shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-100'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {targetOptions.length > 1 && (
+            <div className="relative inline-flex items-center">
+              <TargetIcon
+                className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
+                strokeWidth={2.25}
+              />
+              <select
+                value={targetFilter}
+                onChange={(e) => setTargetFilter(e.target.value)}
+                className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              >
+                <option value={ALL_TARGETS}>All targets</option>
+                {targetOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
           <span className="rounded-md bg-red-500/10 px-2 py-0.5 text-red-300 ring-1 ring-red-500/30">
@@ -172,41 +214,33 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
           </div>
         ) : (
           visible.map((f) => (
-            <div
-              key={f.id}
-              className="rounded-xl border border-neutral-800/80 bg-neutral-900/20"
-            >
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-neutral-800/60 px-4 py-2 text-[11px]">
-                {f.targets && f.target_id ? (
-                  <Link
-                    href={`/targets/${f.target_id}`}
-                    className="inline-flex items-center gap-1.5 transition-colors hover:text-cyan-300"
-                  >
-                    <TargetIcon className="h-3.5 w-3.5 text-cyan-400/70" strokeWidth={2.25} />
-                    <span className="font-semibold text-neutral-200">{f.targets.name}</span>
-                    {f.targets.value && (
-                      <span className="font-mono text-neutral-500">· {f.targets.value}</span>
-                    )}
-                  </Link>
-                ) : (
-                  <span className="text-neutral-600">no target</span>
-                )}
-                <span className="text-neutral-700">|</span>
-                {f.scans?.run_name && (
-                  <Link
-                    href={`/scans/${f.scan_id}`}
-                    className="inline-flex items-center gap-1.5 text-neutral-400 transition-colors hover:text-cyan-300"
-                  >
-                    <ScanLine className="h-3 w-3" strokeWidth={2} />
-                    Scan {f.scans.run_name}
-                  </Link>
-                )}
-                {(f.times_seen ?? 1) > 1 && (
-                  <span className="ml-auto rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-300">
-                    seen in {f.times_seen} scans
-                  </span>
-                )}
-              </div>
+            <div key={f.id}>
+              {(f.targets || f.scans?.run_name) && (
+                <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px] text-neutral-500">
+                  {f.targets && f.target_id && (
+                    <span className="inline-flex items-center gap-1">
+                      <TargetIcon className="h-3 w-3 text-cyan-400/70" strokeWidth={2.25} />
+                      <Link
+                        href={`/targets/${f.target_id}`}
+                        className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
+                      >
+                        {f.targets.name}
+                      </Link>
+                    </span>
+                  )}
+                  {f.scans?.run_name && (
+                    <span className="inline-flex items-center gap-1">
+                      <ScanLine className="h-3 w-3" strokeWidth={2} />
+                      <Link
+                        href={`/scans/${f.scan_id}`}
+                        className="text-neutral-400 transition-colors hover:text-cyan-300"
+                      >
+                        {f.scans.run_name}
+                      </Link>
+                    </span>
+                  )}
+                </div>
+              )}
               <FindingCard finding={f} />
             </div>
           ))
