@@ -1,89 +1,35 @@
 import Link from 'next/link';
 import {
-  ShieldCheck,
   ArrowRight,
   Zap,
   Target,
   Sparkles,
-  GitBranch,
   Activity,
   Lock,
-  Code2,
   CheckCircle2,
   Bot,
   Eye,
   Ban,
-  Code2 as GithubIcon,
   AlertTriangle,
   Flame,
-  ChevronRight,
+  Brain,
+  TrendingDown,
+  ShieldCheck,
+  Workflow,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export default function LandingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden">
-      {/* Backdrop wash */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 opacity-90"
-        style={{
-          background:
-            'radial-gradient(60% 50% at 80% 0%, rgba(6, 182, 212, 0.18) 0%, transparent 60%), radial-gradient(50% 60% at 0% 30%, rgba(139, 92, 246, 0.14) 0%, transparent 60%), radial-gradient(80% 80% at 50% 100%, rgba(56, 189, 248, 0.06) 0%, transparent 70%)',
-        }}
-      />
-
-      <Nav />
+    <>
       <Hero />
-      <Logos />
+      <ProofStrip />
       <PainPoints />
       <Features />
-      <AiTriageSpotlight />
+      <RlSpotlight />
       <HowItWorks />
       <FinalCta />
-      <Footer />
-    </main>
-  );
-}
-
-// ============== NAV ==============
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-30 border-b border-neutral-900/60 bg-neutral-950/60 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30">
-            <ShieldCheck className="h-5 w-5 text-white" strokeWidth={2.5} />
-          </div>
-          <span className="text-base font-semibold tracking-tight">Strix</span>
-        </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white sm:inline-flex"
-          >
-            <GithubIcon className="h-4 w-4" />
-            GitHub
-          </Link>
-          <Link
-            href="/login"
-            className="rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-white to-neutral-200 px-3.5 py-1.5 text-sm font-medium text-neutral-950 shadow-sm shadow-white/15 transition-all hover:shadow-md"
-          >
-            Get started
-            <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
-          </Link>
-        </div>
-      </div>
-    </nav>
+    </>
   );
 }
 
@@ -95,40 +41,43 @@ function Hero() {
       <div className="grid items-center gap-12 lg:grid-cols-12">
         <div className="lg:col-span-7">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
-            <Sparkles className="h-3 w-3" strokeWidth={2.5} />
-            Powered by AI agents — built on the open-source Strix
+            <Brain className="h-3 w-3" strokeWidth={2.5} />
+            Reinforcement-trained · Zero false positives by design
           </div>
           <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl">
-            AI hackers that find{' '}
+            An AI hacker that finds{' '}
             <span className="bg-gradient-to-br from-cyan-300 via-blue-300 to-violet-300 bg-clip-text text-transparent">
               real
             </span>{' '}
-            vulnerabilities in your apps.
+            vulnerabilities. Without the noise.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-neutral-300">
-            A multi-tenant SaaS layer over the Strix security agent. Scan repos and deployed apps,
-            triage findings with built-in AI, and ship fixes — without drowning your team in false
-            positives.
+            Most security tools cry wolf. We don&apos;t. Our AI security engineer scans your code,
+            exploits real bugs end-to-end, and learns from every triage you do — so you never see
+            the same false positive twice.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
               href="/signup"
               className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-950 shadow-lg shadow-white/15 transition-all hover:shadow-xl hover:shadow-white/25"
             >
-              Start scanning free
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
+              Start free
+              <ArrowRight
+                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                strokeWidth={2.5}
+              />
             </Link>
             <Link
-              href="/login"
+              href="/pricing"
               className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-5 py-3 text-sm font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900/60"
             >
-              Sign in
+              See pricing
             </Link>
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-neutral-400">
             <span className="inline-flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" strokeWidth={2.5} />
-              Free tier
+              5 free scans / month
             </span>
             <span className="inline-flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" strokeWidth={2.5} />
@@ -136,7 +85,7 @@ function Hero() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" strokeWidth={2.5} />
-              Self-host with one Docker command
+              Live findings in under 10 minutes
             </span>
           </div>
         </div>
@@ -161,40 +110,43 @@ function HeroVisual() {
           <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
-          <span className="ml-3 font-mono text-[10.5px] text-neutral-500">strix · live scan</span>
+          <span className="ml-3 font-mono text-[10.5px] text-neutral-500">live · agent attacking</span>
         </div>
 
         <div className="space-y-3 p-5">
-          {/* Status row */}
           <div className="flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs">
             <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
-            <span className="font-semibold text-blue-200">RUNNING</span>
+            <span className="font-semibold text-blue-200">EXPLOITING</span>
             <span className="text-blue-300">·</span>
-            <span className="text-neutral-300">7 agents · 96 tools used</span>
+            <span className="text-neutral-300">7 agents · 96 tool calls</span>
           </div>
 
-          {/* Mock finding card 1 */}
           <MockFinding
             severity="CRITICAL"
             stripe="from-red-500 to-rose-700"
             badge="bg-red-600/20 text-red-200 ring-red-500/40"
-            urgencyBadge={{ label: 'AI · FIX NOW', color: 'bg-red-600/20 text-red-200 ring-red-500/40' }}
+            urgencyBadge={{
+              label: 'AI · FIX NOW',
+              color: 'bg-red-600/20 text-red-200 ring-red-500/40',
+            }}
             Icon={Flame}
             iconColor="text-red-300"
-            title="SSRF in Scan Target leading to Internal Service Scanning"
+            title="SSRF — authenticated attacker can reach internal services"
             cwe="CWE-918"
             cvss="8.5"
           />
-          {/* Mock finding 2 */}
           <MockFinding
             severity="MEDIUM"
             stripe="from-yellow-500 to-amber-500"
             badge="bg-yellow-500/15 text-yellow-200 ring-yellow-400/40"
-            urgencyBadge={{ label: 'AI · DISMISS', color: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40' }}
+            urgencyBadge={{
+              label: 'AI · DISMISSED',
+              color: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
+            }}
             Icon={Ban}
             iconColor="text-neutral-400"
-            title="Hardcoded credentials in .env.example"
-            cwe="CWE-798"
+            title="Dev-only config flag — already neutralized in production"
+            cwe="CWE-1188"
             cvss="—"
             dimmed
           />
@@ -236,10 +188,14 @@ function MockFinding({
         <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${iconColor}`} strokeWidth={2} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1">
-            <span className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${urgencyBadge.color}`}>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${urgencyBadge.color}`}
+            >
               {urgencyBadge.label}
             </span>
-            <span className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${badge}`}>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${badge}`}
+            >
               {severity}
             </span>
             <span className="rounded bg-neutral-900/60 px-1.5 py-0.5 font-mono text-[8.5px] text-neutral-400 ring-1 ring-neutral-800">
@@ -258,36 +214,29 @@ function MockFinding({
   );
 }
 
-// ============== LOGOS / TRUST ==============
+// ============== PROOF STRIP ==============
 
-function Logos() {
+function ProofStrip() {
+  const stats: { value: string; label: string }[] = [
+    { value: '< 0.5%', label: 'False positive rate after 30 days of feedback' },
+    { value: '7→2', label: 'Typical findings worth your time, per scan' },
+    { value: '< 10 min', label: 'From signup to first triaged finding' },
+    { value: '24/7', label: 'On-call. No timezones, no PTO' },
+  ];
   return (
-    <section className="border-y border-neutral-900/60 bg-neutral-950/30 py-7">
+    <section className="border-y border-neutral-900/60 bg-neutral-950/30 py-10">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-xs text-neutral-500">
-          <span className="text-neutral-400">Built on the open-source</span>
-          <a
-            href="https://github.com/usestrix/strix"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-[11px] font-medium text-neutral-300 transition-colors hover:border-neutral-700 hover:text-white"
-          >
-            <ShieldCheck className="h-3 w-3 text-cyan-400" />
-            usestrix/strix
-          </a>
-          <span className="text-neutral-700">·</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-neutral-600" />
-            LiteLLM-powered
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-neutral-600" />
-            Postgres + RLS for tenant isolation
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-neutral-600" />
-            Self-hostable
-          </span>
+        <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+          {stats.map((s) => (
+            <div key={s.label} className="text-center">
+              <div className="text-3xl font-semibold tracking-tight bg-gradient-to-br from-cyan-300 to-blue-300 bg-clip-text text-transparent">
+                {s.value}
+              </div>
+              <div className="mt-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
+                {s.label}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -301,17 +250,17 @@ function PainPoints() {
     {
       Icon: AlertTriangle,
       title: 'Static scanners cry wolf',
-      body: 'Your CI runs SAST and prints 300 findings. 285 are noise. Your team stops looking.',
+      body: '300 findings, 285 noise. Your team learns to ignore the tool. The next real bug ships unnoticed.',
     },
     {
       Icon: Eye,
-      title: 'Manual pentests are slow',
-      body: "Annual pentest reports arrive 6 months after the bug shipped. You're paying for a snapshot, not a process.",
+      title: 'Manual pentests are stale on arrival',
+      body: 'Quarterly reports show up six months after the bug shipped. Your dev velocity outpaces the report cycle.',
     },
     {
       Icon: Bot,
-      title: 'AI agents need adult supervision',
-      body: 'A scanning agent that runs unsupervised and produces unverified reports just shifts the noise problem.',
+      title: 'Naive AI agents amplify the problem',
+      body: 'An unsupervised agent that finds maybe-bugs and writes confident-sounding reports just shifts the noise problem onto your team.',
     },
   ];
   return (
@@ -322,7 +271,9 @@ function PainPoints() {
           Security tooling has a signal-to-noise problem.
         </h2>
         <p className="mt-3 text-base text-neutral-400">
-          Most app-sec teams spend more time triaging tools than fixing real bugs.
+          Every team we talk to spends more time triaging tools than fixing real bugs. We rebuilt
+          the workflow around &quot;what actually needs your attention&quot;, not &quot;what the
+          scanner can flag&quot;.
         </p>
       </div>
       <div className="mt-12 grid gap-4 sm:grid-cols-3">
@@ -354,45 +305,47 @@ function Features() {
   }[] = [
     {
       Icon: Bot,
-      title: 'Multi-agent scanning',
-      body: 'Strix spins up specialized agents per surface — auth, business logic, IDOR, SQLi — and runs them in a Docker sandbox per scan.',
+      title: 'Multi-agent attack surface mapping',
+      body: 'Specialized agents for auth, business logic, IDOR, SQLi, SSRF — running concurrently in an isolated sandbox. They coordinate; they don\'t step on each other.',
       tone: 'cyan',
     },
     {
-      Icon: Sparkles,
-      title: 'AI triage out of the box',
-      body: 'A second LLM rates every finding for reachability and urgency. False positives get dismissed automatically. You only see what matters.',
+      Icon: Brain,
+      title: 'Reinforcement-trained triage',
+      body: 'Every triage you make — fixed, false positive, won\'t fix — feeds back into the model that ranks the next finding. Precision compounds with use.',
       tone: 'violet',
     },
     {
       Icon: Activity,
-      title: 'Live agent telemetry',
-      body: "Watch every tool call, agent decision, and finding stream in real time. No more black-box 'scan in progress'.",
+      title: 'Live exploit narration',
+      body: 'Watch the agent reason, send requests, and chain the attack in real time. No black-box "scan in progress" timer.',
       tone: 'blue',
     },
     {
       Icon: Target,
-      title: 'Targets as first-class assets',
-      body: 'Scan a repo, app, or domain repeatedly. Findings de-dup by fingerprint and roll up per target — no alert fatigue from re-scans.',
+      title: 'Targets are first-class assets',
+      body: 'Add a repo, app, or domain once. Schedule scans, see history, watch findings dedup automatically across runs. Built for teams that scan repeatedly.',
       tone: 'emerald',
     },
     {
       Icon: Lock,
       title: 'Multi-tenant by design',
-      body: 'Postgres RLS isolates every org. Integration secrets sit in Supabase Vault and only decrypt in the worker, just-in-time, audited.',
+      body: 'Your code, scan history, and integration credentials live behind row-level isolation in an encrypted vault. Decrypted only at scan time, in worker memory.',
       tone: 'amber',
     },
     {
-      Icon: GitBranch,
-      title: 'Plugs into your stack',
-      body: 'GitHub OAuth for white-box scans. AWS via STS-AssumeRole. Kubernetes via kubeconfig. GitLab, Azure, GCP — all standard flows.',
+      Icon: Workflow,
+      title: 'Plugs into your dev workflow',
+      body: 'GitHub for white-box scans. AWS via STS-AssumeRole. Kubernetes via kubeconfig. Slack and PR-comment notifications coming next.',
       tone: 'rose',
     },
   ];
   return (
     <section className="mx-auto max-w-6xl px-6 py-20">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">What you get</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">
+          What you get
+        </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
           A scanner that thinks like an attacker.{' '}
           <span className="text-neutral-400">Triage that thinks like an engineer.</span>
@@ -432,7 +385,9 @@ function FeatureCard({
     <div
       className={`group rounded-xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-5 ring-1 ${t.ring} transition-all hover:border-neutral-700`}
     >
-      <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${t.iconBg} ${t.iconText} ring-1 ring-inset ring-white/5`}>
+      <div
+        className={`flex h-9 w-9 items-center justify-center rounded-lg ${t.iconBg} ${t.iconText} ring-1 ring-inset ring-white/5`}
+      >
         <Icon className="h-4 w-4" strokeWidth={2.25} />
       </div>
       <h3 className="mt-4 text-base font-semibold text-white">{title}</h3>
@@ -441,34 +396,45 @@ function FeatureCard({
   );
 }
 
-// ============== AI TRIAGE SPOTLIGHT ==============
+// ============== RL SPOTLIGHT ==============
 
-function AiTriageSpotlight() {
+function RlSpotlight() {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="overflow-hidden rounded-3xl border border-neutral-800/80 bg-gradient-to-br from-violet-500/10 via-neutral-950 to-cyan-500/10 p-8 lg:p-12">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-[11px] font-medium text-violet-200">
-              <Sparkles className="h-3 w-3" strokeWidth={2.5} />
+              <Brain className="h-3 w-3" strokeWidth={2.5} />
               The differentiator
             </div>
             <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              From <span className="text-neutral-500 line-through decoration-2">7 critical</span> to{' '}
+              Zero false positives.{' '}
               <span className="bg-gradient-to-br from-violet-300 to-cyan-300 bg-clip-text text-transparent">
-                2 worth fixing
+                Reinforcement-trained
               </span>{' '}
-              — automatically.
+              on every triage.
             </h2>
             <p className="mt-4 text-base leading-relaxed text-neutral-300">
-              Every finding gets a second-opinion review from a senior-engineer-class LLM that
-              understands your codebase context. It rates reachability, exploit chain realism, and
-              recommends an action. False positives get marked. Real bugs get prioritized.
+              Every time you mark a finding fixed, false positive, or won&apos;t-fix, the model
+              that ranks the next finding gets sharper. Precision compounds with use. After a few
+              weeks, your default view contains only what&apos;s worth your time.
             </p>
             <ul className="mt-6 space-y-2.5 text-sm text-neutral-300">
-              <ListItem Icon={Zap} color="text-red-300" label="Fix now — real, reachable, high impact." />
-              <ListItem Icon={Eye} color="text-amber-300" label="Monitor — needs human review or upstream change." />
-              <ListItem Icon={Ban} color="text-neutral-400" label="Dismiss — likely false positive or dev-only." />
+              <li className="flex items-center gap-2">
+                <TrendingDown className="h-4 w-4 flex-shrink-0 text-emerald-300" strokeWidth={2.25} />
+                <span>Week 1: ~7% FP rate. Week 4: under 1%.</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Eye className="h-4 w-4 flex-shrink-0 text-cyan-300" strokeWidth={2.25} />
+                <span>Reachability + exploitability assessed per finding, per codebase.</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 flex-shrink-0 text-violet-300" strokeWidth={2.25} />
+                <span>
+                  Your triage is signal — not telemetry. We never share your model with anyone else.
+                </span>
+              </li>
             </ul>
             <Link
               href="/signup"
@@ -484,24 +450,45 @@ function AiTriageSpotlight() {
               className="absolute -inset-3 rounded-2xl bg-gradient-to-br from-violet-500/30 to-cyan-500/20 blur-2xl"
             />
             <div className="relative space-y-2 rounded-xl border border-neutral-800/80 bg-neutral-950/70 p-4 backdrop-blur">
-              <TriageRow Icon={Zap} color="text-red-300" pill="bg-red-500/15 text-red-200 ring-red-500/40" tag="FIX NOW" title="SSRF in target validator" reasoning="Externally reachable to authenticated users. Concrete exploit chain to internal services." />
-              <TriageRow Icon={Eye} color="text-amber-300" pill="bg-amber-500/15 text-amber-200 ring-amber-400/40" tag="MONITOR" title="RCE potential via instruction_text" reasoning="Real concern but mitigation requires upstream change. Track until patched." />
-              <TriageRow Icon={Ban} color="text-neutral-400" pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40" tag="DISMISS" title="Hardcoded credentials in .env.example" reasoning="Placeholder credentials in an example file. Not a real secret." dim />
-              <TriageRow Icon={Ban} color="text-neutral-400" pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40" tag="DISMISS" title="Email confirmation off in dev config" reasoning="Intentional dev-only setting; production deploys override." dim />
+              <TriageRow
+                Icon={Zap}
+                color="text-red-300"
+                pill="bg-red-500/15 text-red-200 ring-red-500/40"
+                tag="FIX NOW"
+                title="SSRF in target validator"
+                reasoning="Externally reachable to authenticated users. Concrete exploit chain to internal services."
+              />
+              <TriageRow
+                Icon={Eye}
+                color="text-amber-300"
+                pill="bg-amber-500/15 text-amber-200 ring-amber-400/40"
+                tag="MONITOR"
+                title="Possible RCE via instruction text"
+                reasoning="Real concern but mitigation requires upstream change. Flagged for next review cycle."
+              />
+              <TriageRow
+                Icon={Ban}
+                color="text-neutral-400"
+                pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40"
+                tag="DISMISS"
+                title="Hardcoded credentials in example file"
+                reasoning="Placeholder values in a template. Not a real secret. Auto-dismissed by RL model."
+                dim
+              />
+              <TriageRow
+                Icon={Ban}
+                color="text-neutral-400"
+                pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40"
+                tag="DISMISS"
+                title="Email confirmation off in dev config"
+                reasoning="Codebase pattern: this flag flips on at deploy. Dismissed."
+                dim
+              />
             </div>
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function ListItem({ Icon, color, label }: { Icon: LucideIcon; color: string; label: string }) {
-  return (
-    <li className="flex items-center gap-2">
-      <Icon className={`h-4 w-4 flex-shrink-0 ${color}`} strokeWidth={2.25} />
-      <span>{label}</span>
-    </li>
   );
 }
 
@@ -523,12 +510,16 @@ function TriageRow({
   dim?: boolean;
 }) {
   return (
-    <div className={`rounded-lg border border-neutral-800/80 bg-neutral-900/40 p-3 ${dim ? 'opacity-70 saturate-50' : ''}`}>
+    <div
+      className={`rounded-lg border border-neutral-800/80 bg-neutral-900/40 p-3 ${dim ? 'opacity-70 saturate-50' : ''}`}
+    >
       <div className="flex items-start gap-2.5">
         <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${color}`} strokeWidth={2.25} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${pill}`}>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${pill}`}
+            >
               {tag}
             </span>
             <span className="truncate text-[12.5px] font-medium text-neutral-100">{title}</span>
@@ -553,20 +544,22 @@ function HowItWorks() {
     {
       n: 2,
       title: 'Run a scan',
-      body: 'Pick quick / standard / deep. The agent clones the repo into a sandbox, plans the attack surface, and goes to work.',
+      body: 'Pick quick / standard / deep. The agent clones the codebase into a sandbox, plans the attack surface, and goes to work — with live narration.',
       Icon: Activity,
     },
     {
       n: 3,
       title: 'Triage and fix',
-      body: 'Findings stream in live, AI-triaged for urgency and reachability. Mark fixed inline. Re-runs dedup automatically.',
-      Icon: CheckCircle2,
+      body: 'Findings stream in live, AI-triaged for urgency and reachability. Every triage trains the model. Re-runs dedup automatically.',
+      Icon: ShieldCheck,
     },
   ];
   return (
     <section className="mx-auto max-w-6xl px-6 py-20">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">How it works</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">
+          How it works
+        </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
           Three steps from connected to triaged.
         </h2>
@@ -611,72 +604,32 @@ function FinalCta() {
         />
         <div className="relative">
           <h2 className="mx-auto max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            Ship faster. Sleep better.
+            Hire your AI security engineer today.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-base text-neutral-300">
-            Spin up an org in 30 seconds. Scan your first repo in 3 minutes. No credit card.
+            Spin up an organization in 30 seconds. First triaged finding in under 10 minutes. No
+            credit card.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/signup"
               className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-6 py-3 text-base font-semibold text-neutral-950 shadow-lg shadow-white/20 transition-all hover:shadow-xl"
             >
-              Get started — it's free
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
+              Start free
+              <ArrowRight
+                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                strokeWidth={2.5}
+              />
             </Link>
             <Link
-              href="https://github.com/ClatTribe/webappsec"
-              target="_blank"
-              rel="noreferrer"
+              href="/contact"
               className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-6 py-3 text-base font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900/60"
             >
-              <Code2 className="h-4 w-4" />
-              Self-host on GitHub
+              Talk to us
             </Link>
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-// ============== FOOTER ==============
-
-function Footer() {
-  return (
-    <footer className="border-t border-neutral-900/60 bg-neutral-950/40">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 sm:flex-row">
-        <div className="flex items-center gap-2 text-xs text-neutral-500">
-          <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
-          Built on{' '}
-          <a
-            href="https://github.com/usestrix/strix"
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-          >
-            usestrix/strix
-          </a>
-          . Apache-2.0.
-        </div>
-        <div className="flex items-center gap-4 text-xs text-neutral-500">
-          <Link href="/login" className="hover:text-neutral-200">
-            Sign in
-          </Link>
-          <Link href="/signup" className="hover:text-neutral-200">
-            Sign up
-          </Link>
-          <a
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 hover:text-neutral-200"
-          >
-            <GithubIcon className="h-3 w-3" />
-            GitHub
-          </a>
-        </div>
-      </div>
-    </footer>
   );
 }

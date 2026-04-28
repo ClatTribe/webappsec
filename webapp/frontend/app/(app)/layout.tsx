@@ -10,7 +10,6 @@ import {
   Users,
   Settings,
   LogOut,
-  ShieldCheck,
 } from 'lucide-react';
 
 const NAV = [
@@ -47,10 +46,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           href="/dashboard"
           className="flex items-center gap-2.5 px-5 pb-3 pt-6"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20">
-            <ShieldCheck className="h-5 w-5 text-white" strokeWidth={2.5} />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 font-mono text-sm font-semibold text-white shadow-lg shadow-cyan-500/20">
+            y.
           </div>
-          <span className="text-base font-semibold tracking-tight">Strix</span>
+          <span className="text-sm font-semibold tracking-tight leading-tight">
+            your <span className="text-cyan-300">AI</span><br />
+            security engineer
+          </span>
         </Link>
 
         {org && (

@@ -15,8 +15,9 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Strix',
-  description: 'AI-powered security testing for your apps.',
+  title: 'your AI security engineer',
+  description:
+    'An AI hacker that finds real vulnerabilities in your apps. Reinforcement-trained to eliminate false positives.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
