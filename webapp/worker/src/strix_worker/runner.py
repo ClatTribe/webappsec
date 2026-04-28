@@ -104,32 +104,52 @@ class StrixStats:
         }
 
 
+# Heartbeat cadence (seconds). Worker writes to scans.last_heartbeat_at this
+# often. Sweep tolerance lives in the listener as a multiple of this.
+HEARTBEAT_INTERVAL_SEC = 60
+
+# A registry of currently-running subprocesses, keyed by scan_id. The
+# listener's scan_cancel handler reaches in here to send SIGTERM. We use a
+# module-level dict instead of plumbing it through arguments so the cancel
+# path doesn't need a back-channel into every run_scan invocation.
+_RUNNING_PROCS: dict[str, asyncio.subprocess.Process] = {}
+
+
 async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
     """Drive a single scan end to end. Always finalizes the scan row, even on error."""
     logger.info("picking up scan %s", scan_id)
 
+    # Atomic claim. If another worker won the race, this returns None and we
+    # bail — without ever calling start_scan or running Strix.
     try:
-        scan = sb.fetch_scan(scan_id)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("failed to fetch scan %s", scan_id)
-        # We can't update the scan row if we can't read it — bail.
+        claimed = sb.claim_scan(scan_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to claim scan %s", scan_id)
+        return
+    if not claimed:
+        logger.info("scan %s already claimed by someone else; skipping", scan_id)
         return
 
-    # Defensive: if someone else already started this scan, skip.
-    if scan.get("status") not in ("queued", "running"):
-        logger.info("scan %s already %s, skipping", scan_id, scan.get("status"))
+    # claim_scan returns the bare scans row; we still need joined targets +
+    # integrations for run-shaping. One extra round-trip but the SELECT is RLS-
+    # cheap.
+    try:
+        scan = sb.fetch_scan(scan_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to fetch scan %s after claim", scan_id)
+        # We claimed it, so we own marking it failed.
+        sb.finish_scan(scan_id, "failed", error_message="failed to load scan after claim")
         return
 
     org_id = scan["org_id"]
     targets = scan.get("scan_targets") or []
     integrations = [si["integrations"] for si in (scan.get("scan_integrations") or [])]
 
-    sb.start_scan(scan_id)
-
     exit_code: int | None = None
     error_message: str | None = None
     final_status = "failed"
     stats = StrixStats()
+    cancelled = False
 
     try:
         with materialize_credentials(sb, scan_id, integrations) as creds:
@@ -153,8 +173,10 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workdir,
             )
+            _RUNNING_PROCS[scan_id] = proc
 
             tailer_stop = asyncio.Event()
+            heartbeat_stop = asyncio.Event()
             stdout_task = asyncio.create_task(
                 _stream_logs(sb, scan_id, proc.stdout, "stdout", stats)
             )
@@ -162,16 +184,29 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             events_task = asyncio.create_task(
                 _stream_events_jsonl(sb, scan_id, workdir, tailer_stop)
             )
+            heartbeat_task = asyncio.create_task(
+                _heartbeat_loop(sb, scan_id, heartbeat_stop)
+            )
 
             exit_code = await proc.wait()
             tailer_stop.set()
+            heartbeat_stop.set()
             # Gather all readers before upload; the tailer must close events.jsonl
             # before _upload_run_artifacts reads it from disk.
-            await asyncio.gather(stdout_task, stderr_task, events_task)
+            await asyncio.gather(stdout_task, stderr_task, events_task, heartbeat_task)
 
-        # Strix's exit code convention: 0 = completed with no findings,
-        # 2 = completed with findings. Anything else is a real failure.
-        if exit_code in (0, 2):
+        # Did the user (or some other actor) ask us to cancel this run while it
+        # was in flight? If so, the row carries cancel_requested_at — even if
+        # Strix happened to exit normally before SIGTERM landed, we still
+        # honour the requested status.
+        cancelled = _was_cancel_requested(sb, scan_id) or _exit_code_is_signal(exit_code)
+
+        if cancelled:
+            final_status = "cancelled"
+            error_message = error_message or "scan cancelled"
+        elif exit_code in (0, 2):
+            # Strix's exit code convention: 0 = completed with no findings,
+            # 2 = completed with findings. Anything else is a real failure.
             final_status = "completed"
         else:
             final_status = "failed"
@@ -186,6 +221,7 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         final_status = "failed"
 
     finally:
+        _RUNNING_PROCS.pop(scan_id, None)
         sb.finish_scan(
             scan_id,
             final_status,
@@ -203,6 +239,73 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             stats.cost,
             stats.agents_count,
         )
+
+
+def cancel_running_scan(scan_id: str) -> bool:
+    """Send SIGTERM to the subprocess for `scan_id` if we have one running.
+
+    Called by the listener when a scan_cancel notification arrives. Returns
+    True if we actually had a process to signal.
+    """
+    proc = _RUNNING_PROCS.get(scan_id)
+    if proc is None or proc.returncode is not None:
+        return False
+    try:
+        proc.terminate()
+        logger.info("SIGTERM sent to scan %s subprocess", scan_id)
+        return True
+    except ProcessLookupError:
+        # Already gone.
+        return False
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to terminate scan %s subprocess", scan_id)
+        return False
+
+
+async def _heartbeat_loop(sb: WorkerSupabase, scan_id: str, stop: asyncio.Event) -> None:
+    """Tick last_heartbeat_at every HEARTBEAT_INTERVAL_SEC while the scan runs.
+
+    On stop, tries one final tick so the row reflects the moment the run ended
+    — useful for the stale-scan sweep, which otherwise might race with the
+    finish_scan write.
+    """
+    try:
+        while not stop.is_set():
+            try:
+                sb.heartbeat_scan(scan_id)
+            except Exception:  # noqa: BLE001
+                # A heartbeat failure isn't fatal — the sweep will eventually
+                # reap the row, but we shouldn't take the whole scan down.
+                logger.warning("heartbeat for scan %s failed", scan_id, exc_info=True)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_INTERVAL_SEC)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
+    except asyncio.CancelledError:
+        return
+
+
+def _was_cancel_requested(sb: WorkerSupabase, scan_id: str) -> bool:
+    """Check the current scan row for a cancel_requested_at timestamp."""
+    try:
+        result = (
+            sb.client.table("scans")
+            .select("cancel_requested_at")
+            .eq("id", scan_id)
+            .single()
+            .execute()
+        )
+        return bool(result.data and result.data.get("cancel_requested_at"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _exit_code_is_signal(exit_code: int | None) -> bool:
+    """asyncio.create_subprocess_exec returns negative codes when the child was
+    killed by a signal (POSIX convention: -SIGNUM). SIGTERM == 15."""
+    return exit_code is not None and exit_code < 0
 
 
 # ============================================================

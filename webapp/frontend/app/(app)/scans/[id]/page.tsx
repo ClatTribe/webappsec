@@ -128,6 +128,8 @@ export default async function ScanDetailPage({ params }: Props) {
         scanId={params.id}
         initialStatus={scan.status}
         agentsCount={scan.agents_count ?? 0}
+        initialHeartbeatAt={scan.last_heartbeat_at ?? null}
+        initialCancelRequestedAt={scan.cancel_requested_at ?? null}
       />
     </div>
   );

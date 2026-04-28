@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, Pause, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
+import { Activity, Pause, ShieldAlert, ShieldCheck, ShieldX, AlertTriangle, X, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
@@ -14,7 +14,15 @@ interface Props {
   scanId: string;
   initialStatus: ScanStatus;
   agentsCount?: number | null;
+  initialHeartbeatAt?: string | null;
+  initialCancelRequestedAt?: string | null;
 }
+
+// A scan is "stale" if it's still in 'running' but hasn't heartbeat'd in this
+// many seconds. The worker ticks every 60s and the sweep tolerance is 10
+// minutes, so showing the badge at 5 minutes gives the user an early warning
+// while still being well past one missed beat.
+const STALE_HEARTBEAT_THRESHOLD_SEC = 5 * 60;
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
 
@@ -72,11 +80,27 @@ const STATUS_THEME: Record<
   },
 };
 
-export default function ScanLiveView({ scanId, initialStatus, agentsCount }: Props) {
+export default function ScanLiveView({
+  scanId,
+  initialStatus,
+  agentsCount,
+  initialHeartbeatAt,
+  initialCancelRequestedAt,
+}: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [heartbeatAt, setHeartbeatAt] = useState<string | null>(initialHeartbeatAt ?? null);
+  const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(
+    initialCancelRequestedAt ?? null,
+  );
+  const [cancelInFlight, setCancelInFlight] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  // A wall-clock tick so the staleness check re-evaluates every minute even
+  // when no DB updates arrive (which is exactly the failure mode the badge
+  // is meant to catch).
+  const [, setNowTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,13 +143,58 @@ export default function ScanLiveView({ scanId, initialStatus, agentsCount }: Pro
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scanId}` },
-        (payload) => setStatus((payload.new as { status: ScanStatus }).status),
+        (payload) => {
+          const row = payload.new as {
+            status: ScanStatus;
+            last_heartbeat_at?: string | null;
+            cancel_requested_at?: string | null;
+          };
+          setStatus(row.status);
+          if (row.last_heartbeat_at !== undefined) setHeartbeatAt(row.last_heartbeat_at);
+          if (row.cancel_requested_at !== undefined) setCancelRequestedAt(row.cancel_requested_at);
+        },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
   }, [scanId, supabase]);
+
+  // Re-render once a minute so the stale-heartbeat badge catches a worker
+  // that goes silent without anything else changing on the row.
+  useEffect(() => {
+    if (status !== 'running') return;
+    const id = setInterval(() => setNowTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  const handleCancel = async () => {
+    if (cancelInFlight) return;
+    setCancelInFlight(true);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/scans/${scanId}/cancel`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setCancelError(body?.error ?? `failed (${res.status})`);
+        return;
+      }
+      // Optimistic — the realtime UPDATE will overwrite this when the worker
+      // actually flips the row.
+      setCancelRequestedAt(new Date().toISOString());
+    } catch (e) {
+      setCancelError(e instanceof Error ? e.message : 'request failed');
+    } finally {
+      setCancelInFlight(false);
+    }
+  };
+
+  const heartbeatStale =
+    status === 'running' &&
+    heartbeatAt != null &&
+    Date.now() - Date.parse(heartbeatAt) > STALE_HEARTBEAT_THRESHOLD_SEC * 1000;
+  const showCancelButton = status === 'queued' || status === 'running';
+  const cancelPending = cancelRequestedAt != null && status === 'running';
 
   const sortedFindings = [...findings].sort((a, b) => {
     const sa = SEVERITY_ORDER.indexOf(a.severity as (typeof SEVERITY_ORDER)[number]);
@@ -147,21 +216,66 @@ export default function ScanLiveView({ scanId, initialStatus, agentsCount }: Pro
       <section
         className={`relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-gradient-to-b from-neutral-900/50 via-neutral-950/30 to-neutral-950/0 p-6 ring-1 ${theme.ring}`}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-start gap-4">
           <div
             className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-neutral-900/70 ${theme.tag} ring-1 ring-inset ring-white/5`}
           >
             <StatusIcon className="h-6 w-6" strokeWidth={2} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${theme.tag}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${theme.tag}`}
+              >
                 <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
                 {theme.label}
               </span>
+              {cancelPending && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30">
+                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2.5} />
+                  Cancel pending
+                </span>
+              )}
+              {heartbeatStale && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-yellow-500/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-yellow-200 ring-1 ring-yellow-400/30">
+                  <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />
+                  Stalled
+                </span>
+              )}
             </div>
-            <p className="mt-1.5 text-sm text-neutral-300">{theme.tagline(findings.length)}</p>
+            <p className="mt-1.5 text-sm text-neutral-300">
+              {cancelPending
+                ? 'Cancellation requested — the worker is shutting the scan down.'
+                : heartbeatStale
+                  ? "Worker hasn't checked in for several minutes. The scan may have stalled — it'll be auto-failed if it stays silent."
+                  : theme.tagline(findings.length)}
+            </p>
           </div>
+          {showCancelButton && (
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={cancelInFlight || cancelPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-200 transition-colors hover:border-red-500/50 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                title={
+                  cancelPending
+                    ? 'Cancellation already requested'
+                    : 'Stop this scan immediately'
+                }
+              >
+                {cancelInFlight ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
+                ) : (
+                  <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+                )}
+                {cancelPending ? 'Cancelling…' : 'Cancel scan'}
+              </button>
+              {cancelError && (
+                <span className="text-[10.5px] text-red-300">{cancelError}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Severity stat row */}

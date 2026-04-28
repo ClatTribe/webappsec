@@ -85,6 +85,8 @@ export interface Scan {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  last_heartbeat_at: string | null;
+  cancel_requested_at: string | null;
 }
 
 export interface ScanTarget {

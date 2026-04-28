@@ -35,7 +35,36 @@ class WorkerSupabase:
         return result.data
 
     def start_scan(self, scan_id: str) -> None:
+        """Legacy non-atomic start. Prefer claim_scan."""
         self.client.rpc("worker_start_scan", {"p_scan_id": scan_id}).execute()
+
+    def claim_scan(self, scan_id: str) -> dict[str, Any] | None:
+        """Atomically flip queued -> running. Returns the row only on win."""
+        result = self.client.rpc("worker_claim_scan", {"p_scan_id": scan_id}).execute()
+        # The RPC returns the scan row (jsonb representation of the table type)
+        # or null when it didn't claim. Supabase python client wraps it.
+        data = result.data
+        if data is None:
+            return None
+        # Some Supabase client versions wrap a single-row result in a dict;
+        # others return it raw. Normalise both.
+        if isinstance(data, list):
+            return data[0] if data else None
+        return data if isinstance(data, dict) and data.get("id") else None
+
+    def heartbeat_scan(self, scan_id: str) -> None:
+        self.client.rpc("worker_heartbeat_scan", {"p_scan_id": scan_id}).execute()
+
+    def mark_stale_scans(self, max_silence_seconds: int = 600) -> list[str]:
+        """Sweep running scans whose heartbeat hasn't ticked in N seconds.
+
+        Returns the scan_ids that were flipped to 'failed'.
+        """
+        result = self.client.rpc(
+            "mark_stale_scans", {"p_max_silence_seconds": max_silence_seconds}
+        ).execute()
+        rows = result.data or []
+        return [r["scan_id"] for r in rows if isinstance(r, dict) and r.get("scan_id")]
 
     def finish_scan(
         self,
