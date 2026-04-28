@@ -2,11 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ScanLine, EyeOff, Eye, Sparkles } from 'lucide-react';
+import { ScanLine, Sparkles, Target as TargetIcon } from 'lucide-react';
 import FindingCard from './finding-card';
 import type { AiUrgency, Finding } from '@/lib/supabase/types';
 
-type FindingWithScan = Finding & { scans?: { run_name: string; status: string } | null };
+type FindingWithScan = Finding & {
+  scans?: { run_name: string; status: string } | null;
+  targets?: { name: string; value: string; type: string } | null;
+};
 
 const RESOLVED_STATUSES = new Set(['fixed', 'false_positive', 'wont_fix']);
 
@@ -170,18 +173,31 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
         ) : (
           visible.map((f) => (
             <div key={f.id}>
-              {f.scans?.run_name && (
-                <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] text-neutral-500">
-                  <ScanLine className="h-3 w-3" strokeWidth={2} />
-                  Found in scan{' '}
-                  <Link
-                    href={`/scans/${f.scan_id}`}
-                    className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
-                  >
-                    {f.scans.run_name}
-                  </Link>
-                </div>
-              )}
+              <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px] text-neutral-500">
+                {f.targets && f.target_id && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <TargetIcon className="h-3 w-3" strokeWidth={2} />
+                    <Link
+                      href={`/targets/${f.target_id}`}
+                      className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
+                    >
+                      {f.targets.name}
+                    </Link>
+                  </span>
+                )}
+                {f.scans?.run_name && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <ScanLine className="h-3 w-3" strokeWidth={2} />
+                    Scan{' '}
+                    <Link
+                      href={`/scans/${f.scan_id}`}
+                      className="font-medium text-neutral-400 transition-colors hover:text-cyan-300"
+                    >
+                      {f.scans.run_name}
+                    </Link>
+                  </span>
+                )}
+              </div>
               <FindingCard finding={f} />
             </div>
           ))

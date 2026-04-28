@@ -8,13 +8,20 @@ const RESOLVED = new Set(['fixed', 'false_positive', 'wont_fix']);
 
 export default async function FindingsPage() {
   const supabase = createClient();
+  // `findings` has two FK relationships to `scans` (`scan_id` and
+  // `last_seen_scan_id`) since migration 010, so we have to disambiguate
+  // the PostgREST embed by FK name. Without this, the query returns 0 rows
+  // with the error "more than one relationship was found".
   const { data } = await supabase
     .from('findings')
-    .select('*, scans!inner(run_name, status)')
+    .select('*, scans!findings_scan_id_fkey(run_name, status), targets(name, value, type)')
     .order('created_at', { ascending: false })
     .limit(200);
 
-  const findings = ((data as (Finding & { scans?: { run_name: string; status: string } | null })[]) ?? []);
+  const findings = ((data as (Finding & {
+    scans?: { run_name: string; status: string } | null;
+    targets?: { name: string; value: string; type: string } | null;
+  })[]) ?? []);
 
   const open = findings.filter((f) => !RESOLVED.has(f.status));
   const fixNow = open.filter(
