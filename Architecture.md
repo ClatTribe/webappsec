@@ -281,6 +281,7 @@ These are bugs and gaps in the existing code that will surface immediately under
 | # | Fix | Why it matters | Where |
 |---|---|---|---|
 | 1 | **Fix the severity parser.** `line.split(":", 1)[1]` splits inside `**Severity:**` and produces `"** high"`, which fails the DB check constraint and gets silently swallowed by the broad `except`. Findings are silently dropped. | Findings never appear in the UI. | [runner.py:238](webapp/worker/src/strix_worker/runner.py:238) |
+| 1a | **Fix exit-code-2 mishandling.** The original `if exit_code in (0, 2): final_status = "completed"` conflates Strix success with argparse usage errors. A scan submitted with no `-t` exits 2 and was silently marked "completed" with zero findings. **Fixed in this PR:** `exit_code == 0` only counts as completed. | Bad scans showed up as successful. | [runner.py:78](webapp/worker/src/strix_worker/runner.py:78) |
 | 2 | **Use the structured fields.** The `findings` schema has columns for CVSS, CWE, target, endpoint, method, PoC — currently only `description_md` is populated. Parse the rest from the rich Strix markdown. | Severity-sorted lists, compliance reporting, and PoC display all need structured data. | [runner.py:225-252](webapp/worker/src/strix_worker/runner.py:225) |
 | 3 | **Stream `events.jsonl` live**, not just at end. Today the live UI shows raw stdout strings; the structured agent graph only appears after exit. | Users stare at a near-blank screen for 5–30 minutes. | [runner.py:165-190](webapp/worker/src/strix_worker/runner.py:165) — needs Strix-side event-sink callback (Phase-0 Strix change) |
 | 4 | **Populate token / cost stats.** `worker_finish_scan` is called with all zeros for `total_input_tokens / output_tokens / cost / agents_count`. Parse them from `events.jsonl` after exit. | Billing, cost caps, per-org quotas all depend on these. | [supabase_client.py:46-50](webapp/worker/src/strix_worker/supabase_client.py:46) |
@@ -331,6 +332,24 @@ Some of the above need Strix to expose APIs the wrapper can use. Tracked in [doc
 - **Structured `create_vulnerability_report` event** — emit a JSON event alongside the markdown so the wrapper doesn't have to parse `**ID:**`/`**Severity:**` headers. Unblocks #2.
 - **Scan-scoped state** — replace process-global `Config / _agent_graph / Tracer` with per-scan instances. Unblocks raising `WORKER_CONCURRENCY` from 1, which is the most cost-effective scaling lever today.
 - **Cancel signal handling** — make Strix shut down gracefully on SIGTERM (close subagents, flush events, exit). Unblocks #5.
+
+---
+
+### 4.5 Findings from a real white-box scan against this repo
+
+Scan #6 (Gemini 2.5 Pro, `quick` mode) found 5 issues before the LLM hit the free-tier RPD cap and stalled. Three of them were genuinely new and not in the §4.1 list above:
+
+| # | Severity | Finding | Status in this PR |
+|---|---|---|---|
+| F1 | **HIGH** (CVSS 8.5) | **SSRF in `inferTargetType`** — accepts `http://127.0.0.1`, `http://169.254.169.254`, `http://10.x` etc. as `web_application` targets, letting an authenticated user point Strix at the worker's internal network | **Fixed** — `isInternalAddress` rejects loopback / RFC1918 / link-local / IPv6 ULA / cloud-metadata hosts at the API boundary. DNS rebinding still gets through; egress firewall (#12) closes that gap |
+| F2 | **MEDIUM** (CVSS 4.9) | **Audit gap in `worker_decrypt_org_llm_key`** — the LLM-key decrypt RPC writes no audit_log row and silently produces "org has no LLM API key configured" when the scan_id is bogus, while its sibling `worker_decrypt_integration` does both | **Fixed** — new migration `20260427000008` brings the two functions to parity |
+| F3 | **MEDIUM** (CVSS 5.3) | Email confirmation off in `config.toml` | Intentional dev-only setting; the `# set true in production` comment makes the intent explicit. Not changed |
+| F4 | **CRITICAL** (CVSS 9.8) | "Outdated frontend dependencies" — Next 14.2.5, etc. | Won't fix in this PR — npm audit's CVSS scores often overstate actual impact for transitive deps; tracked under §4.1 #1 dependency hygiene |
+| F5 | **HIGH** (CVSS 8.2) | "Hardcoded `postgres:postgres` in `.env.example`" | False-positive — these are local Supabase defaults, not real credentials |
+
+Also surfaced while wiring up the run:
+- **JWT-hook function had two real bugs** — local variable `user_id` shadowed the column (every signup 500'd with `column reference "user_id" is ambiguous`), and the function wasn't `SECURITY DEFINER` so it couldn't read `org_members` as `supabase_auth_admin`. **Fixed** in `20260427000007_fix_jwt_hook_variable_shadow.sql`.
+- **Worker dockerization on macOS is fundamentally limited.** Strix's `_resolve_docker_host()` returns `127.0.0.1` from inside the worker container, but the spawned sandbox is on the host's docker daemon — they can't reach each other. Production deploy on a privileged Linux machine works fine; macOS Docker Desktop without TCP API exposure does not. The right fix is the [§4.3 #22 K8s-Job-per-scan model](#43-enterprise); the temporary workaround is to run the worker on the host directly (kept the `docker-compose.yml` for Linux deployments).
 
 ---
 

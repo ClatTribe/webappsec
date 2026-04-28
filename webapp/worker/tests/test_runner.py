@@ -577,8 +577,14 @@ async def test_integration_credentials_materialised_into_subprocess_env(cfg_fact
 
 
 @pytest.mark.asyncio
-async def test_no_integration_means_no_github_token(cfg_factory, fake_scan):
-    """§3.6 negative: with no scan_integrations, the subprocess env has no GITHUB_TOKEN."""
+async def test_no_integration_means_no_github_token(cfg_factory, fake_scan, monkeypatch):
+    """§3.6 negative: with no scan_integrations, the subprocess env has no GITHUB_TOKEN.
+
+    Explicitly clear GITHUB_TOKEN from the test process env — the worker
+    inherits os.environ, so a token in the developer's shell would otherwise
+    leak into the subprocess and fail this assertion.
+    """
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     cfg = cfg_factory(FAKE_STRIX_ENV_PROBE)
     sb = FakeSupabase(fake_scan)
     await run_scan(SCAN_ID, cfg, sb)

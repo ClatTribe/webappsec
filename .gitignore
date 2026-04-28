@@ -43,6 +43,8 @@ coverage.xml
 supabase/.branches
 supabase/.temp
 supabase/.env
+webapp/supabase/.branches/
+webapp/supabase/.temp/
 
 # Worker / runtime
 strix_runs/

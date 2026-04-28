@@ -75,7 +75,10 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             exit_code = await proc.wait()
             await asyncio.gather(stdout_task, stderr_task)
 
-        if exit_code in (0, 2):
+        # Strix uses 0 for success. Argparse uses 2 for usage errors, which the
+        # earlier version of this code conflated with success — so a missing
+        # `-t` would mark the scan "completed" with no findings.
+        if exit_code == 0:
             final_status = "completed"
         else:
             final_status = "failed"
