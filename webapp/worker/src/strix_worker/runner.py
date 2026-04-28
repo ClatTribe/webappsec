@@ -23,6 +23,78 @@ logger = logging.getLogger(__name__)
 SCAN_ARTIFACTS_BUCKET = "scan-artifacts"
 
 
+# Strix renders its final stats panel through Rich. In a headless run it's
+# still plain ASCII, but every value is humanised by `format_token_count`
+# (see strix/interface/utils.py): >=1M -> "2.6M", >=1K -> "14.4K", else
+# raw int. Cost is full precision: "$0.2392". The panel is reprinted as
+# the live display refreshes, so we keep the running max across the
+# whole stdout — values only grow, so max == final.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
+_TOKEN_RE = {
+    "input": re.compile(r"Input Tokens\s+([\d.]+)\s*([MK])?", re.IGNORECASE),
+    "output": re.compile(r"Output Tokens\s+([\d.]+)\s*([MK])?", re.IGNORECASE),
+}
+_COST_RE = re.compile(r"Cost[\s·]*\$([\d.]+)", re.IGNORECASE)
+_AGENTS_RE = re.compile(r"\bAgents\b[\s·]*?(\d+)", re.IGNORECASE)
+
+
+def _parse_humanized_count(num: str, suffix: str | None) -> int:
+    try:
+        value = float(num)
+    except ValueError:
+        return 0
+    if suffix and suffix.upper() == "M":
+        return int(value * 1_000_000)
+    if suffix and suffix.upper() == "K":
+        return int(value * 1_000)
+    return int(value)
+
+
+class StrixStats:
+    """Accumulates token / cost / agent stats from Strix's stdout panel.
+
+    Strix prints a live stats panel that is also reprinted at end of run
+    (`build_final_stats_text` in strix/interface/utils.py). The numbers only
+    grow, so taking a running max yields the final values regardless of how
+    many times the panel is rendered.
+    """
+
+    def __init__(self) -> None:
+        self.input_tokens: int = 0
+        self.output_tokens: int = 0
+        self.cost: float = 0.0
+        self.agents_count: int = 0
+
+    def feed(self, line: str) -> None:
+        text = _ANSI_RE.sub("", line)
+        if m := _TOKEN_RE["input"].search(text):
+            self.input_tokens = max(
+                self.input_tokens, _parse_humanized_count(m.group(1), m.group(2))
+            )
+        if m := _TOKEN_RE["output"].search(text):
+            self.output_tokens = max(
+                self.output_tokens, _parse_humanized_count(m.group(1), m.group(2))
+            )
+        if m := _COST_RE.search(text):
+            try:
+                self.cost = max(self.cost, float(m.group(1)))
+            except ValueError:
+                pass
+        if m := _AGENTS_RE.search(text):
+            try:
+                self.agents_count = max(self.agents_count, int(m.group(1)))
+            except ValueError:
+                pass
+
+    def as_finish_kwargs(self) -> dict[str, Any]:
+        return {
+            "total_input_tokens": self.input_tokens,
+            "total_output_tokens": self.output_tokens,
+            "total_cost": round(self.cost, 4),
+            "agents_count": self.agents_count,
+        }
+
+
 async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
     """Drive a single scan end to end. Always finalizes the scan row, even on error."""
     logger.info("picking up scan %s", scan_id)
@@ -48,6 +120,7 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
     exit_code: int | None = None
     error_message: str | None = None
     final_status = "failed"
+    stats = StrixStats()
 
     try:
         with materialize_credentials(sb, scan_id, integrations) as creds:
@@ -71,7 +144,9 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 cwd=_make_run_workdir(scan_id),
             )
 
-            stdout_task = asyncio.create_task(_stream_logs(sb, scan_id, proc.stdout, "stdout"))
+            stdout_task = asyncio.create_task(
+                _stream_logs(sb, scan_id, proc.stdout, "stdout", stats)
+            )
             stderr_task = asyncio.create_task(_stream_logs(sb, scan_id, proc.stderr, "stderr"))
 
             exit_code = await proc.wait()
@@ -99,8 +174,18 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             final_status,
             exit_code=exit_code,
             error_message=error_message,
+            **stats.as_finish_kwargs(),
         )
-        logger.info("scan %s done status=%s exit_code=%s", scan_id, final_status, exit_code)
+        logger.info(
+            "scan %s done status=%s exit_code=%s tokens_in=%d tokens_out=%d cost=$%.4f agents=%d",
+            scan_id,
+            final_status,
+            exit_code,
+            stats.input_tokens,
+            stats.output_tokens,
+            stats.cost,
+            stats.agents_count,
+        )
 
 
 # ============================================================
@@ -171,11 +256,16 @@ async def _stream_logs(
     scan_id: str,
     stream: asyncio.StreamReader | None,
     label: str,
+    stats: StrixStats | None = None,
 ) -> None:
     """Stream stdout/stderr lines into scan_events as 'log' events.
 
     Strix's structured event stream lives in events.jsonl on disk, which we upload at the end.
     These log lines are a coarse live channel — fine for "show me what's happening now" UX.
+
+    The optional `stats` accumulator parses Strix's stats panel out of stdout
+    (token counts, cost, agent count). events.jsonl never carries these — the
+    only place the totals reach the worker is the rendered panel.
     """
     if stream is None:
         return
@@ -190,6 +280,8 @@ async def _stream_logs(
             text = line.decode(errors="replace").rstrip("\n")
             if text:
                 sb.emit_event(scan_id, "log", {"stream": label, "line": text})
+                if stats is not None:
+                    stats.feed(text)
         except Exception as e:  # noqa: BLE001
             logger.warning("failed to emit log line: %s", e)
 

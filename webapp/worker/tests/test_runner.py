@@ -210,6 +210,47 @@ FAKE_STRIX_FAILURE = textwrap.dedent('''\
     sys.exit(1)
 ''')
 
+# A success run that also prints the live + final stats panel Strix renders
+# via Rich (`build_live_stats_text` / `build_final_stats_text` in
+# strix/interface/utils.py). Numbers are humanised because real Strix calls
+# `format_token_count` (>=1M -> "X.YM", >=1K -> "X.YK", else int).
+# The live panel is reprinted as values grow; the worker should pick the
+# largest seen, which matches the final render.
+FAKE_STRIX_WITH_STATS = textwrap.dedent('''\
+    #!/usr/bin/env python3
+    """Strix-like run that also emits the stats panel multiple times."""
+    import csv, json, sys
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    # Live panel during the scan — small numbers, then growing.
+    print("Vulnerabilities  HIGH: 1 (Total: 1)")
+    print("Agents 2  ·  Tools 12")
+    print("Input Tokens 850  ·  Output Tokens 420")
+    print("Cost $0.0050")
+    sys.stdout.flush()
+
+    # Mid-scan refresh.
+    print("Vulnerabilities  CRITICAL: 1 | HIGH: 1 (Total: 2)")
+    print("Agents 4  ·  Tools 48")
+    print("Input Tokens 12.5K  ·  Cached Tokens 8.0K  ·  Output Tokens 3.2K")
+    print("Cost $0.1180")
+    sys.stdout.flush()
+
+    # Final summary (this is what real Strix prints last).
+    print("Vulnerabilities  CRITICAL: 1 | HIGH: 1 (Total: 2)")
+    print("Agents  7  ·  Tools  96")
+    print("Input Tokens 2.6M  ·  Cached Tokens 2.1M  ·  Output Tokens 14.4K · Cost $0.2392")
+    sys.stdout.flush()
+
+    # Minimal artifact so _upload_run_artifacts has something to walk.
+    run_dir = Path.cwd() / "strix_runs" / "stats-run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "events.jsonl").write_text("")
+    (run_dir / "penetration_test_report.md").write_text("# Security Penetration Test Report\\n")
+    sys.exit(0)
+''')
+
 
 def _write_executable(path: Path, contents: str) -> Path:
     path.write_text(contents)
@@ -830,3 +871,117 @@ def test_mock_penetration_test_report_has_strix_header(tmp_path):
     text = (run / "penetration_test_report.md").read_text()
     assert text.startswith("# Security Penetration Test Report")
     assert "**Generated:**" in text
+
+
+# ---------------------------------------------------------------------------
+# 4. Token / cost stats — Roadmap §1: stats must populate, not stay at zero.
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import StrixStats  # noqa: E402
+
+
+def test_stats_parser_humanized_millions_thousands_and_cost():
+    """Strix renders tokens through `format_token_count`; we must round-trip the
+    common shapes ("2.6M", "14.4K", "850") and the literal Cost line."""
+    s = StrixStats()
+    s.feed("Input Tokens 2.6M  ·  Cached Tokens 2.1M  ·  Output Tokens 14.4K · Cost $0.2392")
+    s.feed("Agents  7  ·  Tools  96")
+    assert s.input_tokens == 2_600_000
+    assert s.output_tokens == 14_400
+    assert s.cost == 0.2392
+    assert s.agents_count == 7
+
+
+def test_stats_parser_takes_running_max_across_renders():
+    """Strix reprints the live panel with growing values; we keep the largest."""
+    s = StrixStats()
+    s.feed("Input Tokens 850  ·  Output Tokens 420")
+    s.feed("Cost $0.0050")
+    s.feed("Agents 2  ·  Tools 12")
+    s.feed("Input Tokens 12.5K  ·  Output Tokens 3.2K")
+    s.feed("Cost $0.1180")
+    s.feed("Agents 4  ·  Tools 48")
+    s.feed("Input Tokens 2.6M  ·  Output Tokens 14.4K · Cost $0.2392")
+    s.feed("Agents 7  ·  Tools 96")
+    assert s.input_tokens == 2_600_000
+    assert s.output_tokens == 14_400
+    assert s.cost == 0.2392
+    assert s.agents_count == 7
+
+
+def test_stats_parser_strips_ansi_color_codes():
+    """Rich renders the panel with ANSI; the parser must see through it."""
+    s = StrixStats()
+    s.feed("\x1b[2mInput Tokens \x1b[0m\x1b[1m1.5M\x1b[0m  ·  \x1b[2mOutput Tokens \x1b[0m500")
+    s.feed("\x1b[2mCost \x1b[0m\x1b[33m$0.0500\x1b[0m")
+    assert s.input_tokens == 1_500_000
+    assert s.output_tokens == 500
+    assert s.cost == 0.05
+
+
+def test_stats_parser_ignores_unrelated_log_lines():
+    """Log lines that mention 'cost' or 'agents' in prose must not trip the parser."""
+    s = StrixStats()
+    s.feed("strix: 12 agents available in pool")          # not "Agents N" pattern with whitespace
+    s.feed("strix: estimated cost low for this run")      # no "$"
+    s.feed("strix: starting scan")
+    assert s.input_tokens == 0
+    assert s.output_tokens == 0
+    assert s.cost == 0.0
+    # "12 agents" doesn't match the panel pattern (Agents at start of token, not "agents").
+    # Even if it did, the parser is safe — these are operational lines, not panel lines.
+
+
+def test_stats_parser_finish_kwargs_shape_matches_finish_scan_signature():
+    """The kwargs we hand finish_scan must use the names the RPC wrapper expects."""
+    s = StrixStats()
+    s.feed("Input Tokens 100K · Output Tokens 50K · Cost $1.2345")
+    s.feed("Agents 3 · Tools 10")
+    kwargs = s.as_finish_kwargs()
+    assert set(kwargs) == {
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_cost",
+        "agents_count",
+    }
+    assert kwargs["total_input_tokens"] == 100_000
+    assert kwargs["total_output_tokens"] == 50_000
+    assert kwargs["total_cost"] == 1.2345
+    assert kwargs["agents_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_scan_passes_parsed_stats_to_finish_scan(fake_scan, cfg_factory):
+    """End-to-end: a Strix-like subprocess that prints the panel must produce
+    populated stats on `finish_scan`. This is the ship-blocker — without it,
+    every finished scan reports zero tokens / zero cost."""
+    cfg = cfg_factory(FAKE_STRIX_WITH_STATS)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    assert len(sb.finish_calls) == 1
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "completed"
+    # Final panel: Input 2.6M, Cached 2.1M, Output 14.4K, Cost $0.2392, Agents 7.
+    assert finish["total_input_tokens"] == 2_600_000
+    assert finish["total_output_tokens"] == 14_400
+    assert finish["total_cost"] == 0.2392
+    assert finish["agents_count"] == 7
+
+
+@pytest.mark.asyncio
+async def test_run_scan_emits_zero_stats_when_strix_prints_no_panel(fake_scan, cfg_factory):
+    """A run that crashes before printing the panel should not block finish_scan
+    — we still finalise the row, just with zeroes (the existing behaviour)."""
+    cfg = cfg_factory(FAKE_STRIX_FAILURE)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "failed"
+    assert finish["total_input_tokens"] == 0
+    assert finish["total_output_tokens"] == 0
+    assert finish["total_cost"] == 0.0
+    assert finish["agents_count"] == 0
