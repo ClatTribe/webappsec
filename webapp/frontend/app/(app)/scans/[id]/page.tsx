@@ -1,5 +1,13 @@
 import { notFound } from 'next/navigation';
-import { ChevronRight, Target, Cpu, ArrowDownToLine, ArrowUpFromLine, DollarSign } from 'lucide-react';
+import {
+  ChevronRight,
+  Target,
+  Cpu,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  DollarSign,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import ScanLiveView from '@/components/scan/scan-live-view';
@@ -132,7 +140,7 @@ function StatTile({
   value,
   accent,
 }: {
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   label: string;
   value: string;
   accent: keyof typeof ACCENTS;

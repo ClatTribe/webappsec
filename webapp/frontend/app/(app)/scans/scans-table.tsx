@@ -27,6 +27,20 @@ const STATUS_THEME: Record<ScanStatus, { Icon: LucideIcon; tag: string }> = {
 
 const ALL_TARGETS = '__all__';
 
+// Locale-stable date format. `toLocaleString()` without args uses the runtime
+// locale + timezone, which differs between Node (server) and the browser
+// (client) and triggers a hydration mismatch on first render. We format the
+// timestamp deterministically as `YYYY-MM-DD HH:MM` in UTC so the SSR HTML
+// matches the client's first render exactly.
+function formatStartedAt(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
+    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
+  );
+}
+
 export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
   const [targetFilter, setTargetFilter] = useState<string>(ALL_TARGETS);
 
@@ -132,7 +146,7 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
                     </td>
                     <td className="px-5 py-3.5 text-neutral-300">{scan.scan_mode}</td>
                     <td className="px-5 py-3.5 font-mono tabular-nums text-neutral-200">
-                      {scan.total_cost && Number(scan.total_cost) > 0
+                      {Number(scan.total_cost ?? 0) > 0
                         ? `$${Number(scan.total_cost).toFixed(4)}`
                         : <span className="text-neutral-600">—</span>}
                     </td>
@@ -146,9 +160,9 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
                         return String(total);
                       })()}
                     </td>
-                    <td className="px-5 py-3.5 text-neutral-400">
+                    <td className="px-5 py-3.5 font-mono tabular-nums text-neutral-400">
                       {scan.started_at ? (
-                        new Date(scan.started_at).toLocaleString()
+                        formatStartedAt(scan.started_at)
                       ) : (
                         <span className="text-neutral-600">—</span>
                       )}
