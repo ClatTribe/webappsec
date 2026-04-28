@@ -456,6 +456,31 @@ async def test_run_scan_collects_all_reports(fake_scan, cfg_factory):
     assert "concatenates user input" in by_id["vuln-0001"]["payload"]["description_md"]
     assert "reflected without escaping" in by_id["vuln-0002"]["payload"]["description_md"]
 
+    # ---- 6. events.jsonl streamed live into scan_events ----
+    # The structured events Strix writes to events.jsonl mirror into scan_events
+    # while the scan runs. Without this, the UI only sees `log` lines (raw stdout)
+    # until artifact upload at scan exit.
+    streamed_types = {et for et, _ in sb.events}
+    for expected in {
+        "run.started",
+        "agent.created",
+        "tool.execution.started",
+        "run.completed",
+    }:
+        assert expected in streamed_types, f"events.jsonl tailer didn't forward {expected}"
+
+    # finding.created is intentionally skipped — the markdown ingest path is
+    # the source of truth for findings, and re-emitting events.jsonl ones
+    # would double up the timeline.
+    streamed_finding_events = [p for et, p in sb.events if et == "finding.created"]
+    assert streamed_finding_events == [], (
+        "finding.created should not be re-emitted by the tailer"
+    )
+
+    # chat.message is filtered as noise (full LLM round-trip text). The mock
+    # doesn't emit one, but the contract is still asserted here.
+    assert "chat.message" not in streamed_types
+
 
 @pytest.mark.asyncio
 async def test_run_scan_marks_failed_on_nonzero_exit(fake_scan, cfg_factory):
@@ -985,3 +1010,165 @@ async def test_run_scan_emits_zero_stats_when_strix_prints_no_panel(fake_scan, c
     assert finish["total_output_tokens"] == 0
     assert finish["total_cost"] == 0.0
     assert finish["agents_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 5. events.jsonl tailer — Roadmap §1: live stream of structured events.
+#    The tailer turns Strix's on-disk events.jsonl into live scan_events while
+#    the run is still in progress, so the UI doesn't have to wait for upload.
+# ---------------------------------------------------------------------------
+
+# Custom fake-strix that writes a small, mixed events.jsonl: one of every event
+# type the tailer must forward, one of each type it must skip. No findings; no
+# stdout panel. Used to assert the skip rules in isolation.
+FAKE_STRIX_EVENTS_ONLY = textwrap.dedent('''\
+    #!/usr/bin/env python3
+    """Writes a hand-crafted events.jsonl with every event-type case the tailer covers."""
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    run_dir = Path.cwd() / "strix_runs" / "events-only"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    def ev(event_type, payload, status="ok"):
+        return {
+            "timestamp": now,
+            "event_type": event_type,
+            "run_id": "events-only",
+            "trace_id": "0" * 32,
+            "span_id": "0" * 16,
+            "parent_span_id": None,
+            "actor": None,
+            "payload": payload,
+            "status": status,
+            "error": None,
+            "source": None,
+        }
+
+    with (run_dir / "events.jsonl").open("w") as f:
+        f.write(json.dumps(ev("run.started", {"run_name": "events-only"})) + "\\n")
+        f.write(json.dumps(ev("agent.created", {"agent_id": "a1", "task": "look around"})) + "\\n")
+        f.write(json.dumps(ev("chat.message", {"content": "should be skipped"})) + "\\n")
+        f.write(json.dumps(ev("tool.execution.started", {"tool_name": "browser_navigate"})) + "\\n")
+        f.write(json.dumps(ev("finding.created", {"report": {"id": "vuln-skip-me"}})) + "\\n")
+        f.write(json.dumps(ev("run.completed", {"vulnerability_count": 0})) + "\\n")
+''')
+
+# A fake-strix that intermixes valid JSONL with garbage to verify the parser
+# survives malformed lines (Strix has been observed to occasionally dump
+# tracebacks if a remote-export fails mid-stream).
+FAKE_STRIX_MALFORMED_LINES = textwrap.dedent('''\
+    #!/usr/bin/env python3
+    """Intentionally garbage-in-the-middle events.jsonl — tailer must keep going."""
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    run_dir = Path.cwd() / "strix_runs" / "garbage"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc).isoformat()
+    base = {
+        "timestamp": now, "trace_id": "0"*32, "span_id": "0"*16,
+        "parent_span_id": None, "actor": None, "status": "ok", "error": None, "source": None,
+        "run_id": "garbage",
+    }
+
+    with (run_dir / "events.jsonl").open("w") as f:
+        f.write(json.dumps({**base, "event_type": "run.started", "payload": {"a": 1}}) + "\\n")
+        f.write("not-json garbage line\\n")
+        f.write("{ this is also broken json\\n")
+        f.write(json.dumps({**base, "event_type": "agent.created", "payload": {"agent_id": "a"}}) + "\\n")
+        f.write(json.dumps({**base, "event_type": "run.completed", "payload": {}}) + "\\n")
+''')
+
+# A fake-strix that never creates strix_runs/. The tailer's discovery loop
+# should give up gracefully without blocking the run from finalising.
+FAKE_STRIX_NO_EVENTS_DIR = textwrap.dedent('''\
+    #!/usr/bin/env python3
+    """Exits 0 without writing any artifacts."""
+    import sys
+    print("strix: nothing to do")
+    sys.exit(0)
+''')
+
+
+@pytest.mark.asyncio
+async def test_tailer_skips_finding_created_and_chat_message(fake_scan, cfg_factory):
+    cfg = cfg_factory(FAKE_STRIX_EVENTS_ONLY)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    streamed = [et for et, _ in sb.events]
+    # Forward these.
+    assert "run.started" in streamed
+    assert "agent.created" in streamed
+    assert "tool.execution.started" in streamed
+    assert "run.completed" in streamed
+    # Skip these.
+    assert "chat.message" not in streamed
+    # finding.created from events.jsonl is skipped — no row whose payload has
+    # the sentinel id we wrote in the mock should land in scan_events.
+    finding_payloads = [p for et, p in sb.events if et == "finding.created"]
+    assert all(
+        (p or {}).get("payload", {}).get("report", {}).get("id") != "vuln-skip-me"
+        for p in finding_payloads
+    )
+
+
+@pytest.mark.asyncio
+async def test_tailer_resilient_to_malformed_jsonl_lines(fake_scan, cfg_factory):
+    cfg = cfg_factory(FAKE_STRIX_MALFORMED_LINES)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    # Run still finishes cleanly.
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "completed"
+
+    # Both valid events arrive; garbage lines silently dropped.
+    streamed = [et for et, _ in sb.events]
+    assert "run.started" in streamed
+    assert "agent.created" in streamed
+    assert "run.completed" in streamed
+
+
+@pytest.mark.asyncio
+async def test_tailer_handles_missing_events_jsonl(fake_scan, cfg_factory):
+    """A run that never writes events.jsonl must not block finalisation."""
+    cfg = cfg_factory(FAKE_STRIX_NO_EVENTS_DIR)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    # The scan still finalises — exit 0 means completed.
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "completed"
+    assert finish["exit_code"] == 0
+
+    # No structured events forwarded (there were none on disk), but the
+    # lifecycle events from the worker still landed.
+    streamed = {et for et, _ in sb.events}
+    assert "scan.command" in streamed
+    assert not any(et in streamed for et in {"agent.created", "tool.execution.started"})
+
+
+@pytest.mark.asyncio
+async def test_tailer_does_not_hold_file_open_after_run(fake_scan, cfg_factory):
+    """Upload must be able to read events.jsonl after the tailer returns."""
+    cfg = cfg_factory(FAKE_STRIX_SUCCESS)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    # _upload_run_artifacts walks the run dir and uploads events.jsonl. If the
+    # tailer were still holding it open, the upload would either fail (Win32)
+    # or read a half-flushed buffer (POSIX). Asserting the artifact uploaded
+    # with non-zero size is a proxy for "the file was readable post-tailer".
+    events_uploads = [u for u in sb.uploads if u["path"].endswith("/events.jsonl")]
+    assert len(events_uploads) == 1
+    assert events_uploads[0]["size"] > 0

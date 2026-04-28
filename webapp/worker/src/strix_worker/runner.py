@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 SCAN_ARTIFACTS_BUCKET = "scan-artifacts"
 
+# Event types from Strix's events.jsonl that we DON'T re-emit into scan_events.
+# - finding.created: we ingest findings via the markdown files in
+#   `vulnerabilities/` and call `worker_insert_finding` (which itself emits a
+#   finding.created scan_event). Streaming the raw events.jsonl version too
+#   would double up the timeline.
+# - chat.message: every LLM round-trip's full content. Way too noisy for the
+#   scan UI; the structured agent / tool events convey the same information.
+_TAILER_SKIP_EVENT_TYPES = frozenset({"finding.created", "chat.message"})
+
 
 # Strix renders its final stats panel through Rich. In a headless run it's
 # still plain ASCII, but every value is humanised by `format_token_count`
@@ -136,21 +145,29 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 {"cmd": cmd, "env_keys": sorted(env.keys())},
             )
 
+            workdir = _make_run_workdir(scan_id)
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 env={**os.environ, **env},
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=_make_run_workdir(scan_id),
+                cwd=workdir,
             )
 
+            tailer_stop = asyncio.Event()
             stdout_task = asyncio.create_task(
                 _stream_logs(sb, scan_id, proc.stdout, "stdout", stats)
             )
             stderr_task = asyncio.create_task(_stream_logs(sb, scan_id, proc.stderr, "stderr"))
+            events_task = asyncio.create_task(
+                _stream_events_jsonl(sb, scan_id, workdir, tailer_stop)
+            )
 
             exit_code = await proc.wait()
-            await asyncio.gather(stdout_task, stderr_task)
+            tailer_stop.set()
+            # Gather all readers before upload; the tailer must close events.jsonl
+            # before _upload_run_artifacts reads it from disk.
+            await asyncio.gather(stdout_task, stderr_task, events_task)
 
         # Strix's exit code convention: 0 = completed with no findings,
         # 2 = completed with findings. Anything else is a real failure.
@@ -284,6 +301,110 @@ async def _stream_logs(
                     stats.feed(text)
         except Exception as e:  # noqa: BLE001
             logger.warning("failed to emit log line: %s", e)
+
+
+async def _stream_events_jsonl(
+    sb: WorkerSupabase,
+    scan_id: str,
+    workdir: str,
+    stop_event: asyncio.Event,
+) -> None:
+    """Tail Strix's events.jsonl as it's written, mirror events into scan_events.
+
+    Strix emits a structured event stream (agent.created, tool.execution.started,
+    run.configured, etc.) to `<cwd>/strix_runs/<run_name>/events.jsonl`. The file
+    is uploaded as an artifact at scan exit, but until that point the only live
+    signal in the UI is raw stdout. This coroutine bridges that gap: it
+    discovers the run dir (we don't know the run_name ahead of time), then
+    tails the file line by line and re-emits each event into `scan_events`.
+
+    Cooperative shutdown: caller sets `stop_event` after `proc.wait()` returns.
+    The tailer drains any remaining lines and closes the file before returning,
+    so `_upload_run_artifacts` reads from a closed handle.
+    """
+    runs_root = Path(workdir) / "strix_runs"
+    events_path: Path | None = None
+
+    # Phase 1: discovery. Poll until events.jsonl appears or the run is over.
+    # Bound the wait so a Strix that hangs before opening the file doesn't
+    # pin this task forever.
+    discovery_deadline = asyncio.get_event_loop().time() + 60.0
+    while events_path is None:
+        if runs_root.exists():
+            for cand in runs_root.glob("*/events.jsonl"):
+                events_path = cand
+                break
+        if events_path is not None:
+            break
+        if stop_event.is_set():
+            # Final glob after the process exits.
+            if runs_root.exists():
+                for cand in runs_root.glob("*/events.jsonl"):
+                    events_path = cand
+                    break
+            break
+        if asyncio.get_event_loop().time() > discovery_deadline:
+            logger.info("events.jsonl never appeared for scan %s within 60s", scan_id)
+            return
+        try:
+            await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
+
+    if events_path is None:
+        return
+
+    # Phase 2: tail. Read from byte 0, hold a buffer for partial trailing lines.
+    buf = ""
+    try:
+        with events_path.open("r", encoding="utf-8", errors="replace") as fh:
+            while True:
+                chunk = fh.read()
+                if chunk:
+                    buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        _emit_jsonl_line(sb, scan_id, line)
+                if stop_event.is_set():
+                    # Drain remaining bytes (Strix writes the final events
+                    # right before exit, so a final read is required).
+                    chunk = fh.read()
+                    if chunk:
+                        buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        _emit_jsonl_line(sb, scan_id, line)
+                    if buf.strip():
+                        _emit_jsonl_line(sb, scan_id, buf)
+                        buf = ""
+                    return
+                try:
+                    await asyncio.sleep(0.25)
+                except asyncio.CancelledError:
+                    return
+    except Exception:  # noqa: BLE001
+        # A tailer crash must never short-circuit upload / finish_scan.
+        logger.exception("events.jsonl tailer crashed for scan %s", scan_id)
+
+
+def _emit_jsonl_line(sb: WorkerSupabase, scan_id: str, raw: str) -> None:
+    """Parse one JSONL line, decide whether to forward it, and emit."""
+    line = raw.strip()
+    if not line:
+        return
+    try:
+        rec = json.loads(line)
+    except json.JSONDecodeError:
+        logger.debug("malformed events.jsonl line for scan %s: %r", scan_id, line[:200])
+        return
+    event_type = rec.get("event_type")
+    if not event_type or event_type in _TAILER_SKIP_EVENT_TYPES:
+        return
+    try:
+        sb.emit_event(scan_id, event_type, rec)
+    except Exception as e:  # noqa: BLE001
+        # One bad insert shouldn't halt the whole tailer.
+        logger.warning("failed to emit %s for scan %s: %s", event_type, scan_id, e)
 
 
 async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -> None:

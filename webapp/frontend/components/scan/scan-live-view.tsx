@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
 import EventRow from '@/components/scan/event-row';
+import SecurityReview from '@/components/scan/security-review';
 
 interface Props {
   scanId: string;
@@ -75,6 +76,7 @@ export default function ScanLiveView({ scanId, initialStatus }: Props) {
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [showEvents, setShowEvents] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +184,9 @@ export default function ScanLiveView({ scanId, initialStatus }: Props) {
         </div>
       </section>
 
+      {/* Security review — agents, tools, and attack surface from events.jsonl */}
+      <SecurityReview events={events} />
+
       {/* Findings */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
@@ -209,35 +214,58 @@ export default function ScanLiveView({ scanId, initialStatus }: Props) {
         )}
       </section>
 
-      {/* Live activity (collapsible) */}
+      {/* Live activity (collapsible). Stdout `log` lines are noisy line-noise
+          (Strix renders a Rich panel that streams hundreds of lines), so we
+          hide them by default. The toggle restores the original verbose view. */}
       <section className="overflow-hidden rounded-xl border border-neutral-800/80 bg-neutral-900/30">
-        <button
-          type="button"
-          onClick={() => setShowEvents((v) => !v)}
-          className="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-neutral-900/50"
-        >
-          <div className="flex items-center gap-2.5">
+        <div className="flex w-full items-center justify-between px-5 py-3">
+          <button
+            type="button"
+            onClick={() => setShowEvents((v) => !v)}
+            className="flex items-center gap-2.5 text-left transition-colors hover:opacity-80"
+          >
             <Activity className="h-4 w-4 text-neutral-400" strokeWidth={2} />
             <span className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
               Live activity
             </span>
             <span className="rounded-md bg-neutral-800 px-2 py-0.5 text-[10px] font-medium text-neutral-400">
-              {events.length} events
+              {showLogs
+                ? `${events.length} events`
+                : `${events.filter((e) => e.event_type !== 'log').length} events · ${events.filter((e) => e.event_type === 'log').length} logs hidden`}
             </span>
+          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowLogs((v) => !v)}
+              className="text-[11px] text-neutral-500 transition-colors hover:text-cyan-300"
+            >
+              {showLogs ? 'Hide raw logs' : 'Show raw logs'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEvents((v) => !v)}
+              className="text-xs text-neutral-500 transition-colors hover:text-neutral-300"
+            >
+              {showEvents ? 'Hide timeline ▲' : 'Show timeline ▼'}
+            </button>
           </div>
-          <span className="text-xs text-neutral-500">
-            {showEvents ? 'Hide timeline ▲' : 'Show timeline ▼'}
-          </span>
-        </button>
+        </div>
         {showEvents && (
           <div className="max-h-[60vh] overflow-y-auto border-t border-neutral-800/60 bg-neutral-950/40">
-            {events.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm text-neutral-500">
-                Waiting for events…
-              </div>
-            ) : (
-              events.map((e) => <EventRow key={e.id} event={e} />)
-            )}
+            {(() => {
+              const visible = showLogs ? events : events.filter((e) => e.event_type !== 'log');
+              if (visible.length === 0) {
+                return (
+                  <div className="px-5 py-8 text-center text-sm text-neutral-500">
+                    {events.length === 0
+                      ? 'Waiting for events…'
+                      : 'No structured events yet — toggle "Show raw logs" to see Strix\'s stdout.'}
+                  </div>
+                );
+              }
+              return visible.map((e) => <EventRow key={e.id} event={e} />);
+            })()}
           </div>
         )}
       </section>
