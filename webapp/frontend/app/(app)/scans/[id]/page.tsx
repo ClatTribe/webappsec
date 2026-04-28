@@ -90,8 +90,10 @@ export default async function ScanDetailPage({ params }: Props) {
         />
         <StatTile
           icon={Cpu}
-          label="Agents"
+          label="AI agents"
           value={scan.agents_count != null ? String(scan.agents_count) : '0'}
+          hint="See what each one tested ↓"
+          href="#agents"
           accent="emerald"
         />
       </section>
@@ -122,7 +124,11 @@ export default async function ScanDetailPage({ params }: Props) {
         </section>
       )}
 
-      <ScanLiveView scanId={params.id} initialStatus={scan.status} />
+      <ScanLiveView
+        scanId={params.id}
+        initialStatus={scan.status}
+        agentsCount={scan.agents_count ?? 0}
+      />
     </div>
   );
 }
@@ -139,15 +145,19 @@ function StatTile({
   label,
   value,
   accent,
+  hint,
+  href,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   accent: keyof typeof ACCENTS;
+  hint?: string;
+  href?: string;
 }) {
   const cls = ACCENTS[accent];
-  return (
-    <div className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
+  const body = (
+    <>
       <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
         <Icon className={`h-3 w-3 ${cls.split(' ')[0]}`} strokeWidth={2.25} />
         {label}
@@ -155,6 +165,21 @@ function StatTile({
       <div className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-neutral-100">
         {value}
       </div>
-    </div>
+      {hint && (
+        <div className="mt-1 text-[10.5px] leading-snug text-neutral-500 transition-colors group-hover:text-cyan-300/80">
+          {hint}
+        </div>
+      )}
+    </>
   );
+  const wrapperCls =
+    'group block rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3 transition-colors';
+  if (href) {
+    return (
+      <Link href={href} className={`${wrapperCls} hover:border-neutral-700`}>
+        {body}
+      </Link>
+    );
+  }
+  return <div className={wrapperCls}>{body}</div>;
 }

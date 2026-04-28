@@ -8,10 +8,12 @@ import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
 import FindingsSummary from '@/components/scan/findings-summary';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
+import AgentsSection from '@/components/scan/agents-section';
 
 interface Props {
   scanId: string;
   initialStatus: ScanStatus;
+  agentsCount?: number | null;
 }
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
@@ -70,7 +72,7 @@ const STATUS_THEME: Record<
   },
 };
 
-export default function ScanLiveView({ scanId, initialStatus }: Props) {
+export default function ScanLiveView({ scanId, initialStatus, agentsCount }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
   const [events, setEvents] = useState<ScanEvent[]>([]);
@@ -181,6 +183,9 @@ export default function ScanLiveView({ scanId, initialStatus }: Props) {
           ))}
         </div>
       </section>
+
+      {/* AI investigators — explains what an "agent" is and lists each one. */}
+      <AgentsSection events={events} expectedCount={agentsCount ?? 0} />
 
       {/* What we found — categorised summary of the findings, in plain language. */}
       <FindingsSummary findings={findings} status={status} />
