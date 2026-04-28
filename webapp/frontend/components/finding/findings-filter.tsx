@@ -25,20 +25,30 @@ const SEVERITY_RANK: Record<string, number> = {
   info: 4,
 };
 
-type ViewMode = 'urgent' | 'all_open' | 'all';
+type ViewMode = 'urgent' | 'open' | 'all';
 
 const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
   {
     value: 'urgent',
-    label: 'Urgent',
-    help: 'AI says fix-now or fix-soon, hides dismissed/resolved.',
+    label: 'Urgent only',
+    help: 'AI says fix-now or fix-soon, hides everything else.',
   },
-  { value: 'all_open', label: 'Open', help: 'Anything not yet fixed/dismissed.' },
-  { value: 'all', label: 'All', help: 'Including dismissed and resolved.' },
+  {
+    value: 'open',
+    label: 'Open',
+    help: 'Anything not yet fixed / dismissed / wont-fix.',
+  },
+  {
+    value: 'all',
+    label: 'All',
+    help: 'Including resolved and AI-dismissed findings.',
+  },
 ];
 
 export default function FindingsFilter({ findings }: { findings: FindingWithScan[] }) {
-  const [view, setView] = useState<ViewMode>('urgent');
+  // Default to "Open" — users land on /findings expecting to see their findings,
+  // not a curated "AI urgent" subset. Urgent is still one click away.
+  const [view, setView] = useState<ViewMode>('open');
 
   const sorted = useMemo(() => {
     const arr = [...findings];
@@ -56,16 +66,14 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   const visible = useMemo(() => {
     return sorted.filter((f) => {
       const isResolved = RESOLVED_STATUSES.has(f.status);
-      const aiSaysDismiss = f.ai_assessment?.urgency === 'dismiss';
       if (view === 'all') return true;
-      if (view === 'all_open') return !isResolved;
-      // 'urgent': AI says fix_now or fix_soon AND not resolved AND not dismissed.
+      if (view === 'open') return !isResolved;
+      // 'urgent': AI says fix_now or fix_soon AND not resolved.
       const u = f.ai_assessment?.urgency;
       if (u && (u === 'fix_now' || u === 'fix_soon')) return !isResolved;
       // No AI assessment yet → fall back to severity, surface critical/high.
       if (!f.ai_assessment && (f.severity === 'critical' || f.severity === 'high'))
         return !isResolved;
-      if (aiSaysDismiss) return false;
       return false;
     });
   }, [sorted, view]);
@@ -141,10 +149,23 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
 
       <div className="space-y-3">
         {visible.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/20 px-6 py-10 text-center text-sm text-neutral-400">
-            {view === 'urgent'
-              ? 'No urgent findings — nothing the AI thinks needs immediate action.'
-              : 'No findings match the current filter.'}
+          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/20 px-6 py-10 text-center">
+            <p className="text-sm text-neutral-300">
+              {view === 'urgent'
+                ? 'No urgent findings — nothing the AI thinks needs immediate action.'
+                : view === 'open'
+                ? 'No open findings — everything has been triaged.'
+                : 'No findings match the current filter.'}
+            </p>
+            {findings.length > 0 && view !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setView('all')}
+                className="mt-3 text-xs text-cyan-300 hover:underline"
+              >
+                Show all {findings.length} (including resolved & dismissed) →
+              </button>
+            )}
           </div>
         ) : (
           visible.map((f) => (
