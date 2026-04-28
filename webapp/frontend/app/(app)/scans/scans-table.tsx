@@ -90,6 +90,7 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold">Mode</th>
                 <th className="px-5 py-3 font-semibold">Cost</th>
+                <th className="px-5 py-3 font-semibold">Tokens</th>
                 <th className="px-5 py-3 font-semibold">Started</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -130,8 +131,20 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-neutral-300">{scan.scan_mode}</td>
-                    <td className="px-5 py-3.5 text-neutral-400">
-                      ${scan.total_cost?.toFixed(2) ?? '0.00'}
+                    <td className="px-5 py-3.5 font-mono tabular-nums text-neutral-200">
+                      {scan.total_cost && Number(scan.total_cost) > 0
+                        ? `$${Number(scan.total_cost).toFixed(4)}`
+                        : <span className="text-neutral-600">—</span>}
+                    </td>
+                    <td className="px-5 py-3.5 font-mono tabular-nums text-neutral-400">
+                      {(() => {
+                        const total =
+                          (scan.total_input_tokens ?? 0) + (scan.total_output_tokens ?? 0);
+                        if (!total) return <span className="text-neutral-600">—</span>;
+                        if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(2)}M`;
+                        if (total >= 1_000) return `${(total / 1_000).toFixed(1)}K`;
+                        return String(total);
+                      })()}
                     </td>
                     <td className="px-5 py-3.5 text-neutral-400">
                       {scan.started_at ? (
