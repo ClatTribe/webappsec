@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ShieldCheck, ArrowRight, Code2 as GithubIcon } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 const NAV_LINKS = [
   { href: '/pricing', label: 'Pricing' },
@@ -9,15 +9,35 @@ const NAV_LINKS = [
   { href: '/about', label: 'About' },
 ];
 
+export function BrandMark({ size = 'sm' }: { size?: 'sm' | 'md' }) {
+  const dim = size === 'md' ? 'h-9 w-9 text-base' : 'h-8 w-8 text-sm';
+  return (
+    <span
+      className={`flex flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 font-mono font-semibold text-white shadow-lg shadow-cyan-500/30 ${dim}`}
+      aria-hidden
+    >
+      y.
+    </span>
+  );
+}
+
+export function BrandLockup({ className = '' }: { className?: string }) {
+  return (
+    <span className={`flex items-center gap-2.5 ${className}`}>
+      <BrandMark />
+      <span className="text-base font-semibold tracking-tight">
+        your <span className="text-cyan-300">AI</span> security engineer
+      </span>
+    </span>
+  );
+}
+
 export function MarketingNav() {
   return (
     <nav className="sticky top-0 z-30 border-b border-neutral-900/60 bg-neutral-950/60 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30">
-            <ShieldCheck className="h-5 w-5 text-white" strokeWidth={2.5} />
-          </div>
-          <span className="text-base font-semibold tracking-tight">Strix</span>
+        <Link href="/" className="block">
+          <BrandLockup />
         </Link>
         <div className="hidden items-center gap-1 md:flex">
           {NAV_LINKS.map((l) => (
@@ -31,15 +51,6 @@ export function MarketingNav() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white sm:inline-flex"
-          >
-            <GithubIcon className="h-4 w-4" />
-            GitHub
-          </Link>
           <Link
             href="/login"
             className="rounded-md px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:text-white"
@@ -65,24 +76,15 @@ export function MarketingFooter() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
           <div className="lg:col-span-2">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-cyan-500 to-blue-600">
-                <ShieldCheck className="h-4 w-4 text-white" strokeWidth={2.5} />
-              </div>
-              <span className="text-sm font-semibold">Strix</span>
+            <Link href="/" className="block">
+              <span className="flex items-center gap-2">
+                <BrandMark />
+                <span className="text-sm font-semibold">your AI security engineer</span>
+              </span>
             </Link>
             <p className="mt-3 max-w-xs text-xs leading-relaxed text-neutral-500">
-              AI-powered application security for teams that don't have a red team. Built on the
-              open-source{' '}
-              <a
-                href="https://github.com/usestrix/strix"
-                target="_blank"
-                rel="noreferrer"
-                className="text-neutral-400 hover:text-white"
-              >
-                Strix agent
-              </a>
-              .
+              An AI security engineer that finds real vulnerabilities and learns from your triage to
+              eliminate false positives over time.
             </p>
           </div>
           <FooterColumn
@@ -111,19 +113,10 @@ export function MarketingFooter() {
             ]}
           />
         </div>
-        <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-neutral-900/80 pt-6 sm:flex-row sm:items-center">
+        <div className="mt-10 border-t border-neutral-900/80 pt-6">
           <p className="text-[11px] text-neutral-600">
-            © {new Date().getFullYear()} Strix. Open-source under Apache-2.0.
+            © {new Date().getFullYear()} youraisecurityengineer. All rights reserved.
           </p>
-          <a
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-[11px] text-neutral-500 hover:text-neutral-300"
-          >
-            <GithubIcon className="h-3 w-3" />
-            ClatTribe/webappsec
-          </a>
         </div>
       </div>
     </footer>

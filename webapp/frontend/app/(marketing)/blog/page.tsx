@@ -4,9 +4,9 @@ import type { Metadata } from 'next';
 import { getAllPosts } from './posts';
 
 export const metadata: Metadata = {
-  title: 'Blog — Strix',
+  title: 'Blog — your AI security engineer',
   description:
-    'Notes from the team building Strix. Engineering, product, application-security writing — no growth-hack listicles.',
+    'Notes from the team. Engineering, product, application-security writing — no growth-hack listicles.',
 };
 
 export default function BlogIndex() {

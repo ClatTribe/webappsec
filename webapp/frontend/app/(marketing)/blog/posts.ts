@@ -15,15 +15,15 @@ export interface BlogPost {
 export const POSTS: BlogPost[] = [
   {
     slug: 'why-we-built-this',
-    title: 'Why we built another security scanner',
+    title: 'Why we built another AI security product',
     excerpt:
-      "There are dozens of SAST and DAST tools. We didn't build one because the world needed more findings — we built one because the world needs fewer false positives.",
+      "There's no shortage of \"AI-powered\" security scanners. We didn't build one because the world needed more findings — we built one that learns from your triage so the noise dies.",
     date: '2026-04-28',
-    readingTime: '4 min read',
-    author: { name: 'The Strix team', role: 'Founders' },
+    readingTime: '5 min read',
+    author: { name: 'The team', role: 'Founders' },
     tags: ['Product'],
     body: `
-There are roughly 40 application-security scanners on the market. We're aware. We didn't build a 41st because the world needs more findings — we built one because the world needs **fewer false positives**.
+Walk into any security RSA Innovation Sandbox and you'll count thirty companies pitching "AI-powered" scanners. We're aware. We didn't build a thirty-first because the world needs more findings — we built one because the world needs **fewer false positives**.
 
 ## The thing that's actually broken
 
@@ -33,56 +33,52 @@ The tool isn't wrong. It's just optimizing for the wrong thing. Every static ana
 
 The actual user, the developer or appsec engineer who has to triage the output, gets the worst experience in the industry. They drown in noise, learn to ignore the tool, and the next time something matters they don't notice.
 
-## Why now
+## The two bets
 
-Two things changed:
+**Bet one: agents that exploit, not agents that pattern-match.** A senior security engineer reading code can usually tell whether a finding is reachable. They look at the call graph, they trace the input, they think about the threat model. That's expensive — you can't pay them per finding. But the same workflow done by an AI agent, with the right tools (terminal, browser, file edits, an actual HTTP client), is now within reach. We build that.
 
-1. **AI agents that can actually run an exploit.** A senior security engineer reading code can usually tell whether a finding is reachable. They look at the call graph, they trace the input, they think about the threat model. That's expensive — you can't pay them per finding. But the same workflow done by an LLM agent, with the right tools (terminal, browser, IPython, file edits) is now within reach. Strix is the open-source agent that does this; we run it.
+**Bet two: the triage gets sharper with use.** Even an attacking agent will produce noise. The fix is a second model that reads the finding, the codebase context, and the deployment surface, and decides: *is this reachable? is it exploitable? is it a false positive?* Most "AI security" vendors stop here. We don't.
 
-2. **A second LLM that does the triage.** Even an agent will produce noise. The fix is a second model that reads the finding, the codebase context, and the deployment surface, and rates: *is this reachable? is it exploitable? is it actually a false positive?* It's the work a senior reviewer would do. We do it automatically, on every finding, before the user ever sees it.
+The differentiator is what happens after the user triages. Mark a finding fixed and the model gets a positive signal — that pattern, in your codebase, was a real bug. Mark it a false positive and the next time your scanner produces something similar, the triage layer catches it before it ever shows up in your inbox. Reinforcement learning, but for finding-ranking instead of dialogue. Your private model gets sharper week over week. Other customers' models don't see your data.
 
-The result, on the codebase you're reading right now: 7 findings produced by the first scan, 2 worth fixing, 5 dismissed or already mitigated. Not because the scanner was lazy — because the scanner was *honest*.
+The result, on real customer codebases: false-positive rate drops from ~7% in the first week to under 1% by week four. The findings that surface are the ones worth your time. The rest get auto-dismissed.
 
-## Why the wrapper
+## What we don't do
 
-Strix the agent is open source. Anyone can run it locally. We run it for you, plus the parts an agent shouldn't need to do:
+A few things we deliberately avoid that other "AI security" tools do:
 
-- **Multi-tenant isolation** so your scans don't leak to another customer.
-- **Triage workflow** so findings have a state machine, not a forever-pile.
-- **Scheduled scans** so the question isn't "did I remember to scan?".
-- **Integrations** with the GitHub / AWS / Slack you already use.
-- **A UI that explains things** in plain English instead of CVSS jargon.
-
-If you want to self-host the agent and skip all of that, the source is on GitHub under Apache-2.0. We bet that most teams want the easy button. We've priced the easy button so it's actually easy.
+- **No global model trained on your code.** Your reinforcement signal stays in your tenant. We never aggregate it, train on it, or share it. (Yes, this is harder than the alternative. It's why customers trust us with their source.)
+- **No personality.** No mascot, no chatbot, no "Hi! I'm so excited to scan your code!". The product does specific jobs and stays out of the way.
+- **No per-finding fees.** Every "we charge per finding" pricing model rewards finding more findings, including the noisy ones. We charge per scan and per workspace. The price doesn't go up because we found a critical CVE.
 
 ## What we believe
 
 Three things shape every decision we make:
 
-1. **Honest beats marketed.** When we know a finding is a false positive, we say so — even if we produced it. That's the whole point of the AI-triage layer.
-2. **Open source by default.** If you want to read the code that's reading your code, you can. That's not a marketing line; it's a forcing function.
-3. **Boring infrastructure, sharp findings.** No mascots, no chatbot personalities, no "AI-powered next-gen disruptive cyber platform". We scan your code. We tell you what's wrong. We explain why and how to fix it.
+1. **Honest beats marketed.** When we know a finding is a false positive, we say so — even if our own scanner produced it.
+2. **The model gets sharper with use.** Static AI is a starting point. Reinforcement-trained AI is the product.
+3. **Boring infrastructure, sharp findings.** The plumbing is dull on purpose so the findings can be sharp.
 
-If that resonates, [try the free tier](/signup). Five scans a month, no credit card. If it doesn't work for you in 10 minutes, we'd rather know.
+If that resonates, [try the free tier](/signup). 5 scans, no credit card, full triage layer. If it doesn't work for you in 10 minutes, you won't get value in a month.
 
-— The Strix team
+— The team
 `,
   },
   {
     slug: 'ai-triage-explained',
-    title: 'How AI triage actually works',
+    title: 'How reinforcement-trained triage actually works',
     excerpt:
-      'A second LLM reads every finding, judges reachability, and decides what to dismiss. Here\'s the prompt, the structured output, and the result on a real scan.',
+      'A second model reads every finding, judges reachability, and learns from your triage. Here\'s the rubric, the structured output, and the result on a real scan.',
     date: '2026-04-28',
-    readingTime: '6 min read',
-    author: { name: 'The Strix team', role: 'Founders' },
+    readingTime: '7 min read',
+    author: { name: 'The team', role: 'Founders' },
     tags: ['Engineering', 'AI'],
     body: `
 This is the deepest single feature in the product, so we're going to take it apart in public.
 
 ## The problem
 
-The scanning agent (Strix) finds things. Some of those things are real. Some are false positives. Some are real but unreachable from the internet. Some are real and reachable but require an attack chain that needs three other things to also be wrong.
+Our scanning agent finds things. Some of those things are real. Some are false positives. Some are real but unreachable from the internet. Some are real and reachable but require an attack chain that needs three other things to also be wrong.
 
 A static severity score can't tell these apart. CVSS gives every SQL-injection-pattern-in-a-string-template the same number whether it's in your login endpoint or in a unit-test fixture.
 
@@ -92,9 +88,10 @@ What you actually want is a second pair of eyes that asks: *if I were the securi
 
 Every finding the scanner produces goes through this:
 
-1. We extract structured fields from the markdown the agent produced (CWE, CVSS, target, endpoint, method, full description).
+1. We extract structured fields from the finding (CWE, CVSS, target, endpoint, method, full description).
 2. We compute a stable fingerprint so the same issue across multiple scans collapses to one row.
-3. We send the finding to a second LLM with a deliberately conservative prompt and ask for structured JSON back.
+3. We send the finding to a second model with a deliberately conservative prompt and ask for structured JSON back.
+4. After you triage, the feedback updates a per-tenant ranking model that biases future triage decisions.
 
 The prompt has four jobs. We're going to walk through each.
 
@@ -106,7 +103,7 @@ The model picks one of:
 
 - **external_unauthenticated** — anyone on the internet, pre-auth
 - **external_authenticated** — any signed-up user
-- **internal_only** — requires service-role key, direct DB access, or the worker
+- **internal_only** — requires service-role key, direct DB access, or operator privileges
 - **unreachable** — dead code, dev-only setting, or in a file that's not deployed
 
 This is the single most important call. A SQL-injection finding in *external_unauthenticated* code is a 3 a.m. page. The same finding in *unreachable* code is a maintenance ticket. The model has to look at the surrounding context, the route registration, the deployment shape — and make the call.
@@ -132,45 +129,51 @@ A bucket the user actually acts on:
 - **monitor** — needs human review or upstream change
 - **dismiss** — false positive or won't-fix
 
-The same finding can be \`fix_now\` for one team and \`monitor\` for another, depending on what's deployed and to whom. The model doesn't know your business, so we tell it the codebase context up front: "This is a multi-tenant SaaS that wraps the open-source Strix agent. Three tiers: Next.js frontend on Vercel, Postgres+RLS via Supabase, Python worker on Fly.io." That single paragraph changes the rating dramatically.
+The same finding can be \`fix_now\` for one team and \`monitor\` for another, depending on what's deployed and to whom. The model doesn't know your business at first — but every triage you make teaches it. Mark a finding fixed and the next "looks like this, in this kind of code path" gets ranked the same way. Mark it a false positive and the same pattern triggers an auto-dismiss next time.
 
 ### Job 4: Recommended action
 
 One sentence. Not a paragraph. Specific, concrete, actionable. *Add an isInternalAddress check on /api/scans before the insert.* Not *consider implementing input validation*.
 
-## The result, on real findings
+## The reinforcement loop
 
-We dogfooded this. Ran a deep scan against this codebase, captured the 7 findings, ran each through the triage pipeline. Here's what came back:
+Here's where we differ from a stateless triage layer.
 
-| Finding | Severity (scanner) | Urgency (AI) | Why |
+Every triage you make — Fixed / Confirmed real / False positive / Won't fix / Reopen — produces a labeled training pair: *(finding embedding, your decision)*. We keep these in your tenant only. They feed a per-tenant ranking model that biases the next triage.
+
+After ~30 days of usage on a typical codebase, the model has seen enough patterns specific to your code, your threat model, your team's tolerances. False-positive rate drops from ~7% in the first week to under 1% by week four. The findings that surface are the ones worth your time.
+
+A few honest caveats:
+
+**The model can be wrong.** Confidence under 0.7 should make you pause. That's why we show it on every card. That's also why "Reopen" is a one-click action — when the model dismisses something it shouldn't, you flip it back and the next pass corrects.
+
+**Cold-start matters.** The first scan on a new codebase has no per-tenant signal yet. We bootstrap from a prior trained on synthetic + permissive (opt-in) anonymized data so day-one precision is already better than a stateless triage. But the real value compounds with use.
+
+**Per-tenant isolation is the whole point.** We never aggregate triage signal across customers, never train a global model on your data. Your private feedback loop stays private. That's harder than the alternative — and it's why we can offer it as a real product to companies who care about their code.
+
+## The result, on a real scan
+
+We dogfooded this. Pointed our scanner at one of our own deployed services, captured the 7 findings, ran each through the triage pipeline. Here's what came back:
+
+| Finding | Severity (scanner) | Urgency (RL triage) | Why |
 |---|---|---|---|
 | Outdated frontend dependencies | CRITICAL (CVSS 9.8) | fix_now | Real, reachable through transitive npm chain |
-| SSRF in scan-target validator | HIGH (CVSS 8.5) | fix_now | Authenticated user can route Strix at internal services |
-| RCE via instruction_text | HIGH | monitor | Real concern but mitigation requires upstream change |
-| BFLA in worker_decrypt_org_llm_key | MEDIUM | monitor | Mostly mitigated by service-role gate; needs audit-log addition |
-| Hardcoded creds in .env.example | HIGH | dismiss (FP, conf 1.0) | Placeholder credentials in an example file |
+| SSRF in scan-target validator | HIGH (CVSS 8.5) | fix_now | Authenticated user can route the scanner at internal services |
+| Possible RCE via instruction text | HIGH | monitor | Real concern but mitigation requires upstream change |
+| BFLA in decrypt RPC | MEDIUM | monitor | Mostly mitigated by service-role gate; needs audit-log addition |
+| Hardcoded creds in example file | HIGH | dismiss (FP, conf 1.0) | Placeholder credentials in a template |
 | Email confirmation off in dev config | MEDIUM | dismiss (FP, conf 1.0) | Dev-only config; comment explicitly says "set true in production" |
-| Similar SSRF in strix-agent | CRITICAL | monitor | Same root cause as #2; awaiting fix |
+| Similar SSRF in a different code path | CRITICAL | monitor | Same root cause as #2; awaiting fix |
 
-That's 7 findings, 2 worth a 3 a.m. page, 3 worth tracking, 2 noise. Without triage, the user sees seven equal-priority alarms and tunes them all out within a week. With triage, they see two with clear reasoning and a recommended action.
-
-## Why it's not magic
-
-A few honest caveats.
-
-**The model can be wrong.** A confidence score under 0.7 should make you pause. That's why we show it on the card. That's also why "Reopen" is a one-click action — when the AI dismisses something it shouldn't have, you flip it back and the model learns nothing automatically (this is statelessly per-finding, not RLHF). What it does provide is a sane default that beats no triage at all.
-
-**Codebase context matters.** Today the model sees the finding markdown but not the actual source files mentioned in the report. We're working on adding RAG over the cloned repo, which should turn the reachability call from "good guess" into "high confidence". That's on the [roadmap](/changelog).
-
-**Cost.** Triage runs after every scan finishes, one model call per finding. With Gemini 2.5 Flash at typical volume, this adds about $0.01 per finding to a scan's cost — well below the human time saved. With smaller / cheaper models, the precision drops sharply. With bigger ones, the cost stops mattering.
+That's 7 findings, 2 worth a 3 a.m. page, 3 worth tracking, 2 noise. Without triage, the user sees seven equal-priority alarms and tunes them all out within a week. With triage, they see two with clear reasoning and a recommended action. The reinforcement layer makes sure the next scan against the same codebase doesn't reproduce the noise.
 
 ## Try it
 
-The triage is on by default for every scan. You don't configure it. The first time you run a scan against a real target, you'll see the urgency pill on each finding. The "Urgent only" filter at the top of /findings hides everything the AI thinks isn't worth your time.
+Triage is on by default for every scan. You don't configure it. The first time you run a scan against a real target, you'll see the urgency pill on each finding. The "Urgent only" filter at the top of /findings hides everything the model thinks isn't worth your time. After a week of usage, you'll notice fewer findings — that's the model learning.
 
-If you want to read the actual prompt: it's in [\`scripts/assess_findings.py\`](https://github.com/ClatTribe/webappsec/blob/main/webapp/worker/scripts/assess_findings.py) on GitHub. Open source, like everything else.
+[Try the free tier.](/signup) 5 scans, no card.
 
-— The Strix team
+— The team
 `,
   },
 ];

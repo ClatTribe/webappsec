@@ -15,9 +15,9 @@ import type { LucideIcon } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Security & Trust — Strix',
+  title: 'Security & Trust — your AI security engineer',
   description:
-    'How Strix isolates tenant data, encrypts secrets, and protects your code. Built to shorten the security review from 30 days to 1.',
+    'How we isolate tenant data, encrypt secrets, and protect your code. Built to shorten the security review from 30 days to 1.',
 };
 
 const PILLARS: { Icon: LucideIcon; title: string; bullets: string[] }[] = [
@@ -93,11 +93,11 @@ const PROCESS: { title: string; body: string }[] = [
   },
   {
     title: 'We scan ourselves',
-    body: 'We run Strix against this codebase regularly. Two real bugs in this repo were caught and fixed by a Strix scan; you can read about them in our changelog.',
+    body: 'We point our own AI security engineer at our own codebase regularly. Two real bugs in our service were caught and fixed by an internal scan; you can read about them in the changelog.',
   },
   {
-    title: 'Open source, by default',
-    body: 'The whole stack is on GitHub under Apache-2.0. Anyone — including you — can audit how isolation, encryption, and credential handling actually work. No security through obscurity.',
+    title: 'Per-tenant model isolation',
+    body: 'Your reinforcement-learning triage model lives in your tenant only. We never aggregate, share, or train a global model on your triage signal. Your private feedback loop stays private.',
   },
 ];
 
@@ -128,7 +128,7 @@ export default function SecurityPage() {
       <section className="mt-12 grid gap-3 sm:grid-cols-3">
         <TrustBadge label="SOC 2 Type II" status="In progress" Icon={ShieldCheck} />
         <TrustBadge label="GDPR / CCPA" status="Compliant" Icon={FileCheck} />
-        <TrustBadge label="Open-source audit-ability" status="Apache-2.0" Icon={Code2} />
+        <TrustBadge label="Per-tenant model isolation" status="By design" Icon={Code2} />
       </section>
 
       <section className="mt-16 space-y-10">

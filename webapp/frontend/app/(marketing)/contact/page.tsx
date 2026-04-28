@@ -5,8 +5,8 @@ import Link from 'next/link';
 import {
   Mail,
   MessageCircle,
-  Code2 as GithubIcon,
   ShieldAlert,
+  Building2,
   ArrowRight,
   Loader2,
   Check,
@@ -26,13 +26,19 @@ const CHANNELS: Channel[] = [
     Icon: Mail,
     title: 'Sales & general',
     body: 'Pricing questions, custom plans, design-partner asks, anything else. We answer within 1 business day.',
-    cta: { label: 'hello@strix.example.com', href: 'mailto:hello@strix.example.com' },
+    cta: {
+      label: 'hello@youraisecurityengineer.com',
+      href: 'mailto:hello@youraisecurityengineer.com',
+    },
   },
   {
     Icon: MessageCircle,
     title: 'Support',
     body: 'Bugs, things that look broken, or "is this supposed to work?". Free-tier replies within 3 business days; Team and Business priority.',
-    cta: { label: 'support@strix.example.com', href: 'mailto:support@strix.example.com' },
+    cta: {
+      label: 'support@youraisecurityengineer.com',
+      href: 'mailto:support@youraisecurityengineer.com',
+    },
   },
   {
     Icon: ShieldAlert,
@@ -41,11 +47,13 @@ const CHANNELS: Channel[] = [
     cta: { label: 'See the disclosure policy', href: '/security/disclosure' },
   },
   {
-    Icon: GithubIcon,
-    title: 'GitHub',
-    body: 'Issues, feature requests, PRs against the open-source codebase. Public issues are fine for non-security questions.',
-    cta: { label: 'ClatTribe/webappsec', href: 'https://github.com/ClatTribe/webappsec' },
-    external: true,
+    Icon: Building2,
+    title: 'Enterprise & design partners',
+    body: 'Need SSO, SCIM, custom deployment, or a procurement-friendly contract? Let\'s talk.',
+    cta: {
+      label: 'enterprise@youraisecurityengineer.com',
+      href: 'mailto:enterprise@youraisecurityengineer.com',
+    },
   },
 ];
 
@@ -150,8 +158,8 @@ function ContactForm() {
           <h4 className="text-sm font-semibold text-white">Got it. We'll be in touch.</h4>
           <p className="mt-1 text-sm text-neutral-300">
             Reply will land in your inbox within 1 business day. Reach us at{' '}
-            <a href="mailto:hello@strix.example.com" className="text-cyan-300 hover:underline">
-              hello@strix.example.com
+            <a href="mailto:hello@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              hello@youraisecurityengineer.com
             </a>{' '}
             if you don't hear back.
           </p>

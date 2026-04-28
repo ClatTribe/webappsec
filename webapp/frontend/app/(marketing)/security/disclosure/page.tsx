@@ -4,9 +4,9 @@ import type { LucideIcon } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Responsible Disclosure — Strix',
+  title: 'Responsible Disclosure — your AI security engineer',
   description:
-    'How to report a security vulnerability in Strix. We respond within 1 business day, fix critical issues within 7, and credit responsible reporters.',
+    'How to report a security vulnerability in our service. We respond within 1 business day, fix critical issues within 7, and credit responsible reporters.',
 };
 
 const TIMELINE: { Icon: LucideIcon; label: string; body: string }[] = [
@@ -51,8 +51,9 @@ export default function DisclosurePage() {
           Found a security issue?
         </h1>
         <p className="text-lg leading-relaxed text-neutral-300">
-          We're a security tool — we'd be embarrassed if our own product had a hole. If you've
-          found one, please tell us. We'll fix it fast, give you credit, and not threaten to sue.
+          We&apos;re a security tool — we&apos;d be embarrassed if our own product had a hole. If
+          you&apos;ve found one, please tell us. We&apos;ll fix it fast, give you credit, and not
+          threaten to sue.
         </p>
       </header>
 
@@ -67,13 +68,13 @@ export default function DisclosurePage() {
               <p className="text-sm text-neutral-200">
                 Email{' '}
                 <a
-                  href="mailto:security@strix.example.com"
+                  href="mailto:security@youraisecurityengineer.com"
                   className="font-semibold text-cyan-300 hover:underline"
                 >
-                  security@strix.example.com
+                  security@youraisecurityengineer.com
                 </a>{' '}
                 with as much detail as you can: the affected endpoint or component, reproduction
-                steps, the impact you've observed, and (if you have one) a PoC.
+                steps, the impact you&apos;ve observed, and (if you have one) a PoC.
               </p>
               <p className="mt-3 text-sm text-neutral-400">
                 Encrypt sensitive details with our{' '}
@@ -85,8 +86,8 @@ export default function DisclosurePage() {
                 >
                   PGP key
                 </a>{' '}
-                (fingerprint <span className="font-mono">XXXX XXXX XXXX XXXX</span> — replace with
-                real key) if you'd prefer.
+                (fingerprint <span className="font-mono">XXXX XXXX XXXX XXXX</span>) if you&apos;d
+                prefer.
               </p>
             </div>
           </div>
@@ -121,13 +122,12 @@ export default function DisclosurePage() {
           title="In scope"
           color="emerald"
           items={[
-            'app.strix.example.com (the hosted SaaS)',
-            'github.com/ClatTribe/webappsec (the repo)',
-            'github.com/usestrix/strix (the upstream agent — also report to upstream)',
+            'app.youraisecurityengineer.com (the hosted SaaS)',
             'API authentication, authorization, and tenant-isolation issues',
             'XSS / CSRF / SSRF in the application',
-            'Improper Vault decryption or RPC org-context leaks',
+            'Improper credential storage or decryption-context leaks',
             'Sandbox-escape bugs in the worker',
+            'Issues that cross the per-tenant model-isolation boundary',
           ]}
         />
         <ScopeCard

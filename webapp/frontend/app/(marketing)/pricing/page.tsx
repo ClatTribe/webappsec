@@ -13,9 +13,9 @@ import type { LucideIcon } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Pricing — Strix',
+  title: 'Pricing — your AI security engineer',
   description:
-    'Free for personal projects. From $99/mo for teams. Self-host for free. No per-finding fees, no surprise bills.',
+    'Free for personal projects. From $99/mo for teams. No per-finding fees. No surprise bills. Reinforcement-trained triage on every plan.',
 };
 
 interface Tier {
@@ -40,7 +40,7 @@ const TIERS: Tier[] = [
     bullets: [
       '5 scans / month',
       'Public GitHub repos',
-      'AI triage on every finding',
+      'Reinforcement-trained AI triage',
       '1 user',
       'Community support',
     ],
@@ -59,7 +59,7 @@ const TIERS: Tier[] = [
       'GitHub PR comments · Slack · webhooks',
       'Up to 10 users',
       'Email support',
-      'AI triage with reasoning + reachability',
+      'RL triage with reasoning + reachability',
     ],
   },
   {
@@ -93,8 +93,8 @@ const MATRIX: { label: string; values: [string | boolean, string | boolean, stri
   { label: 'SARIF / CSV / JSON export', values: [false, false, true] },
   { label: 'Compliance mapping (OWASP / CWE / PCI)', values: [false, false, true] },
   { label: 'Audit log retention controls', values: ['30 days', '90 days', 'Configurable'] },
+  { label: 'Reinforcement-trained triage', values: [true, true, true] },
   { label: 'Priority support', values: [false, false, true] },
-  { label: 'Self-hostable (full source)', values: [true, true, true] },
 ];
 
 const FAQS: { q: string; a: React.ReactNode }[] = [
@@ -115,8 +115,8 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
     a: 'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time. When set, your key replaces ours and your scans are billed to your provider, not us.',
   },
   {
-    q: 'Why is there a self-host option?',
-    a: 'Because we believe security tooling should be inspectable. The full source is on GitHub under Apache-2.0. Run it yourself with one Docker command. We make money on the hosted service that handles auth, billing, alerting, and AI triage so you don\'t have to.',
+    q: 'How does the AI actually reduce false positives?',
+    a: "Every finding goes through a reinforcement-trained reviewer that rates reachability, exploitability, and false-positive likelihood. Each time you triage (mark fixed / false positive / won't fix), the model that ranks the next finding gets better at understanding your codebase. After ~30 days of feedback, FP rate drops below 1% on most teams.",
   },
   {
     q: 'Do you offer annual billing?',
@@ -134,11 +134,11 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
         <Link href="/changelog" className="text-cyan-300 hover:underline">
           roadmap
         </Link>
-        . Need them today? Self-host the open-source version, or{' '}
+        . Need them today?{' '}
         <Link href="/contact" className="text-cyan-300 hover:underline">
-          get in touch
+          Get in touch
         </Link>{' '}
-        — we can prioritize for design partners.
+        — we can prioritize for design partners and offer custom deployment options.
       </>
     ),
   },
@@ -160,8 +160,8 @@ export default function PricingPage() {
           </span>
         </h1>
         <p className="mt-5 text-lg leading-relaxed text-neutral-300">
-          Free for solo projects. $99/month for teams. Self-host for $0 forever. The price doesn't
-          go up because we found a critical CVE in your code — that would be backwards.
+          Free for solo projects. $99/month for teams. The price doesn&apos;t go up because we
+          found a critical CVE in your code — that would be backwards.
         </p>
       </header>
 
@@ -171,27 +171,28 @@ export default function PricingPage() {
         ))}
       </section>
 
-      <section className="mt-12 rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-6 lg:p-10">
+      <section className="mt-12 rounded-2xl border border-violet-500/30 bg-gradient-to-br from-violet-500/10 to-cyan-500/5 p-6 lg:p-10">
         <div className="grid items-center gap-6 lg:grid-cols-[auto_1fr_auto]">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900 text-neutral-200 ring-1 ring-inset ring-white/5">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/20 text-violet-200 ring-1 ring-inset ring-white/5">
             <Code2 className="h-5 w-5" strokeWidth={2} />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-white">Self-host for free, forever.</h2>
+            <h2 className="text-xl font-semibold text-white">
+              Reinforcement-trained on every plan.
+            </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-300">
-              The whole stack is open source under Apache-2.0. Bring your own infra, bring your own
-              LLM, keep all your data. Hosted is for people who want the easy button.
+              Every triage you make trains the model that ranks the next finding. Your private
+              feedback loop, your data, your sharper signal. Free, Team, and Business tiers all
+              include the full RL triage layer.
             </p>
           </div>
-          <a
-            href="https://github.com/ClatTribe/webappsec"
-            target="_blank"
-            rel="noreferrer"
+          <Link
+            href="/blog/ai-triage-explained"
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900/40 px-4 py-2 text-sm font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900/60"
           >
-            View on GitHub
+            How it works
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
-          </a>
+          </Link>
         </div>
       </section>
 

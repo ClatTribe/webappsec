@@ -2,8 +2,8 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service — Strix',
-  description: 'The terms that govern your use of Strix. Plain-English summary up top.',
+  title: 'Terms of Service — your AI security engineer',
+  description: 'The terms that govern your use of our service. Plain-English summary up top.',
 };
 
 const LAST_UPDATED = '2026-04-28';
@@ -19,7 +19,7 @@ export default function TermsPage() {
 
       <div className="mt-10 space-y-8 text-[15px] leading-relaxed text-neutral-300">
         <p className="rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4 text-sm">
-          <strong className="text-neutral-100">Plain-English summary:</strong> Use Strix only to
+          <strong className="text-neutral-100">Plain-English summary:</strong> Use the service only to
           scan things you own or have written permission to scan. Don't try to break the service.
           We try really hard to keep it running but can't promise zero downtime. If something goes
           really wrong, our liability is capped at what you've paid us. You can stop using the
@@ -28,15 +28,15 @@ export default function TermsPage() {
 
         <Section heading="1. Acceptance">
           <p>
-            By using the Strix service ("Service") at this domain, you agree to these Terms. If
-            you're using Strix on behalf of an organization, you confirm that you have the authority to bind that
+            By using the youraisecurityengineer service ("Service") at this domain, you agree to these Terms. If
+            you're using the service on behalf of an organization, you confirm that you have the authority to bind that
             organization, and "you" means the organization.
           </p>
         </Section>
 
         <Section heading="2. The service">
           <p>
-            Strix is a software-as-a-service application that runs an AI-driven security scanner
+            Our service is a software-as-a-service application that runs an AI-driven security scanner
             against targets you specify (web apps, repositories, domains, IP addresses, local code
             paths) and presents the results.
           </p>
@@ -87,8 +87,8 @@ export default function TermsPage() {
           <p>
             You are responsible for keeping your account credentials secure. Notify us immediately
             at{' '}
-            <a href="mailto:security@strix.example.com" className="text-cyan-300 hover:underline">
-              security@strix.example.com
+            <a href="mailto:security@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              security@youraisecurityengineer.com
             </a>{' '}
             of any unauthorized access. We strongly recommend MFA for owners and admins; on
             qualifying plans we may require it.
@@ -130,19 +130,21 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section heading="8. Open source">
+        <Section heading="8. Intellectual property">
           <p>
-            The Strix codebase is available under the Apache License 2.0 at{' '}
-            <a
-              href="https://github.com/ClatTribe/webappsec"
-              target="_blank"
-              rel="noreferrer"
-              className="text-cyan-300 hover:underline"
-            >
-              github.com/ClatTribe/webappsec
-            </a>
-            . You're free to self-host the open-source version under that license, separate from
-            these hosted-service Terms.
+            The Service and its underlying technology — including the AI scanning agent, the
+            reinforcement-trained triage model, the user interface, and all related software — are
+            owned by us. These Terms grant you a limited, non-exclusive, non-transferable license
+            to use the Service for the duration of your subscription.
+          </p>
+          <p>
+            You retain all rights to your Customer Data and to your tenant-specific reinforcement
+            signal. We don&apos;t aggregate, share, or train a global model on your triage data —
+            see the{' '}
+            <Link href="/privacy" className="text-cyan-300 hover:underline">
+              Privacy Policy
+            </Link>{' '}
+            for specifics.
           </p>
         </Section>
 
@@ -209,8 +211,8 @@ export default function TermsPage() {
         <Section heading="15. Contact">
           <p>
             Questions about these Terms? Email{' '}
-            <a href="mailto:legal@strix.example.com" className="text-cyan-300 hover:underline">
-              legal@strix.example.com
+            <a href="mailto:legal@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              legal@youraisecurityengineer.com
             </a>
             .
           </p>

@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = getPostBySlug(params.slug);
   if (!post) return { title: 'Post not found' };
   return {
-    title: `${post.title} — Strix`,
+    title: `${post.title} — your AI security engineer`,
     description: post.excerpt,
   };
 }

@@ -2,8 +2,8 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Strix',
-  description: 'How Strix collects, uses, and protects your data. GDPR + CCPA compliant.',
+  title: 'Privacy Policy — your AI security engineer',
+  description: 'How we collect, uses, and protect your data. GDPR + CCPA compliant.',
 };
 
 const LAST_UPDATED = '2026-04-28';
@@ -27,10 +27,10 @@ export default function PrivacyPage() {
 
         <Section heading="1. Who we are">
           <p>
-            "Strix", "we", "us", or "our" refers to the entity operating the Strix service at the
+            "we", "us", or "our" refers to the entity operating the service at the
             domain you reached this policy from. For privacy questions, contact us at{' '}
-            <a href="mailto:privacy@strix.example.com" className="text-cyan-300 hover:underline">
-              privacy@strix.example.com
+            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              privacy@youraisecurityengineer.com
             </a>
             .
           </p>
@@ -181,8 +181,8 @@ export default function PrivacyPage() {
           </ul>
           <p className="mt-3">
             To exercise any of these rights, email{' '}
-            <a href="mailto:privacy@strix.example.com" className="text-cyan-300 hover:underline">
-              privacy@strix.example.com
+            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              privacy@youraisecurityengineer.com
             </a>
             . We respond within 30 days.
           </p>
@@ -215,8 +215,8 @@ export default function PrivacyPage() {
         <Section heading="11. Contact">
           <p>
             Questions, requests, or complaints:{' '}
-            <a href="mailto:privacy@strix.example.com" className="text-cyan-300 hover:underline">
-              privacy@strix.example.com
+            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
+              privacy@youraisecurityengineer.com
             </a>
             .
           </p>
