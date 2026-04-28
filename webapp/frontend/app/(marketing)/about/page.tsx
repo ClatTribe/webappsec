@@ -9,13 +9,14 @@ import {
   Heart,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'About — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'About',
   description:
     'A small team building an AI security engineer that learns from every triage. No mascots, no chatbots, no false positives.',
-};
+  path: '/about',
+});
 
 const PRINCIPLES: { Icon: LucideIcon; title: string; body: string }[] = [
   {

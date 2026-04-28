@@ -1,13 +1,14 @@
 import Link from 'next/link';
 import { ArrowRight, Calendar, Clock } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 import { getAllPosts } from './posts';
 
-export const metadata: Metadata = {
-  title: 'Blog — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Blog',
   description:
     'Notes from the team. Engineering, product, application-security writing — no growth-hack listicles.',
-};
+  path: '/blog',
+});
 
 export default function BlogIndex() {
   const posts = getAllPosts();

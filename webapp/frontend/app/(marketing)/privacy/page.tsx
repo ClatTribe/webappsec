@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Privacy Policy — your AI security engineer',
-  description: 'How we collect, uses, and protect your data. GDPR + CCPA compliant.',
-};
+export const metadata = buildPageMetadata({
+  title: 'Privacy Policy',
+  description: 'How we collect, use, and protect your data. GDPR + CCPA compliant.',
+  path: '/privacy',
+});
 
 const LAST_UPDATED = '2026-04-28';
 

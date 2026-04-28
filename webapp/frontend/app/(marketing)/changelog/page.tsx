@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { ArrowRight, Sparkles, Wrench, Bug, Plus, Rss } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Changelog — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Changelog',
   description: 'Every shipping update from the team. Updated weekly.',
-};
+  path: '/changelog',
+});
 
 type Tag = 'new' | 'improved' | 'fixed';
 const TAG: Record<Tag, { label: string; Icon: LucideIcon; cls: string }> = {
