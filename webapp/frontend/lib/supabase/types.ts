@@ -8,6 +8,24 @@ export type ScopeMode = 'auto' | 'diff' | 'full';
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type FindingStatus = 'open' | 'triaged_real' | 'false_positive' | 'wont_fix' | 'fixed';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
+export type TargetType = 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
+export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
+export type TargetStatus = 'active' | 'archived';
+
+export interface Target {
+  id: string;
+  org_id: string;
+  name: string;
+  type: TargetType;
+  value: string;
+  description: string | null;
+  metadata: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  last_scan_at: string | null;
+  scan_frequency: ScanFrequency;
+  status: TargetStatus;
+}
 
 export interface Profile {
   id: string;
@@ -48,6 +66,7 @@ export interface Integration {
 export interface Scan {
   id: string;
   org_id: string;
+  target_id: string | null;
   user_id: string;
   run_name: string;
   status: ScanStatus;

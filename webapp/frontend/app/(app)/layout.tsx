@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import {
   LayoutDashboard,
+  Target,
   ScanLine,
   ShieldAlert,
   Plug,
@@ -14,6 +15,7 @@ import {
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/targets', label: 'Targets', icon: Target },
   { href: '/scans', label: 'Scans', icon: ScanLine },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
   { href: '/integrations', label: 'Integrations', icon: Plug },
