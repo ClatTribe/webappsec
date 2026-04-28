@@ -6,7 +6,6 @@ import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
-import FindingsSummary from '@/components/scan/findings-summary';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
 
@@ -301,15 +300,14 @@ export default function ScanLiveView({
       {/* AI investigators — explains what an "agent" is and lists each one. */}
       <AgentsSection events={events} expectedCount={agentsCount ?? 0} />
 
-      {/* What we found — categorised summary of the findings, in plain language. */}
-      <FindingsSummary findings={findings} status={status} />
-
-      {/* Findings — the canonical list, kept below the categorised summary so
-          a reader who wants the raw view doesn't have to drill in. */}
+      {/* Findings — the only findings list on the page. The earlier
+          categorised "What we found" summary duplicated this view (each
+          category card just expanded into the same finding cards) so it
+          was removed in favour of the flat severity-sorted list. */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
-            All findings
+            Findings
           </h2>
           {findings.length > 0 && (
             <span className="text-xs text-neutral-500">
