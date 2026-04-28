@@ -23,6 +23,14 @@ This is a **product-led growth (PLG) platform** for **medium-sized businesses** 
 
 That ICP shapes the priorities below. Enterprise items (SSO, SCIM, SAML, K8s-Job-per-scan, air-gap) are listed but explicitly **deferred** — they belong in a later motion once the PLG funnel is proven.
 
+### Three product pillars
+
+Every item below should serve one of these. If it doesn't, it's the wrong item.
+
+1. **An AI security engineer that finds real vulnerabilities, not noise.** The headline of the landing page (*"An AI hacker that finds real vulnerabilities. Without the noise."*) sets the expectation. Findings need PoCs that ran. Coverage needs to be visible. The agent's reasoning needs to feel like a real engineer's, not a stack of regex matches.
+2. **Reinforcement-trained: learns from every triage.** *"…learns from every triage you do — so you never see the same false positive twice."* This is the differentiator vs. every other AI-security tool. It only matters if the feedback loop is real: each Fixed / FP / Won't-fix decision must train a per-tenant model that ranks the next finding. The marketing claim is a contract; the roadmap items in §10 below are how we keep it.
+3. **PLG-grade signup → payment.** Every product decision below assumes the user can sign up frictionlessly, hit value in <10 minutes, and pay us *self-serve*. Friction in any of the three (signup, activation, billing) silently caps growth.
+
 ---
 
 ## Status legend
@@ -130,6 +138,25 @@ All of these are static-friendly and a good fit for **MDX in `app/(marketing)/`*
 
 The 10-minute clock starts when the user clicks **Sign up**. Everything between that click and "I see a real finding on my code" is what we're optimizing here.
 
+### Signup mechanics
+
+The pillar-3 plumbing below the wizard. Most PLG signups never finish if any of these is awkward — and they're invisible until they break.
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ⬜ | **Social OAuth at signup — Google + GitHub + Microsoft.** Most dev signups happen via OAuth, not email. GitHub is the highest-converting because it doubles as the integration auth (one click, you're signed up *and* connected to your repos). | Email/password is the worst-converting signup form in PLG. ~60% of dev tools see >70% of signups via Google or GitHub. | Supabase already supports all three; wire the buttons + post-signup redirect. | S |
+| ⬜ | **Magic-link signup option** (passwordless email). | Removes the "what password did I use?" friction on revisit. Best-in-class default for tools where the user signs in from multiple machines. | Supabase OTP. Need a styled "check your email" page. | S |
+| ⬜ | **Email verification with a friendly UX.** Enabled today (after [migration 008]) but the verify-email flow is bare. A clear "we sent you a link, here's what to do if it doesn't arrive" page; a "resend" button; idempotent re-send rate-limit. | Today users hit a generic Supabase error if they don't verify. PLG conversion drops sharply when the verify step looks broken. | New: `/auth/verify-pending` page. | S |
+| ⬜ | **Welcome email** (transactional, not marketing). Confirms the account, links the demo target, offers help. Sent via Resend / Postmark / SES. | Sets expectations. Feels professional. Costs ~zero. | Postgres trigger on `auth.users` insert → Edge Function → email service. | S |
+| ⬜ | **Bot protection on `/signup`.** Cloudflare Turnstile or hCaptcha invisible challenge, plus a per-IP rate-limit (e.g. 10/min). | Free-tier signups are an obvious abuse vector. Without this, a bot signs up 10k orgs and burns the free LLM budget overnight. Same call-out as plan-limit enforcement (§5). | Add the widget on `/signup`; verify token in `/api/auth/signup`; rate-limit via Vercel/Edge middleware. | S |
+| ⬜ | **Org switcher in the app chrome.** A user invited to multiple orgs needs a clean dropdown, not "log out and back in" friction. | The team-collaboration story falls apart without it. Every PLG B2B tool has one. | New: dropdown in [`app/(app)/layout.tsx`](webapp/frontend/app/(app)/layout.tsx) sidebar. Driven by `org_members` for current user. | S |
+| ⬜ | **Invite teammates from any page.** Cmd-K → "Invite". Or a persistent "Invite team" button in the chrome that opens a modal. | The sooner a single-user org becomes a multi-user org, the higher the LTV. Make it impossible to miss. | New: `components/invite-modal.tsx`. Email + role; sends a magic-link invite. | S |
+| ⬜ | **Profile completion nudge.** After signup, gently ask for full name + role. Used for personalized emails + admin-only analytics. | Data hygiene. Costs nothing if the user dismisses. | Optional inline prompt on first dashboard visit. | S |
+
+### Activation mechanics
+
+Everything between signup landing and the first triaged finding.
+
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
 | ⬜ | **Demo target on every new org.** A pre-seeded target pointing at a deliberately vulnerable public repo (e.g. OWASP Juice Shop or our own [test fixture](webapp/worker/tests/test_runner.py)) with **pre-generated findings** showing the AI-triaged urgency / dismissed / resolved tabs. The user sees the value before paying for a real scan. | Conversion from "signed up" to "saw a finding" without spending an LLM cent. | New: a seed migration that adds a demo `target` + 7 sample findings on org creation. Tag them `is_demo=true` so they don't pollute real metrics. | M |
@@ -160,15 +187,32 @@ What happens after the wizard. Goal: every new user has at least one *real* scan
 
 The PLG monetization layer the project doesn't have yet. The public pricing page itself is in §2; this section is the in-app billing plumbing behind it. Without these, there's no business.
 
+### Core billing
+
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
 | ⬜ | **Stripe billing integration.** Self-serve upgrade, plan switching, invoice history, dunning. | Required for revenue. | Stripe Checkout + Webhook → `organizations.stripe_subscription_id`, plan derived from Stripe state. | L |
+| ⬜ | **Pricing tiers as DB schema.** Single source of truth `plans` table mapping plan codes (`free`, `team`, `business`) to feature flags + limits. The marketing pricing page reads from it; plan-limit enforcement (§5 row 3) reads from it; Stripe price IDs map back to it. | Today the pricing page hardcodes plan features in JSX. Drift is inevitable. | New table `plans`. UI + worker read from it. | S |
 | ⬜ | **Plan limits + enforcement.** Free tier: 5 scans / month, no scheduled scans, no integrations beyond GitHub. Team: 100 scans / month, 5 schedules, all integrations. Business: unlimited. | The free → paid lever. | Soft (UI warning) and hard (API rejection at `/api/scans` insert) limits. Schema: `organizations.plan_limits jsonb`. | M |
 | ⬜ | **Usage dashboard.** "You've used 4 of 5 scans this month. Upgrade for unlimited." with a one-click upgrade CTA. | Makes the limit visible before it bites. | New: `/billing` page. Pulls from `cost_stats` + `scans` count. | M |
 | ⬜ | **In-product upgrade prompts.** Friction-free CTAs at the moments of value perception: "Lock in scheduled scans (Team plan)" inside `/targets/new` when the user picks daily/weekly. | Catches the user with intent. | Conditional UI based on `org.plan`. | S |
 | ⬜ | **Annual discount.** "Save 20% with annual." Standard PLG conversion lift. | Money. | Stripe price ID. | S |
 | ⬜ | **Trial of the next tier.** New orgs get 14 days of Team-tier features. After expiry, soft-degrade to Free. | The trial-to-paid pattern is well-trodden in PLG. | Schema: `organizations.trial_expires_at`. Plan-resolution logic. | M |
 | ⬜ | **Self-serve cancellation + downgrade.** "Cancel anytime" needs to actually be one click, not an email. | Trust + churn-reduction-via-trust. | Stripe portal. | S |
+
+### Billing plumbing (the unsexy stuff that breaks PLG when missing)
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ⬜ | **Stripe webhook idempotency + replay safety.** Every Stripe event must be safe to receive twice. Persist `stripe_event_id` + check before applying. Replay-from-dashboard must be no-op-on-success. | Stripe retries failed deliveries; without idempotency you double-charge / double-grant. The single most common PLG billing bug. | New table `stripe_events` (event_id PK + processed_at). Idempotency middleware in the webhook handler. | S |
+| ⬜ | **Stripe Tax integration.** VAT for EU customers, GST for India / Australia, sales tax for US. Required to invoice legally above the local threshold. | Without it, every EU/India sale is a compliance landmine. Stripe Tax handles the hard part if you wire it up. | Enable on the Stripe account; pass `automatic_tax: { enabled: true }` to Checkout sessions. | S |
+| ⬜ | **Failed payment grace period.** A failed renewal triggers Stripe's smart-retries (3 attempts over 21 days by default). During grace, mark org as `past_due` in our schema; show a banner; *don't* downgrade for 7 days. After 7d → soft-downgrade to Free with read-only access to historical data. | The default behaviour ("payment failed → instant downgrade → user lockout → angry tweet") is a churn accelerator. Grace is standard PLG. | Webhook handler for `invoice.payment_failed` + `customer.subscription.past_due`; banner component; downgrade cron. | M |
+| ⬜ | **Coupon / promo code support.** Standard PLG growth lever — Black Friday, partnership launches, conference codes, recovery from outage. | Without coupons, every offer is a manual Stripe-dashboard ad-hoc. | Wire Stripe Coupon API into Checkout; add a `?code=` URL param the upgrade flow honours. | S |
+| ⬜ | **Receipts + invoices via email + portal download.** PDF download of every paid invoice. Auto-emailed receipt on renewal. | Standard expectation. SMB finance teams *will* ask. | Stripe portal already does both; expose the link from `/billing`. | S |
+| ⬜ | **Per-event transactional emails.** Welcome (post-signup), upgraded (post-payment), payment-failed, trial-expiring-in-3-days, downgraded, win-back-after-30d-inactive. | These are the conversion / retention emails every PLG runbook ships. | Resend / Postmark; email template per event; trigger from Stripe webhook + `auth.users` events. | M |
+| ⬜ | **Seat-vs-org billing model decision.** Pricing page implies per-org but Team plans usually need a seat cap (e.g. 5 seats included, $20/extra). Decide once, encode in the `plans` table, build the seat-counter logic. | Ambiguity here breaks the upgrade flow. Picking the wrong model in MVP is harder to fix later. | Decision: per-org + capped seats with overage billing. Schema: `organizations.included_seats`. | S |
+| ⬜ | **Billing audit trail.** Every plan change, payment, refund logged in `audit_log` with the Stripe event ID. | Compliance + customer-support readiness. | Hook into existing `audit_log` writes from webhook handler. | S |
+| ⬜ | **Refund policy + workflow.** Document the 30-day refund policy on `/pricing`; one-click refund issuance from an admin-only page. | A real refund policy is a conversion lever; a refund button is a support-load reducer. | Stripe Refund API + admin UI gate. | S |
 
 ---
 
@@ -234,9 +278,11 @@ The asset types our ICP actually has — make scanning each one delightful out o
 
 ---
 
-## 10. Triage & remediation
+## 10. Triage, remediation & continuous learning
 
-Keep AI triage tight. SMB users have no patience for false positives.
+Keep AI triage tight. SMB users have no patience for false positives. **The "learns from every triage" claim on the landing page lives or dies here.**
+
+### Stateless triage (no human in loop)
 
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
@@ -244,6 +290,37 @@ Keep AI triage tight. SMB users have no patience for false positives.
 | 🚧 | **AI triage during the scan flow.** Today triage is a manual `assess_findings.py` script. Wire it into `_upload_run_artifacts` so every finding is auto-triaged the moment it lands. | Removes the manual step. The whole user value is "I don't see false positives" — that has to happen automatically. | [`runner.py`](webapp/worker/src/strix_worker/runner.py) + [`assess_findings.py`](webapp/worker/scripts/assess_findings.py). | S |
 | ⬜ | **AI triage with codebase context (RAG).** Today the triage LLM sees only the finding markdown. Giving it the actual source files mentioned in the report would let it confirm reachability rather than guess. | Improves precision from "good guess" to "high confidence". | Index the cloned repo in pgvector; on assess, retrieve top-K chunks per finding's `affected_files`. | L |
 | ⬜ | **Fix-suggestion autopilot.** When AI marks a finding `fix_now`, propose a draft PR with a candidate patch. Reviewer-approved, never auto-merged. | The closing of the loop: scan → triage → *fix*. | New worker job using the GitHub integration. Patch generation via the same LLM pipeline. | L |
+
+### Reinforcement learning from triage (pillar 2)
+
+The contract behind *"learns from every triage you do — so you never see the same false positive twice."* Every Fixed / Confirmed-real / False-positive / Won't-fix click on a FindingCard is a labeled training pair. Without the items below, those clicks vanish. Designed for **per-tenant isolation** — the loop never trains across orgs (privacy promise on the landing page).
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ⬜ | **Persisted triage as labeled training pairs.** Every triage decision becomes a row in `triage_signals` with `(finding_id, finding_embedding, decision, decided_at, decided_by, org_id)`. The triage UI already writes `findings.status` + `triage_notes`; this captures the same decision in a model-friendly shape. | Without persistence, "the model gets sharper with use" is marketing. With it, every click is a gradient step. | New table `triage_signals`. Embedding via the existing LLM pipeline. Per-org RLS — never readable across tenants. | M |
+| ⬜ | **Per-org ranking model.** A small model (logistic regression / gradient-boosted trees / distilled LLM-as-classifier) takes a new finding's features + the org's recent `triage_signals` and predicts `(urgency, confidence, p_false_positive)`. Used to rank `/findings` and bias the auto-dismiss threshold. | Per-tenant tuning is the differentiator. The blog post promises FP rate drops from 7% to <1% by week 4 — that only happens if a model learns the org's tolerances. | Train on each `triage_signals` insert; persist weights at `org_models` keyed by org. Cold-start bootstrap from a permissive prior. | L |
+| ⬜ | **Triage suggestions ("we think this is FP — confirm?").** When the per-org model is >70% confident a new finding is a false positive, the FindingCard surfaces *"Likely false positive — based on 14 similar dismissals."* with one-click Confirm / Override. | Saves clicks on routine cases; every Confirm/Override is a labeled training pair (active learning). | UI on FindingCard. Suggestion writes a `triage_signals` row regardless of which button the user clicks. | M |
+| ⬜ | **Auto-dismiss high-confidence false positives.** When the model is >95% confident *and* the same fingerprint has been dismissed by this org before, auto-dismiss with a clear "we dismissed this — see why / undo" affordance in the dismissed tab. | The single biggest perceived-value improvement: the user never sees the FP at all. Reversibility is non-negotiable; the user must be able to override. | Background job after triage; UI badge on auto-dismissed findings. | M |
+| ⬜ | **Pattern → permanent suppression.** The model notices "this org always dismisses CWE-89 findings on `/api/internal/*`". Surface the pattern; offer one click to convert it into a real `finding_suppressions` rule (§6 row 6). | Closes the loop from "we noticed" to "you fixed the rule that made us notice". | Pattern detection job; UI prompt. Re-uses the suppression-rule schema. | M |
+| ⬜ | **Active learning prompts on borderline cases.** When the model's confidence is 0.4–0.6 (genuinely unsure), show a small banner: *"We're not sure about this — your call helps us learn."* | Targeted requests for human input where the marginal information gain is highest. | UI banner conditional on confidence band. | S |
+| ⬜ | **Confidence display + filter on every finding.** Each card shows a small "AI confidence: 0.82 (verified)" badge with hover tooltip explaining what that means. Filter chip to show "high confidence only" / "needs review". | Honest UX. Lets the user calibrate their own trust in the model. | UI on FindingCard + FindingsFilter. | S |
+| ⬜ | **Triage-drift detection.** When a per-org model's hold-out accuracy starts dropping (e.g. user keeps overriding its dismissals), notify the org owner: "your team's triage patterns have changed — shall we retrain on recent signal only?" | A model that silently miscalibrates is worse than a stateless one. | Periodic eval job comparing model-predicted urgency vs subsequent triage on held-out findings. Slack/email alert on drift. | M |
+| ⬜ | **"Reset & retrain" controls.** Power-user setting: "ignore signal older than 90 days" / "retrain from scratch". For when an org's stack changes shape. | Trust + control. | Settings page action, nukes `triage_signals` and rebuilds the model. | S |
+| ⬜ | **Cross-finding triage history on the card.** "You've triaged 12 similar findings before — 10 dismissed, 2 fixed." Shown in the expanded card. | Memory feels like a real engineer; gives the user context for their own decision. | Query `triage_signals` by fingerprint family; render. | S |
+
+### AI security engineer surface (pillar 1)
+
+Make the agent feel like a real security engineer, not a stack of regex matches. Every item below is about *how the work shows up* in the UI, not the work itself.
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ⬜ | **Agent specialisation labels.** When Strix spawns sub-agents, label them by attack class (Recon / Auth-bypass / Injection / SSRF / Authz). Today they all read "Investigator #N". Some of this is upstream ([tools-wishlist.md](tools-wishlist.md) §0); we can also infer the label from the tool-call pattern. | "An AI security engineer" feels real when the team has named roles. Generic "Investigator #3" doesn't. | Heuristic labelling in [`agents-section.tsx`](webapp/frontend/components/scan/agents-section.tsx) until upstream tags arrive. | S |
+| ⬜ | **Multi-step kill-chain narrative.** When a finding required several steps (leaked credential → re-used to log in → escalated to admin), render the chain as a numbered timeline with the agent's reasoning between each step. | Differentiates from pattern-matchers. Shows real adversarial thinking. The events are already in `scan_events`; this is presentation. | New `KillChain` component; group `tool.execution.*` + `chat.message` events for each finding. | M |
+| ⬜ | **PoC verification badge.** Every finding marked "verified" if the agent ran an exploit that actually triggered. *"PoC ran — vulnerable response captured."* vs *"Pattern match — not verified."* Big visual difference on the card. | The "real vulnerabilities, not noise" promise hinges on this distinction. Verified findings should look unmistakably different. | Schema: `findings.verification_status`. Set during scan based on tool-call outcomes. UI badge. | M |
+| ⬜ | **Negative coverage assertions.** "We tested `/api/auth` for SQLi, IDOR, and broken session — clean." Most scanners list only what they found; we should list what we tested *and didn't* find. | A scan that returns 0 findings looks like the scanner failed; a scan that returns 0 findings *plus a coverage report* looks like a clean bill of health. | Some upstream ask ([tools-wishlist.md](tools-wishlist.md) §0 *Semantic checkpoint events*); some derivable today from tool calls + endpoints touched. | M |
+| ⬜ | **Cross-scan memory ("last scan we saw X here").** When a target is rescanned, the agent narrative references prior findings: *"Re-checked the SSRF on `/api/scans` — still vulnerable"* or *"Re-checked the SSRF on `/api/scans` — fixed."* Schema-wise we already have the history; this is surfacing it. | Real engineers remember. Stateless tools forget. | Pre-prompt the assess pipeline with the target's prior scan summary. | M |
+| ⬜ | **Hand-off to a human.** A "request human review" button on any finding. Routes to a paid-tier service (us — or eventually a marketplace of contractors). | Some findings need a human. Owning the hand-off keeps users in the product instead of bouncing to Burp / contractor / consultancy. | New table `review_requests`; admin queue; pricing tier. | L |
+| ⬜ | **Plain-language scan summary at the top.** "Scanned 12 endpoints across `acme.com`. The agent found 1 critical SSRF (verified) and 2 medium misconfigurations. Authentication and access-control checks passed." Currently the user has to read the findings list to figure that out. | The 30-second summary is what the security-minded staff engineer forwards to their team chat. Make it copyable and well-formed. | Generated from triage results + coverage data; rendered above the findings list. Some upstream ([tools-wishlist.md](tools-wishlist.md) §0 *run.summary event*). | S |
 
 ---
 
