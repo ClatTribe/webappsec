@@ -87,15 +87,22 @@ def _reset_role(cur) -> None:
 
 
 def _seed_two_orgs(cur) -> dict[str, str]:
-    """Create alice in org_a (owner) and bob in org_b (owner). Returns their IDs."""
+    """Create alice in org_a (owner) and bob in org_b (owner). Returns their IDs.
+
+    Emails are suffixed with a random tag because some functions called inside
+    the tests (e.g. vault.create_secret) commit internally, which can persist
+    the seed rows even if later test logic fails. Unique emails keep tests
+    independent of leftover state.
+    """
     alice = uuid.uuid4()
     bob = uuid.uuid4()
     org_a = uuid.uuid4()
     org_b = uuid.uuid4()
+    tag = uuid.uuid4().hex[:8]
 
     cur.execute(
         "INSERT INTO auth.users (id, email) VALUES (%s, %s), (%s, %s)",
-        (alice, "alice@a.test", bob, "bob@b.test"),
+        (alice, f"alice-{tag}@a.test", bob, f"bob-{tag}@b.test"),
     )
     cur.execute(
         "INSERT INTO public.organizations (id, name, slug) "
@@ -314,12 +321,19 @@ def test_rls_audit_log_admin_only_read(conn):
 
 
 def test_vault_create_secret_rejects_anon_role(conn):
-    """vault_create_secret raises if called outside the service role."""
+    """vault_create_secret is unreachable to anon/authenticated callers.
+
+    Two layers of defence: the GRANT was REVOKEd from authenticated/anon, AND
+    the function body checks `auth.role() = 'service_role'`. When called as
+    authenticated, the GRANT denial fires first (InsufficientPrivilege).
+    """
     with conn.cursor() as cur:
         ids = _seed_two_orgs(cur)
         _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="authenticated")
 
-        with pytest.raises(psycopg.errors.RaiseException):
+        with pytest.raises(
+            (psycopg.errors.InsufficientPrivilege, psycopg.errors.RaiseException)
+        ):
             cur.execute(
                 "SELECT public.vault_create_secret('plaintext', 'name', 'desc')"
             )

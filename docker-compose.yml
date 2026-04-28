@@ -1,0 +1,43 @@
+# Top-level orchestration for the worker tier.
+#
+# Supabase runs separately via `supabase start` (which uses its own
+# docker-compose under the hood); we connect to it through the host.
+# The Next.js frontend stays on `npm run dev` for now — see Architecture.md
+# for why dockerizing it adds friction on macOS.
+#
+# Bring up:   docker-compose up --build worker
+# Tear down:  docker-compose down
+#
+# Required env (set in ./.env, see .env.example):
+#   SUPABASE_SERVICE_ROLE_KEY    from `supabase status -o env`
+#   STRIX_LLM                    e.g. gemini/gemini-2.5-pro
+#   LLM_API_KEY                  the provider key for STRIX_LLM
+#
+# The worker mounts the host's Docker socket so it can spawn the Strix
+# sandbox container, and mirrors /tmp/strix-runs so per-scan artifacts
+# Strix mounts into the sandbox are visible on both sides.
+
+services:
+  worker:
+    build:
+      context: ./webapp/worker
+    image: strix-worker:local
+    container_name: strix-worker
+    environment:
+      SUPABASE_URL: http://host.docker.internal:54321
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+      STRIX_LLM: ${STRIX_LLM:-gemini/gemini-2.5-pro}
+      LLM_API_KEY: ${LLM_API_KEY}
+      # Optional: token Strix's git clone uses for private repos.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      STRIX_IMAGE: ${STRIX_IMAGE:-ghcr.io/usestrix/strix-sandbox:0.1.13}
+      STRIX_BIN: strix
+      WORKER_CONCURRENCY: 1
+      LOG_LEVEL: INFO
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/strix-runs:/tmp/strix-runs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

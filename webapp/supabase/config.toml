@@ -72,6 +72,12 @@ max_enrolled_factors = 10
 enroll_enabled = true
 verify_enabled = true
 
+# Inject org_id + org_role into the JWT on every token issuance.
+# Defined in supabase/migrations/20260427000002_jwt_hook.sql.
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/custom_access_token_hook"
+
 # OAuth provider for "Login with GitHub" (different from the GitHub *integration*).
 # Configure secrets via env in the Supabase dashboard for cloud, or via local env locally.
 [auth.external.github]

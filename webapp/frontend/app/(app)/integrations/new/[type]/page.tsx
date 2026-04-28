@@ -1,15 +1,15 @@
 'use client';
 
-import { use, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 interface Props {
-  params: Promise<{ type: string }>;
+  params: { type: string };
 }
 
 export default function NewIntegrationPage({ params }: Props) {
-  const { type } = use(params);
+  const { type } = params;
 
   if (type === 'github') return <GitHubFlow />;
   if (type === 'aws') return <AwsForm />;

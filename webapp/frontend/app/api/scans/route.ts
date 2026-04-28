@@ -32,6 +32,14 @@ export async function POST(req: Request) {
   }
   const body = parsed.data;
 
+  const blocked = body.targets.filter(isInternalAddress);
+  if (blocked.length > 0) {
+    return NextResponse.json(
+      { error: 'targets resolve to internal addresses; pick a public host', blocked },
+      { status: 400 },
+    );
+  }
+
   // Pull the org_id from the user's JWT — the JWT hook (migration 2) injects it.
   const session = await supabase.auth.getSession();
   const orgId = (session.data.session?.user.app_metadata as { org_id?: string } | undefined)?.org_id
@@ -119,6 +127,66 @@ function inferTargetType(target: string): string {
   if (/^\d+\.\d+\.\d+\.\d+$/.test(target)) return 'ip_address';
   if (target.startsWith('./') || target.startsWith('/')) return 'local_code';
   return 'domain';
+}
+
+// Reject targets that point at the worker's own network — loopback, link-local,
+// RFC1918, IPv6 ULA, and metadata endpoints. Without this an authenticated user
+// can submit `http://127.0.0.1`, `http://169.254.169.254`, `http://10.x.y.z`,
+// etc. as web_application targets and the scanner agent will hit those from
+// inside the worker.
+//
+// Conservative literal check — does not resolve hostnames, so a domain that
+// resolves to an internal IP (DNS rebinding) still gets through. A future
+// hardening pass should add a worker-side egress firewall keyed on the
+// authorized targets at scan start (Architecture.md §4.2 #12).
+function isInternalAddress(value: string): boolean {
+  let host = value.trim();
+  // Strip scheme + path so we're left with hostname[:port].
+  host = host.replace(/^https?:\/\//i, '').split('/', 1)[0].split('@').pop()!.split(':', 1)[0];
+  if (!host) return false;
+
+  // IPv6 literals come wrapped in [...].
+  const v6 = host.match(/^\[(.+)\]$/)?.[1] ?? (host.includes(':') ? host : null);
+  if (v6) {
+    const lower = v6.toLowerCase();
+    return (
+      lower === '::1' ||
+      lower.startsWith('fe80:') ||              // link-local
+      lower.startsWith('fc') || lower.startsWith('fd') || // ULA fc00::/7
+      lower.startsWith('::ffff:127.') ||        // IPv4-mapped loopback
+      lower.startsWith('::ffff:10.') ||
+      lower.startsWith('::ffff:169.254.') ||
+      /^::ffff:172\.(1[6-9]|2[0-9]|3[01])\./.test(lower) ||
+      lower.startsWith('::ffff:192.168.')
+    );
+  }
+
+  // IPv4 literal.
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const o = v4.slice(1, 5).map(Number);
+    if (o.some((x) => x > 255)) return false;
+    return (
+      o[0] === 127 ||                                   // 127.0.0.0/8 loopback
+      o[0] === 10 ||                                    // 10.0.0.0/8
+      (o[0] === 172 && o[1] >= 16 && o[1] <= 31) ||     // 172.16.0.0/12
+      (o[0] === 192 && o[1] === 168) ||                 // 192.168.0.0/16
+      (o[0] === 169 && o[1] === 254) ||                 // link-local + AWS/GCP metadata
+      o[0] === 0 ||                                     // 0.0.0.0/8
+      o[0] >= 224                                       // multicast / reserved
+    );
+  }
+
+  // Hostname forms that explicitly reference the local host.
+  const lower = host.toLowerCase();
+  return (
+    lower === 'localhost' ||
+    lower.endsWith('.localhost') ||
+    lower === 'metadata.google.internal' ||
+    lower === 'host.docker.internal' ||
+    lower === 'kubernetes.default' ||
+    lower.endsWith('.svc.cluster.local')
+  );
 }
 
 function makeRunName(seed: string): string {
