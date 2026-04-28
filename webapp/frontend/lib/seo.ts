@@ -17,6 +17,10 @@ export const DEFAULT_DESCRIPTION =
   'An AI security engineer that finds real vulnerabilities in your apps. Reinforcement-trained to eliminate false positives.';
 
 interface PageSeoArgs {
+  /** The bare page title — no site suffix. The root layout's title template
+   *  appends " — {SITE_NAME}" automatically. Pass `rawTitle: true` to opt
+   *  out of the template (used by the landing page, where the title is
+   *  already the full marketing headline). */
   title: string;
   description: string;
   path: string; // Leading slash, no trailing slash. e.g. "/pricing".
@@ -24,7 +28,8 @@ interface PageSeoArgs {
   type?: 'website' | 'article';
   /** Per-page OG image path or absolute URL. Falls back to the root /opengraph-image. */
   image?: string;
-  /** Override the rendered <title>. By default the title above is suffixed with " — your AI security engineer" */
+  /** Skip the root layout's title template — render `title` as the literal
+   *  document title with no suffix. */
   rawTitle?: boolean;
   noIndex?: boolean;
 }
@@ -34,6 +39,10 @@ interface PageSeoArgs {
  * Centralises canonical URL handling, OG / Twitter card defaults, and the
  * site-wide title suffix so we don't repeat the same boilerplate on every
  * page (`/contact`, `/about`, `/pricing`, …).
+ *
+ * Title handling: the root layout sets a title template (`%s — {SITE_NAME}`).
+ * We pass the bare title here and let the template add the suffix once. To
+ * opt out (landing page), use `title: { absolute: ... }` via `rawTitle: true`.
  */
 export function buildPageMetadata({
   title,
@@ -44,12 +53,15 @@ export function buildPageMetadata({
   rawTitle = false,
   noIndex = false,
 }: PageSeoArgs): Metadata {
+  // For openGraph + twitter we want the *full* title (with the brand suffix)
+  // because those tags are shown in isolation in unfurls. The HTML <title>
+  // element gets the bare title and the root template fills in the suffix.
   const fullTitle = rawTitle ? title : `${title} — ${SITE_NAME}`;
   const url = `${SITE_URL}${path}`;
   const ogImage = image ?? '/opengraph-image';
 
   return {
-    title: fullTitle,
+    title: rawTitle ? { absolute: title } : title,
     description,
     alternates: {
       canonical: url,

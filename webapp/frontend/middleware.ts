@@ -5,7 +5,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const PUBLIC_PATHS = ['/', '/login', '/signup', '/forgot-password'];
+const PUBLIC_PATHS = [
+  '/',
+  '/login',
+  '/signup',
+  '/forgot-password',
+  // SEO infrastructure. Dynamic routes that crawlers MUST be able to fetch
+  // unauthenticated — without these the middleware redirected /sitemap.xml
+  // and /robots.txt to /login, which silently breaks indexing.
+  '/sitemap.xml',
+  '/robots.txt',
+  '/opengraph-image',
+  '/twitter-image',
+];
 const PUBLIC_PREFIXES = [
   '/pricing',
   '/about',
