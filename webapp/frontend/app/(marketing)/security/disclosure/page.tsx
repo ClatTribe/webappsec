@@ -1,13 +1,14 @@
 import Link from 'next/link';
 import { ChevronRight, Mail, ShieldAlert, Award, Clock, FileText } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Responsible Disclosure — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Responsible Disclosure',
   description:
     'How to report a security vulnerability in our service. We respond within 1 business day, fix critical issues within 7, and credit responsible reporters.',
-};
+  path: '/security/disclosure',
+});
 
 const TIMELINE: { Icon: LucideIcon; label: string; body: string }[] = [
   {

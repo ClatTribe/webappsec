@@ -12,13 +12,14 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Security & Trust — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Security & Trust',
   description:
     'How we isolate tenant data, encrypt secrets, and protect your code. Built to shorten the security review from 30 days to 1.',
-};
+  path: '/security',
+});
 
 const PILLARS: { Icon: LucideIcon; title: string; bullets: string[] }[] = [
   {

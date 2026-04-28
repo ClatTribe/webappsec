@@ -83,20 +83,20 @@ All of these are static-friendly and a good fit for **MDX in `app/(marketing)/`*
 
 | | Page | Why | Where | Effort |
 |---|---|---|---|---|
-| ⬜ | **`/pricing`** | The first thing every PLG comparison shopper checks. Three tiers (Free / Team / Business), self-serve "Upgrade" button, FAQ block. | `app/pricing/page.tsx`. Style-matches the landing. | S |
-| ⬜ | **`/privacy`** | Legally required (GDPR / CCPA / DPDP). | `app/legal/privacy/page.tsx` (MDX). | S |
-| ⬜ | **`/terms`** | Required to charge money. | `app/legal/terms/page.tsx` (MDX). | S |
+| ✅ | **`/pricing`** with 3 tiers + FAQ block | Three tiers (Free / Team / Business), self-serve upgrade CTAs, 9-question FAQ block with `FAQPage` JSON-LD. | [`pricing/page.tsx`](webapp/frontend/app/(marketing)/pricing/page.tsx). | S |
+| ✅ | **`/privacy`** | GDPR / CCPA / DPDP-friendly policy with last-updated stamp. | [`privacy/page.tsx`](webapp/frontend/app/(marketing)/privacy/page.tsx). | S |
+| ✅ | **`/terms`** | Plain-English summary up top, full terms below. | [`terms/page.tsx`](webapp/frontend/app/(marketing)/terms/page.tsx). | S |
 | ⬜ | **Cookie consent banner.** | Required for EU traffic. Honor `Do-Not-Track`. | New: `components/cookie-banner.tsx` + `cookies-policy` page. | S |
-| ⬜ | **`/security` (a.k.a. `/trust`)** | Public security posture: how we encrypt secrets, isolate tenants, where data is stored, our own SOC 2 status. The page that shortens an SMB security review from 30 days to 1. | New: `app/security/page.tsx`. Pulls heavily from [`Architecture.md`](Architecture.md) §3. | S |
-| ⬜ | **`/security/disclosure` + `/.well-known/security.txt`** | Standard responsible-disclosure surface. Required by some bug-bounty programs and compliance frameworks. | New: page + a static `/security.txt` file linking to it. | S |
-| ⬜ | **`/contact` (or `/support`)** | Even self-serve products need a human escape hatch. Email + a form that lands in a shared inbox. | New: `app/contact/page.tsx`. | S |
+| ✅ | **`/security` (a.k.a. `/trust`)** | Public security posture in 7 pillars covering encryption, tenant isolation, data flow, etc. | [`security/page.tsx`](webapp/frontend/app/(marketing)/security/page.tsx). | S |
+| ✅ | **`/security/disclosure` + `/.well-known/security.txt`** | Responsible-disclosure surface with response SLA timeline. | [`security/disclosure/page.tsx`](webapp/frontend/app/(marketing)/security/disclosure/page.tsx) + [`public/.well-known/security.txt`](webapp/frontend/public/.well-known/security.txt). | S |
+| ✅ | **`/contact`** | Routed mailboxes (sales / security / support / partnerships) + a form. | [`contact/page.tsx`](webapp/frontend/app/(marketing)/contact/page.tsx). | S |
 
 ### Conversion & SEO drivers
 
 | | Page | Why | Where | Effort |
 |---|---|---|---|---|
-| ⬜ | **`/blog`** with MDX-based posts | Content marketing is the cheapest CAC for PLG. Every post is a long-tail search term. Three types of posts to seed: vulnerability deep-dives, "how to scan X", customer stories. | New: `app/blog/page.tsx` (index) + `app/blog/[slug]/page.tsx` (post). MDX in `content/blog/`. RSS feed for retention. | M |
-| ⬜ | **`/changelog`** | PLG users *love* a public changelog — it signals constant shipping and gives them something to follow. | New: `app/changelog/page.tsx` (MDX or hand-written). Auto-tweet new entries (later). | S |
+| ✅ | **`/blog`** with markdown-rendered posts + RSS feed | Index page sorted by date, per-post detail page with `Article` JSON-LD, dynamic per-post OG image, and a real `/blog/rss.xml` feed for reader subscriptions. | [`blog/page.tsx`](webapp/frontend/app/(marketing)/blog/page.tsx), [`blog/[slug]/page.tsx`](webapp/frontend/app/(marketing)/blog/[slug]/page.tsx), [`blog/rss.xml/route.ts`](webapp/frontend/app/(marketing)/blog/rss.xml/route.ts). | M |
+| ✅ | **`/changelog`** | Shipping log with new/improved/fixed tags, RSS link, dated entries. | [`changelog/page.tsx`](webapp/frontend/app/(marketing)/changelog/page.tsx). | S |
 | ⬜ | **`/docs`** with MDX + sidebar nav | Distinct from the in-app help drawer (§3). Docs are public, SEO-indexed, deep-linkable. The community uses these to evaluate before signing up. | New: `app/docs/[...slug]/page.tsx` with MDX + a generated sidebar from frontmatter. Categories: getting-started, scan modes, integrations, API, troubleshooting. | L |
 | ⬜ | **Comparison pages** — `/compare/snyk`, `/compare/sonarqube`, `/compare/burp`, etc. | "Snyk alternative" is the highest-intent SEO query in the appsec space. One page per real competitor with an honest feature matrix. | MDX template + per-competitor data file. | M |
 | ⬜ | **Use-case / industry pages** — `/for/startups`, `/for/fintech`, `/for/saas`, `/for/agencies` | Every industry self-identifies. SEO + better landing-page conversion than a generic homepage for paid traffic. | MDX template, vary headline + screenshots per vertical. | M |
@@ -108,7 +108,7 @@ All of these are static-friendly and a good fit for **MDX in `app/(marketing)/`*
 | ⬜ | **`/customers`** with case studies | Social proof is the single biggest enterprise-SMB conversion lever. Logo wall + 2–3 deep-dive stories. | New: `app/customers/page.tsx` + per-customer detail pages. | M |
 | ⬜ | **`/integrations`** directory | Public, SEO-indexed list of every supported integration with a per-integration page. Doubles as a roadmap-of-integrations signal. | Generate from a config file. | S |
 | ⬜ | **`/status`** (uptime / incident page) | Trust + transparency. Embedded widget on `/security`. | Hosted (Statuspage, BetterStack) or self-rolled. | S |
-| ⬜ | **`/about`** | Founder background, mission, principles. Especially important for a security tool — "who is this team?" is a real buyer concern. | New: `app/about/page.tsx`. | S |
+| ✅ | **`/about`** | Founding principles + the values that shape the product. | [`about/page.tsx`](webapp/frontend/app/(marketing)/about/page.tsx). | S |
 | ⬜ | **`/careers`** (when hiring) | Talent funnel. | Linked from `/about`. | S |
 | ⬜ | **`/press` (brand assets / press kit)** | Logo PNG/SVG, screenshots, founder photos, boilerplate. Cuts journalist friction. | Static assets + a one-pager. | S |
 
@@ -116,11 +116,12 @@ All of these are static-friendly and a good fit for **MDX in `app/(marketing)/`*
 
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
-| ⬜ | **MDX setup** — `next/mdx` with shared components (Callout, CodeBlock, Mermaid) | Every page above benefits. | `next.config.js` + `mdx-components.tsx`. | S |
-| ⬜ | **Marketing-site layout shell** | Single header/footer reused across `/blog`, `/docs`, `/legal/*`, `/about`, etc. Distinct from the authenticated `app/(app)/layout.tsx`. | New: `app/(marketing)/layout.tsx` route group. | S |
+| ⬜ | **MDX setup** — `next/mdx` with shared components (Callout, CodeBlock, Mermaid) | Every page above benefits. Today posts live in a static TS registry; MDX would unlock per-post components and richer formatting. | `next.config.js` + `mdx-components.tsx`. | S |
+| ✅ | **Marketing-site layout shell** | Header/footer reused across all marketing routes via the `(marketing)` route group. | [`(marketing)/layout.tsx`](webapp/frontend/app/(marketing)/layout.tsx). | S |
 | ⬜ | **Newsletter signup form** | Embedded on the landing + blog post footers. Captures interest from people who aren't ready to sign up. | Form posts to a service like Resend / Mailerlite, or stores in `email_subscribers` table. | S |
-| ⬜ | **Sitemap + robots.txt** | Every public page indexable by Google; private app routes excluded. | `app/sitemap.ts`, `app/robots.ts`. | S |
-| ⬜ | **OG image generator** | Per-page Twitter/LinkedIn previews. Especially impactful for blog posts and finding share links (§7). | `next/og` route handler. | S |
+| ✅ | **Sitemap + robots.txt** | Public marketing pages + dynamic blog posts in `/sitemap.xml`; auth/api/dashboard routes disallowed in `/robots.txt`. | [`app/sitemap.ts`](webapp/frontend/app/sitemap.ts), [`app/robots.ts`](webapp/frontend/app/robots.ts). | S |
+| ✅ | **OG image generator** | Default `/opengraph-image` rendered via `next/og` for every page; per-blog-post OG image baked at build time. Twitter card uses the same artwork via `summary_large_image`. | [`app/opengraph-image.tsx`](webapp/frontend/app/opengraph-image.tsx), [`blog/[slug]/opengraph-image.tsx`](webapp/frontend/app/(marketing)/blog/[slug]/opengraph-image.tsx). | S |
+| ✅ | **SEO foundation: metadataBase + per-page metadata + structured data** | `metadataBase` + canonical URLs + openGraph + twitter on every marketing page via a shared `buildPageMetadata` helper. `Organization` + `WebSite` JSON-LD on every page from the root layout; `Article` JSON-LD on blog posts; `FAQPage` JSON-LD on pricing. | [`lib/seo.ts`](webapp/frontend/lib/seo.ts), [`app/layout.tsx`](webapp/frontend/app/layout.tsx). | S |
 | ⬜ | **Analytics with proper consent** | Plausible / Posthog / Fathom — privacy-respecting. Tied to the cookie banner. | Drop-in script in marketing layout. | S |
 
 ---

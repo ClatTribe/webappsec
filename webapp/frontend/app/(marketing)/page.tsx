@@ -18,6 +18,15 @@ import {
   Workflow,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { buildPageMetadata } from '@/lib/seo';
+
+export const metadata = buildPageMetadata({
+  title: 'AI security engineer — find real vulnerabilities, zero false positives',
+  description:
+    "Most security tools cry wolf. We don't. Our AI security engineer scans your code, exploits real bugs end-to-end, and learns from every triage you do — so you never see the same false positive twice. 5 free scans / month.",
+  path: '/',
+  rawTitle: true,
+});
 
 export default function LandingPage() {
   return (

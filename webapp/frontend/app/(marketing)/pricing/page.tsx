@@ -10,13 +10,14 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Pricing — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Pricing',
   description:
     'Free for personal projects. From $99/mo for teams. No per-finding fees. No surprise bills. Reinforcement-trained triage on every plan.',
-};
+  path: '/pricing',
+});
 
 interface Tier {
   name: string;
@@ -148,9 +149,50 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
   },
 ];
 
+// Plain-text answers for the FAQPage schema. The on-page <a> answers are
+// fine for humans, but Google's structured-data validator wants plain
+// strings — so we mirror the text once for the schema.
+const FAQ_PLAIN_ANSWERS: Record<string, string> = {
+  'How does the free tier really work?':
+    'Five quick scans per month against any public GitHub repo, with full AI triage and the same UI as paid tiers. No credit card. No free trial that auto-converts — you stay on Free until you click upgrade.',
+  'What counts as a scan?':
+    'One run of the scanner against one target. A scan against a 2-million-line monorepo and a scan against a 5-page side project both count as one. We charge by scan count, not codebase size.',
+  'What if I exceed my monthly quota?':
+    'New scans are blocked at the limit with a clear in-app message. We never auto-charge overage. Bump your plan or wait for the monthly reset.',
+  'Can I bring my own LLM key?':
+    'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time.',
+  'How does the AI actually reduce false positives?':
+    'Every finding goes through a reinforcement-trained reviewer that rates reachability, exploitability, and false-positive likelihood. Each time you triage, the model gets better at your codebase. After ~30 days of feedback, FP rate drops below 1% on most teams.',
+  'Do you offer annual billing?':
+    'Yes — 20% off when paid annually. Available at signup or any time from your billing dashboard.',
+  'How do you bill if my team grows?':
+    'Per workspace, not per user. Add users mid-month at no charge until you hit the seat cap. Need more seats? Bump to Business or contact us.',
+  'What about enterprise needs (SSO, SCIM, on-prem)?':
+    'SSO and SCIM are on our roadmap. Need them today? Get in touch — we can prioritize for design partners and offer custom deployment options.',
+  'How do refunds work?':
+    "Cancel any time, no questions. We don't pro-rate mid-cycle, but we don't charge for the next cycle either. If you've been billed for a service that didn't work for you, email us and we'll make it right.",
+};
+
+const FAQ_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: FAQS.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: {
+      '@type': 'Answer',
+      text: FAQ_PLAIN_ANSWERS[f.q] ?? '',
+    },
+  })),
+};
+
 export default function PricingPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-16 lg:py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_LD) }}
+      />
       <header className="mx-auto max-w-3xl text-center">
         <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">Pricing</p>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">

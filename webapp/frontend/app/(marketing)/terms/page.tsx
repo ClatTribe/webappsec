@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import type { Metadata } from 'next';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'Terms of Service — your AI security engineer',
+export const metadata = buildPageMetadata({
+  title: 'Terms of Service',
   description: 'The terms that govern your use of our service. Plain-English summary up top.',
-};
+  path: '/terms',
+});
 
 const LAST_UPDATED = '2026-04-28';
 

@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, ArrowRight, Calendar, Clock } from 'lucide-react';
 import type { Metadata } from 'next';
+import { buildPageMetadata, SITE_NAME, SITE_URL } from '@/lib/seo';
 import { getAllPosts, getPostBySlug } from '../posts';
 
 interface Props {
@@ -12,11 +13,16 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = getPostBySlug(params.slug);
-  if (!post) return { title: 'Post not found' };
-  return {
-    title: `${post.title} — your AI security engineer`,
+  if (!post) return { title: 'Post not found', robots: { index: false, follow: false } };
+  // Per-post OG image lives at app/(marketing)/blog/[slug]/opengraph-image.tsx
+  // — Next colocates the convention file by route, so we just point at the
+  // canonical post path and the framework picks up the dynamic image.
+  return buildPageMetadata({
+    title: post.title,
     description: post.excerpt,
-  };
+    path: `/blog/${post.slug}`,
+    type: 'article',
+  });
 }
 
 export function generateStaticParams() {
@@ -27,8 +33,39 @@ export default function BlogPostPage({ params }: Props) {
   const post = getPostBySlug(params.slug);
   if (!post) notFound();
 
+  // Article schema. Helps Google promote the post into rich results
+  // (with date, author, image). The shape is the minimum required by
+  // schema.org/Article validator.
+  const articleLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: post.title,
+    description: post.excerpt,
+    datePublished: post.date,
+    dateModified: post.date,
+    author: {
+      '@type': 'Organization',
+      name: post.author.name,
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+      url: SITE_URL,
+    },
+    mainEntityOfPage: {
+      '@type': 'WebPage',
+      '@id': `${SITE_URL}/blog/${post.slug}`,
+    },
+    image: `${SITE_URL}/blog/${post.slug}/opengraph-image`,
+    keywords: post.tags.join(', '),
+  };
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 lg:py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
+      />
       <Link
         href="/blog"
         className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-200"
