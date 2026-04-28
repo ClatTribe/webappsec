@@ -47,28 +47,35 @@ export default function Image() {
           </div>
           <div
             style={{
+              display: 'flex',
               fontSize: 28,
               fontWeight: 600,
               letterSpacing: '-0.02em',
               color: '#e5e7eb',
+              gap: 8,
             }}
           >
-            your <span style={{ color: '#22d3ee' }}>AI</span> security engineer
+            <span>your</span>
+            <span style={{ color: '#22d3ee' }}>AI</span>
+            <span>security engineer</span>
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div
             style={{
+              display: 'flex',
+              flexWrap: 'wrap',
               fontSize: 72,
               fontWeight: 600,
               lineHeight: 1.05,
               letterSpacing: '-0.025em',
               color: '#fff',
               maxWidth: 1040,
+              gap: '0 18px',
             }}
           >
-            An AI hacker that finds{' '}
+            <span>An AI hacker that finds</span>
             <span
               style={{
                 background:
@@ -78,8 +85,8 @@ export default function Image() {
               }}
             >
               real
-            </span>{' '}
-            vulnerabilities.
+            </span>
+            <span>vulnerabilities.</span>
           </div>
           <div
             style={{

@@ -56,7 +56,11 @@ export default function BlogPostPage({ params }: Props) {
       '@type': 'WebPage',
       '@id': `${SITE_URL}/blog/${post.slug}`,
     },
-    image: `${SITE_URL}/blog/${post.slug}/opengraph-image`,
+    // All blog posts share the site-wide OG image. Per-post images would
+    // be nicer but Next 14's metadata routing didn't pick up
+    // `app/(marketing)/blog/[slug]/opengraph-image.tsx` reliably (the
+    // file existed but the route never registered). Easy upgrade later.
+    image: `${SITE_URL}/opengraph-image`,
     keywords: post.tags.join(', '),
   };
 
