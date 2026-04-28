@@ -447,3 +447,239 @@ def test_decrypt_integration_requires_service_role(conn):
                 "SELECT public.worker_decrypt_integration(%s, %s)",
                 (env["scan_id"], env["integration_id"]),
             )
+
+
+# ===========================================================================
+# Roadmap §1 — scan-lifecycle RPCs (claim, heartbeat, sweep, cancel)
+# ===========================================================================
+
+
+def _seed_queued_scan(cur, org_id: str, user_id: str, run_name: str = "test-scan") -> str:
+    cur.execute(
+        "INSERT INTO public.scans (org_id, user_id, run_name, status) "
+        "VALUES (%s, %s, %s, 'queued') RETURNING id",
+        (org_id, user_id, run_name),
+    )
+    return str(cur.fetchone()[0])
+
+
+def test_worker_claim_scan_returns_row_when_queued(conn):
+    """Atomic claim: a single worker claiming a queued scan gets the row."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute("SELECT (public.worker_claim_scan(%s)).id", (scan_id,))
+        row = cur.fetchone()
+        assert row is not None and str(row[0]) == scan_id
+
+        # Side effects: status, started_at, last_heartbeat_at all set.
+        cur.execute(
+            "SELECT status, started_at, last_heartbeat_at FROM public.scans WHERE id = %s",
+            (scan_id,),
+        )
+        status, started_at, hb = cur.fetchone()
+        assert status == "running"
+        assert started_at is not None
+        assert hb is not None
+
+
+def test_worker_claim_scan_returns_null_when_already_running(conn):
+    """The atomicity guarantee: a second claim of the same scan must return
+    null so a second worker doesn't dispatch a duplicate run."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        # First claim wins.
+        cur.execute("SELECT (public.worker_claim_scan(%s)).id", (scan_id,))
+        first = cur.fetchone()[0]
+        assert first is not None
+
+        # Second claim — row is now 'running', UPDATE matches nothing.
+        cur.execute("SELECT (public.worker_claim_scan(%s)).id", (scan_id,))
+        second = cur.fetchone()[0]
+        assert second is None
+
+
+def test_worker_claim_scan_requires_service_role(conn):
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        with pytest.raises(pg_errors.InsufficientPrivilege):
+            cur.execute("SELECT public.worker_claim_scan(%s)", (scan_id,))
+
+
+def test_worker_heartbeat_scan_advances_timestamp(conn):
+    """Successive heartbeat calls bump last_heartbeat_at — the stale-scan
+    sweep relies on this column moving forward."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute("SELECT public.worker_claim_scan(%s)", (scan_id,))
+
+        cur.execute(
+            "SELECT last_heartbeat_at FROM public.scans WHERE id = %s", (scan_id,)
+        )
+        first = cur.fetchone()[0]
+
+        # Force time to advance and call heartbeat again.
+        cur.execute("SELECT pg_sleep(0.05)")
+        cur.execute("SELECT public.worker_heartbeat_scan(%s)", (scan_id,))
+
+        cur.execute(
+            "SELECT last_heartbeat_at FROM public.scans WHERE id = %s", (scan_id,)
+        )
+        second = cur.fetchone()[0]
+        assert second > first
+
+
+def test_worker_heartbeat_noop_on_terminal_scan(conn):
+    """A heartbeat that arrives after the scan was already finished must not
+    resurrect the row — the WHERE clause filters on status='running'."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute("SELECT public.worker_claim_scan(%s)", (scan_id,))
+        cur.execute(
+            "UPDATE public.scans SET status = 'completed' WHERE id = %s", (scan_id,)
+        )
+
+        cur.execute(
+            "SELECT last_heartbeat_at FROM public.scans WHERE id = %s", (scan_id,)
+        )
+        before = cur.fetchone()[0]
+
+        cur.execute("SELECT pg_sleep(0.05)")
+        cur.execute("SELECT public.worker_heartbeat_scan(%s)", (scan_id,))
+
+        cur.execute(
+            "SELECT last_heartbeat_at, status FROM public.scans WHERE id = %s",
+            (scan_id,),
+        )
+        after_hb, after_status = cur.fetchone()
+        assert after_hb == before  # unchanged
+        assert after_status == "completed"  # not flipped back
+
+
+def test_mark_stale_scans_flips_silent_running_rows_to_failed(conn):
+    """Sweep: a 'running' scan whose last_heartbeat_at is older than the
+    tolerance gets flipped to 'failed' with a descriptive error_message."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute("SELECT public.worker_claim_scan(%s)", (scan_id,))
+        # Backdate the heartbeat into the past so the sweep finds it.
+        cur.execute(
+            "UPDATE public.scans SET last_heartbeat_at = now() - interval '20 minutes' "
+            "WHERE id = %s",
+            (scan_id,),
+        )
+
+        cur.execute("SELECT public.mark_stale_scans(600)")  # 10-min tolerance
+        sweept = [str(r[0]) for r in cur.fetchall()]
+        assert scan_id in sweept
+
+        cur.execute(
+            "SELECT status, error_message FROM public.scans WHERE id = %s", (scan_id,)
+        )
+        status, err = cur.fetchone()
+        assert status == "failed"
+        assert err is not None and "heartbeat stopped" in err
+
+
+def test_mark_stale_scans_leaves_fresh_runs_alone(conn):
+    """A scan with a recent heartbeat must not be reaped — that would make
+    the sweep an availability bug."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute("SELECT public.worker_claim_scan(%s)", (scan_id,))
+
+        cur.execute("SELECT public.mark_stale_scans(600)")
+        sweept = [str(r[0]) for r in cur.fetchall()]
+        assert scan_id not in sweept
+
+        cur.execute("SELECT status FROM public.scans WHERE id = %s", (scan_id,))
+        assert cur.fetchone()[0] == "running"
+
+
+def test_request_scan_cancel_sets_flag_and_notifies(conn):
+    """User pressing Cancel: cancel_requested_at is set and a notification
+    fires on the `scan_cancel` channel for the worker to pick up."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with listener.cursor() as lc:
+            lc.execute("LISTEN scan_cancel")
+
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            cur.execute("SELECT public.request_scan_cancel(%s)", (scan_id,))
+            conn.commit()  # release for NOTIFY delivery
+
+            cur.execute(
+                "SELECT cancel_requested_at FROM public.scans WHERE id = %s", (scan_id,)
+            )
+            assert cur.fetchone()[0] is not None
+
+            received = []
+            for n in listener.notifies(timeout=2.0):
+                received.append((n.channel, n.payload))
+                break
+            assert ("scan_cancel", scan_id) in received
+    finally:
+        listener.close()
+
+
+def test_request_scan_cancel_requires_org_membership(conn):
+    """A user from a different org must not be able to cancel another org's
+    scan — that's a tenancy escape."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+
+        # Bob from org_b tries to cancel alice's scan.
+        _set_jwt(cur, sub=ids["bob"], org_id=ids["org_b"])
+        with pytest.raises(pg_errors.RaiseException, match="not a member"):
+            cur.execute("SELECT public.request_scan_cancel(%s)", (scan_id,))
+
+
+def test_request_scan_cancel_is_noop_on_terminal_scan(conn):
+    """Pressing Cancel on a scan that already finished must be a quiet no-op
+    (concurrent click + auto-finish race)."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        scan_id = _seed_queued_scan(cur, ids["org_a"], ids["alice"])
+        cur.execute(
+            "UPDATE public.scans SET status = 'completed' WHERE id = %s", (scan_id,)
+        )
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        # No exception, no row change.
+        cur.execute("SELECT public.request_scan_cancel(%s)", (scan_id,))
+
+        cur.execute(
+            "SELECT cancel_requested_at, status FROM public.scans WHERE id = %s",
+            (scan_id,),
+        )
+        cancelled_at, status = cur.fetchone()
+        assert cancelled_at is None
+        assert status == "completed"

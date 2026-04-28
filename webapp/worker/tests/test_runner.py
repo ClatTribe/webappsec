@@ -269,13 +269,36 @@ class FakeSupabase:
         self.findings: list[dict[str, Any]] = []
         self.uploads: list[dict[str, Any]] = []
         self.start_calls: int = 0
+        self.claim_calls: int = 0
+        self.heartbeat_calls: int = 0
         self.finish_calls: list[dict[str, Any]] = []
+        self.claim_returns_truthy: bool = True
+        # Mimic the scan-row read path for `_was_cancel_requested`. Tests can
+        # set this to a non-None value to simulate a user pressing Cancel.
+        self._cancel_requested_at: str | None = None
+        self.client = _FakeClient(self)
 
     def fetch_scan(self, scan_id: str) -> dict[str, Any]:
         return self._scan
 
+    def claim_scan(self, scan_id: str) -> dict[str, Any] | None:
+        self.claim_calls += 1
+        if not self.claim_returns_truthy:
+            return None
+        # Pretend the row carries the same data fetch_scan returns. The
+        # production claim_scan returns the bare row; runner immediately
+        # follows up with fetch_scan, so what we return here mostly doesn't
+        # matter — only "is it truthy" does.
+        return {**self._scan, "status": "running"}
+
     def start_scan(self, scan_id: str) -> None:
         self.start_calls += 1
+
+    def heartbeat_scan(self, scan_id: str) -> None:
+        self.heartbeat_calls += 1
+
+    def mark_stale_scans(self, max_silence_seconds: int = 600) -> list[str]:
+        return []
 
     def finish_scan(self, scan_id: str, status: str, **kwargs: Any) -> None:
         self.finish_calls.append({"status": status, **kwargs})
@@ -308,6 +331,36 @@ class FakeSupabase:
         self, bucket: str, path: str, contents: bytes, content_type: str = "text/plain"
     ) -> None:
         self.uploads.append({"bucket": bucket, "path": path, "size": len(contents)})
+
+
+# Tiny chainable stub for the supabase-py builder. Only handles the one
+# call-shape `runner._was_cancel_requested` makes:
+#     sb.client.table("scans").select(...).eq("id", X).single().execute()
+class _FakeClient:
+    def __init__(self, sb: "FakeSupabase") -> None:
+        self._sb = sb
+
+    def table(self, name: str) -> "_FakeTable":
+        return _FakeTable(self._sb, name)
+
+
+class _FakeTable:
+    def __init__(self, sb: "FakeSupabase", name: str) -> None:
+        self._sb = sb
+
+    def select(self, _columns: str) -> "_FakeTable":
+        return self
+
+    def eq(self, _col: str, _val: Any) -> "_FakeTable":
+        return self
+
+    def single(self) -> "_FakeTable":
+        return self
+
+    def execute(self) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(data={"cancel_requested_at": self._sb._cancel_requested_at})
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +456,7 @@ async def test_run_scan_collects_all_reports(fake_scan, cfg_factory):
     await run_scan(SCAN_ID, cfg, sb)
 
     # ---- 1. Lifecycle ----
-    assert sb.start_calls == 1
+    assert sb.claim_calls == 1
     assert len(sb.finish_calls) == 1
     finish = sb.finish_calls[0]
     assert finish["status"] == "completed"
@@ -489,7 +542,7 @@ async def test_run_scan_marks_failed_on_nonzero_exit(fake_scan, cfg_factory):
 
     await run_scan(SCAN_ID, cfg, sb)
 
-    assert sb.start_calls == 1
+    assert sb.claim_calls == 1
     assert len(sb.finish_calls) == 1
     finish = sb.finish_calls[0]
     assert finish["status"] == "failed"
@@ -508,12 +561,18 @@ async def test_run_scan_marks_failed_on_nonzero_exit(fake_scan, cfg_factory):
 
 @pytest.mark.asyncio
 async def test_run_scan_skips_when_already_terminal(fake_scan, cfg_factory):
+    """Atomic claim returns falsy when the row isn't 'queued' anymore — the
+    runner should bail without ever invoking Strix or finalising the row.
+    """
     cfg = cfg_factory(FAKE_STRIX_SUCCESS)
     fake_scan["status"] = "completed"
     sb = FakeSupabase(fake_scan)
+    sb.claim_returns_truthy = False  # Simulate "lost the claim race"
 
     await run_scan(SCAN_ID, cfg, sb)
 
+    # claim_scan was called and returned None; nothing else fires.
+    assert sb.claim_calls == 1
     assert sb.start_calls == 0
     assert sb.finish_calls == []
     assert sb.events == []
@@ -1172,3 +1231,106 @@ async def test_tailer_does_not_hold_file_open_after_run(fake_scan, cfg_factory):
     events_uploads = [u for u in sb.uploads if u["path"].endswith("/events.jsonl")]
     assert len(events_uploads) == 1
     assert events_uploads[0]["size"] > 0
+
+
+# ---------------------------------------------------------------------------
+# 6. Lifecycle hardening — Roadmap §1: atomic claim, heartbeat, cancel.
+# ---------------------------------------------------------------------------
+
+# A long-running fake-strix that produces no panel and just sleeps until
+# killed. Used by cancel tests so we have a window to fire the cancel.
+FAKE_STRIX_LONG_RUNNING = textwrap.dedent('''\
+    #!/usr/bin/env python3
+    """A scan that never finishes on its own — sleeps indefinitely. The test
+    sends SIGTERM, and Python's default handler exits with -15."""
+    import sys, time, signal
+    print("strix: long-running scan started")
+    sys.stdout.flush()
+    # No SIGTERM handler — let the default propagate so proc.returncode == -15.
+    time.sleep(60)
+''')
+
+
+@pytest.mark.asyncio
+async def test_run_scan_emits_heartbeat_during_run(fake_scan, cfg_factory):
+    """A running scan must tick last_heartbeat_at so the stale-scan sweep
+    knows the worker is alive."""
+    cfg = cfg_factory(FAKE_STRIX_SUCCESS)
+    sb = FakeSupabase(fake_scan)
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    # The mock finishes too quickly for the 60-second cadence to tick more
+    # than once, but we should see at least one heartbeat (the loop calls
+    # heartbeat_scan immediately on entry).
+    assert sb.heartbeat_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_scan_marks_cancelled_on_signal_exit(fake_scan, cfg_factory):
+    """SIGTERM'd run reports `cancelled`, not `failed`. Without this, a user
+    pressing Cancel would see the scan listed as a failure — wrong status."""
+    from strix_worker.runner import cancel_running_scan
+
+    cfg = cfg_factory(FAKE_STRIX_LONG_RUNNING)
+    sb = FakeSupabase(fake_scan)
+
+    async def cancel_after_delay():
+        # Wait long enough for proc to register in _RUNNING_PROCS, then signal.
+        await asyncio.sleep(0.4)
+        cancel_running_scan(SCAN_ID)
+
+    await asyncio.gather(run_scan(SCAN_ID, cfg, sb), cancel_after_delay())
+
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "cancelled"
+    # POSIX: child killed by SIGTERM => returncode == -15.
+    assert finish["exit_code"] is not None and finish["exit_code"] < 0
+
+
+@pytest.mark.asyncio
+async def test_run_scan_marks_cancelled_when_db_flag_set_even_if_clean_exit(
+    fake_scan, cfg_factory,
+):
+    """Cancel can race with a normal exit. If the user pressed Cancel and
+    Strix happened to complete cleanly before SIGTERM landed, we still
+    honour the requested status — otherwise the row would say `completed`
+    despite the user clearly intending to abort."""
+    cfg = cfg_factory(FAKE_STRIX_SUCCESS)
+    sb = FakeSupabase(fake_scan)
+    sb._cancel_requested_at = "2026-04-29T10:00:00Z"
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    finish = sb.finish_calls[0]
+    assert finish["status"] == "cancelled"
+    # The actual exit code was 0 (Strix wrote everything, exited normally),
+    # but we override the status because cancel_requested_at is set.
+    assert finish["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_scan_returns_false_when_not_owned(fake_scan, cfg_factory):
+    """The listener calls cancel_running_scan for every NOTIFY; if this
+    worker doesn't own the scan, it must be a quiet no-op (the scan is on a
+    different worker, or already finished)."""
+    from strix_worker.runner import cancel_running_scan
+
+    # No run in flight — registry is empty.
+    assert cancel_running_scan("00000000-0000-0000-0000-000000000000") is False
+
+
+@pytest.mark.asyncio
+async def test_run_scan_bails_when_claim_loses_race(fake_scan, cfg_factory):
+    """If claim_scan returns None (another worker won), the runner must NOT
+    call finish_scan — it doesn't own the row."""
+    cfg = cfg_factory(FAKE_STRIX_SUCCESS)
+    sb = FakeSupabase(fake_scan)
+    sb.claim_returns_truthy = False
+
+    await run_scan(SCAN_ID, cfg, sb)
+
+    assert sb.claim_calls == 1
+    assert sb.finish_calls == []
+    assert sb.events == []
+    assert sb.uploads == []
