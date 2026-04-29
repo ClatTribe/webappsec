@@ -287,6 +287,75 @@ You should see `"listening for scan_queued + scan_cancel notifications"` within 
 
 For redeploys: `git pull && docker build … && docker stop strix-worker && docker rm strix-worker && docker run …`. A 10-line shell script in `/usr/local/bin/redeploy-worker.sh` makes this one-command.
 
+---
+
+## Building against our Strix fork
+
+We maintain a fork at [`ClatTribe/strix`](https://github.com/ClatTribe/strix) for changes we make on top of upstream — primarily the items in [`tools-wishlist.md`](tools-wishlist.md). The worker's `Dockerfile` accepts two `--build-arg` flags so we don't have to edit the file when we switch between upstream PyPI and our fork.
+
+### How the build picks Strix
+
+```
+ARG STRIX_SOURCE=pypi              # "pypi" | "git"
+ARG STRIX_REPO=ClatTribe/strix     # only used when STRIX_SOURCE=git
+ARG STRIX_REF=main                 # branch / tag / commit SHA
+```
+
+| Goal | Build command |
+|---|---|
+| Production-stable upstream | `docker build -t strix-worker .` (defaults — installs latest `strix-agent` from PyPI) |
+| Pin to a specific upstream version | `docker build --build-arg STRIX_REF=0.1.13 -t strix-worker .` |
+| Active development from the fork's `main` | `docker build --build-arg STRIX_SOURCE=git -t strix-worker .` |
+| Reproducible production deploy of a fork commit | `docker build --build-arg STRIX_SOURCE=git --build-arg STRIX_REF=<commit-sha> -t strix-worker .` |
+| Try someone else's branch on the fork | `docker build --build-arg STRIX_SOURCE=git --build-arg STRIX_REF=feature/per-event-tokens -t strix-worker .` |
+
+`git` is already in the image (the apt block that installs the Docker CLI also pulls it), so the git-install path needs no extra packages.
+
+### What lives in the fork vs the wrapper
+
+| Concern | Where it changes |
+|---|---|
+| Anything in [`tools-wishlist.md`](tools-wishlist.md) (token stats in events.jsonl, run.summary event, semantic checkpoints, finding categories, etc.) | The fork's Python codebase — `strix/telemetry/tracer.py`, `strix/llm/llm.py`, etc. |
+| Anything wrapper-specific (atomic claim, heartbeat, scan-cancel, the UI) | This repo (`webapp/`) |
+| The Strix sandbox image (`ghcr.io/usestrix/strix-sandbox:0.1.13`) | Nothing in the wishlist needs sandbox changes; we keep using the upstream image. If we ever do, we'd build + push to `ghcr.io/clattribe/strix-sandbox:<tag>` and override `STRIX_IMAGE` in the worker env. |
+
+### Workflow for shipping a fork change
+
+1. **In the fork** — open a feature branch, make the change, push.
+2. **Test locally** against the worker:
+   ```bash
+   cd webapp/worker
+   docker build \
+     --build-arg STRIX_SOURCE=git \
+     --build-arg STRIX_REF=feature/<branch> \
+     -t strix-worker:dev .
+   docker run -d --name strix-worker --restart=unless-stopped \
+     --env-file .env -v /var/run/docker.sock:/var/run/docker.sock \
+     strix-worker:dev
+   ```
+   Run a real scan from the UI; verify the new behaviour in `scan_events`.
+3. **Pin the SHA for production.** Once the change is validated, capture the merge commit SHA on the fork's `main` and pin it via `STRIX_REF=<sha>` in the production deploy. This makes the build reproducible — Fly.io / Railway / VPS rebuilds always pull that exact commit.
+4. **Upstream-friendly fork hygiene.** Keep `main` of the fork in sync with `usestrix/strix` upstream so wishlist PRs are easy to send back:
+   ```bash
+   git remote add upstream https://github.com/usestrix/strix
+   git fetch upstream
+   git checkout main && git merge upstream/main
+   git push origin main
+   ```
+
+### Setting the build args on the deploy platform
+
+| Platform | How to pass build args |
+|---|---|
+| **Fly.io** | Add `[build.args]` to `webapp/worker/fly.toml`: `[build.args]\nSTRIX_SOURCE = "git"\nSTRIX_REF = "main"` |
+| **Railway** | Service Settings → Build → Build args. Add `STRIX_SOURCE=git`, `STRIX_REF=<sha>`. |
+| **VPS / docker-compose** | Either pass `--build-arg` on the command line (above) or add an `args:` block under `build:` in `docker-compose.yml`. |
+| **Coolify** | Build → Build Arguments. |
+
+### When the fork drifts ahead of upstream
+
+The worker tests use a `FAKE_STRIX_*` shell mock, not the real Strix — so the wrapper's test suite is decoupled from fork drift. End-to-end tests (a live scan against a real target) need the real binary; spin them up against `strix-worker:dev` per step 2 above.
+
 ### Switching to Railway
 
 ```bash

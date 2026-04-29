@@ -18,8 +18,41 @@ RUN apt-get update \
 # Install uv for dependency management.
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
-# Install Strix from PyPI (kept independent from the worker code).
-RUN pip install --no-cache-dir strix-agent
+# --- Strix install ---------------------------------------------------------
+#
+# Default: install the latest published `strix-agent` from PyPI. Override
+# the two ARGs at build time to install from our fork (or any fork / branch
+# / tag / commit) without rewriting the Dockerfile:
+#
+#   docker build \
+#     --build-arg STRIX_SOURCE=git \
+#     --build-arg STRIX_REF=main \
+#     -t strix-worker .
+#
+# STRIX_SOURCE accepts:
+#   "pypi" (default) — `pip install strix-agent[==<STRIX_REF>]`
+#   "git"            — install from `https://github.com/<STRIX_REPO>@<STRIX_REF>`
+#
+# STRIX_REPO defaults to our fork (ClatTribe/strix). STRIX_REF defaults to
+# `main`. Pin a specific commit SHA for production rollouts so the build is
+# reproducible (e.g. `--build-arg STRIX_REF=abc123def`).
+#
+# `git` is already on the image (installed in the apt block above) so the
+# git+https install path needs no additional packages.
+ARG STRIX_SOURCE=pypi
+ARG STRIX_REPO=ClatTribe/strix
+ARG STRIX_REF=main
+RUN if [ "$STRIX_SOURCE" = "git" ]; then \
+      pip install --no-cache-dir "git+https://github.com/${STRIX_REPO}@${STRIX_REF}"; \
+    else \
+      if [ "$STRIX_REF" = "main" ] || [ -z "$STRIX_REF" ]; then \
+        pip install --no-cache-dir strix-agent; \
+      else \
+        pip install --no-cache-dir "strix-agent==${STRIX_REF}"; \
+      fi; \
+    fi \
+ && python -c "import strix" \
+ && echo "strix installed (source=$STRIX_SOURCE repo=$STRIX_REPO ref=$STRIX_REF)"
 
 WORKDIR /app
 

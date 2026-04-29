@@ -7,6 +7,16 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+# How to pull Strix into the worker image. Defaults match the Dockerfile
+# (latest published `strix-agent` from PyPI). To deploy our fork, switch to
+# git source and pin a commit SHA for reproducibility:
+#   STRIX_SOURCE = "git"
+#   STRIX_REF    = "abc123def…"   # commit SHA on ClatTribe/strix
+[build.args]
+  STRIX_SOURCE = "pypi"
+  STRIX_REPO   = "ClatTribe/strix"
+  STRIX_REF    = "main"
+
 [env]
   LOG_LEVEL = "INFO"
   WORKER_CONCURRENCY = "1"
