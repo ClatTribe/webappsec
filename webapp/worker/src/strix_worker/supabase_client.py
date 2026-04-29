@@ -20,13 +20,19 @@ class WorkerSupabase:
     # --- Scans -----------------------------------------------------------
 
     def fetch_scan(self, scan_id: str) -> dict[str, Any]:
-        """Fetch a scan with its targets and integrations."""
+        """Fetch a scan with its targets, integrations, and parent target config.
+
+        The parent target join brings in `targets.config` (the typed
+        per-target-type configuration) so the worker's instruction
+        augmenter can read it without a second round-trip.
+        """
         result = (
             self.client.table("scans")
             .select(
                 "*, "
                 "scan_targets(*), "
-                "scan_integrations(integration_id, integrations(id, type, name, vault_secret_id, metadata))"
+                "scan_integrations(integration_id, integrations(id, type, name, vault_secret_id, metadata)), "
+                "targets(id, type, value, config, auto_discover)"
             )
             .eq("id", scan_id)
             .single()

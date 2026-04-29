@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { configSchemaFor, type TargetType } from '@/lib/target-config';
 
 const Body = z.object({
   name: z.string().min(1).max(120),
@@ -13,6 +14,10 @@ const Body = z.object({
   // targets; ignored for everything else. Defaults to false — explicit
   // opt-in matches the principle of least surprise.
   auto_discover: z.boolean().default(false),
+  // Per-target-type configuration blob. Validated *after* `type` is parsed
+  // because the shape is discriminated on it (zod can't do field-dependent
+  // discrimination natively). Default: empty object.
+  config: z.record(z.string(), z.unknown()).default({}),
 });
 
 export async function POST(req: Request) {
@@ -35,6 +40,19 @@ export async function POST(req: Request) {
   const orgId = tok ? readJwtClaim(tok, 'org_id') : null;
   if (!orgId) return NextResponse.json({ error: 'no org context' }, { status: 400 });
 
+  // Validate the per-type config shape now that we know the type. zod can
+  // do `discriminatedUnion` for tagged unions but our discriminator (type)
+  // lives outside the config, so a manual second-pass parse is cleaner.
+  const cfgParse = configSchemaFor(parsed.data.type as TargetType).safeParse(
+    parsed.data.config,
+  );
+  if (!cfgParse.success) {
+    return NextResponse.json(
+      { error: 'invalid config for target type', details: cfgParse.error.format() },
+      { status: 400 },
+    );
+  }
+
   const { data, error } = await supabase
     .from('targets')
     .insert({
@@ -48,6 +66,7 @@ export async function POST(req: Request) {
       // also force-clear it here for non-domain types so a malformed UI can't
       // accidentally store auto_discover=true on, say, an IP address.
       auto_discover: parsed.data.type === 'domain' ? parsed.data.auto_discover : false,
+      config: cfgParse.data,
       created_by: user.id,
     })
     .select()
