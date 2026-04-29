@@ -40,7 +40,14 @@ export default async function IntegrationDetailPage({ params }: Props) {
         <h2 className="text-sm font-medium uppercase text-neutral-400">Recent uses</h2>
         <ul className="mt-3 space-y-2 text-sm">
           {(usedIn ?? []).map((u, i) => {
-            const s = (u as { scans: { run_name: string; status: string; created_at: string } }).scans;
+            // Supabase typegen returns embedded relations as arrays even when
+            // the FK guarantees at most one row. Normalise both shapes so
+            // `next build` doesn't fail on the type cast.
+            const raw = (u as { scans: unknown }).scans;
+            const s = (Array.isArray(raw) ? raw[0] : raw) as
+              | { run_name: string; status: string; created_at: string }
+              | undefined;
+            if (!s) return null;
             return (
               <li key={i} className="flex items-center justify-between">
                 <span>{s.run_name}</span>
