@@ -39,9 +39,16 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 #
 # `git` is already on the image (installed in the apt block above) so the
 # git+https install path needs no additional packages.
-ARG STRIX_SOURCE=pypi
+# Default to our fork pinned at a known-good commit. Builds are reproducible
+# (the same SHA always produces the same image) and we control the rollout
+# window for any change Strix lands upstream.
+#
+# When you land a wishlist item in the fork, bump STRIX_REF to the merge SHA
+# on `ClatTribe/strix@main`. To temporarily fall back to upstream PyPI in
+# an emergency: `--build-arg STRIX_SOURCE=pypi --build-arg STRIX_REF=`
+ARG STRIX_SOURCE=git
 ARG STRIX_REPO=ClatTribe/strix
-ARG STRIX_REF=main
+ARG STRIX_REF=9fb101282f728e5135cb484e4e7557570f0846ef
 RUN if [ "$STRIX_SOURCE" = "git" ]; then \
       pip install --no-cache-dir "git+https://github.com/${STRIX_REPO}@${STRIX_REF}"; \
     else \
