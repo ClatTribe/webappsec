@@ -683,3 +683,168 @@ def test_request_scan_cancel_is_noop_on_terminal_scan(conn):
         cancelled_at, status = cur.fetchone()
         assert cancelled_at is None
         assert status == "completed"
+
+
+# ===========================================================================
+# create_scan_with_targets — atomic scan creation that closes the race
+# between INSERT INTO scans (which fires pg_notify) and INSERT INTO
+# scan_targets (which the worker needs to invoke Strix correctly).
+# ===========================================================================
+
+
+def test_create_scan_with_targets_inserts_atomically(conn):
+    """Single RPC call → scan + scan_targets + integrations all visible
+    at commit time. Without this, the worker could fetch a target-less
+    scan and silently fail the run."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+
+        cur.execute(
+            "SELECT public.create_scan_with_targets("
+            "  %s::uuid, %s, %s, %s, %s, %s, %s::uuid, %s::jsonb, %s::uuid[]"
+            ")",
+            (
+                ids["org_a"],
+                "test-atomic-scan",
+                "quick",
+                "auto",
+                None,
+                "passive recon",
+                None,
+                json.dumps(
+                    [
+                        {"type": "domain", "value": "example.com", "workspace_subdir": "t1"},
+                        {"type": "domain", "value": "example.org"},
+                    ]
+                ),
+                [],
+            ),
+        )
+        scan_id = cur.fetchone()[0]
+        assert scan_id is not None
+
+        # Both targets land before commit; second target's workspace_subdir
+        # auto-fills to `target_2` from the array index.
+        cur.execute(
+            "SELECT type, value, workspace_subdir FROM public.scan_targets "
+            "WHERE scan_id = %s ORDER BY workspace_subdir",
+            (scan_id,),
+        )
+        rows = cur.fetchall()
+        assert rows == [
+            ("domain", "example.com", "t1"),
+            ("domain", "example.org", "target_2"),
+        ]
+
+        cur.execute(
+            "SELECT status, run_name FROM public.scans WHERE id = %s", (scan_id,)
+        )
+        status, run_name = cur.fetchone()
+        assert status == "queued"
+        assert run_name == "test-atomic-scan"
+
+
+def test_create_scan_with_targets_notify_fires_with_targets_visible(conn):
+    """The pg_notify-then-fetch-empty race the RPC was built to fix:
+    a separate listening connection that wakes on `scan_queued` must see
+    the scan_targets row. Without atomicity, the LISTEN delivers before
+    scan_targets has even been inserted."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with listener.cursor() as lc:
+            lc.execute("LISTEN scan_queued")
+
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+
+            cur.execute(
+                "SELECT public.create_scan_with_targets("
+                "  %s::uuid, %s, %s, %s, %s, %s, %s::uuid, %s::jsonb, %s::uuid[]"
+                ")",
+                (
+                    ids["org_a"],
+                    "race-test",
+                    "quick",
+                    "auto",
+                    None,
+                    None,
+                    None,
+                    json.dumps([{"type": "domain", "value": "example.com"}]),
+                    [],
+                ),
+            )
+            scan_id = cur.fetchone()[0]
+            conn.commit()  # release notification
+
+            # The listener now sees scan_queued. By the contract the RPC
+            # gives, scan_targets is already populated for that id.
+            received = []
+            for n in listener.notifies(timeout=2.0):
+                received.append(n.payload)
+                break
+            assert str(scan_id) in received
+
+            # Critical: the joined view the worker queries returns >= 1 target.
+            with listener.cursor() as lc:
+                lc.execute(
+                    "SELECT count(*) FROM public.scan_targets WHERE scan_id = %s",
+                    (scan_id,),
+                )
+                assert lc.fetchone()[0] >= 1
+    finally:
+        listener.close()
+
+
+def test_create_scan_with_targets_rejects_empty_targets(conn):
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+
+        with pytest.raises(pg_errors.RaiseException, match="at least one target"):
+            cur.execute(
+                "SELECT public.create_scan_with_targets("
+                "  %s::uuid, %s, %s, %s, %s, %s, %s::uuid, %s::jsonb, %s::uuid[]"
+                ")",
+                (
+                    ids["org_a"],
+                    "empty",
+                    "quick",
+                    "auto",
+                    None,
+                    None,
+                    None,
+                    json.dumps([]),
+                    [],
+                ),
+            )
+
+
+def test_create_scan_with_targets_rls_blocks_cross_org_insert(conn):
+    """Bob can't create a scan in Alice's org — RLS on the scans insert
+    rejects it. The RPC runs as security invoker so the user's RLS applies."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["bob"], org_id=ids["org_b"])
+
+        with pytest.raises((pg_errors.InsufficientPrivilege, pg_errors.RaiseException)):
+            cur.execute(
+                "SELECT public.create_scan_with_targets("
+                "  %s::uuid, %s, %s, %s, %s, %s, %s::uuid, %s::jsonb, %s::uuid[]"
+                ")",
+                (
+                    ids["org_a"],  # bob targeting alice's org
+                    "cross-org",
+                    "quick",
+                    "auto",
+                    None,
+                    None,
+                    None,
+                    json.dumps([{"type": "domain", "value": "evil.example"}]),
+                    [],
+                ),
+            )

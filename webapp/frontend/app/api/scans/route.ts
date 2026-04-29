@@ -65,60 +65,52 @@ export async function POST(req: Request) {
 
   const runName = makeRunName(body.targets[0]);
 
-  // Insert under user-context so RLS validates org_id matches the JWT.
-  const { data: scan, error: scanErr } = await supabase
-    .from('scans')
-    .insert({
-      org_id: orgId,
-      user_id: user.id,
-      target_id: body.target_id ?? null,  // ensure_target_for_scan trigger fills if null
-      run_name: runName,
-      status: 'queued',
-      scan_mode: body.scan_mode,
-      scope_mode: body.scope_mode,
-      diff_base: body.diff_base ?? null,
-      instruction_text: body.instruction_text ?? null,
-    })
-    .select()
-    .single();
-  if (scanErr || !scan) {
-    return NextResponse.json({ error: scanErr?.message ?? 'failed to insert' }, { status: 500 });
-  }
-
-  // Insert targets and integration links. Could be done in a transaction RPC for atomicity.
-  const targets = body.targets.map((value, i) => ({
-    scan_id: scan.id,
+  // Atomic create. Without this, the previous flow did three sequential
+  // inserts (scans, scan_targets, scan_integrations) — each its own HTTP
+  // round-trip and Postgres transaction. The `scan_queued` pg_notify fires
+  // when the *first* commits, before targets are in. A fast worker can
+  // claim the scan, fetch a target-less join, invoke Strix with no `-t`,
+  // and silently mark it completed.
+  //
+  // The RPC inserts all three in one transaction; pg_notify is held until
+  // commit, so the worker only ever sees fully-populated scans.
+  const targetsPayload = body.targets.map((value, i) => ({
     type: inferTargetType(value),
     value,
     workspace_subdir: `target_${i + 1}`,
   }));
-  const { error: tgtErr } = await supabase.from('scan_targets').insert(targets);
-  if (tgtErr) {
-    // Best-effort cleanup; the scan row is harmless on its own (worker will fail with no targets).
-    return NextResponse.json({ error: tgtErr.message }, { status: 500 });
-  }
 
-  if (body.integration_ids.length > 0) {
-    const { error: linkErr } = await supabase.from('scan_integrations').insert(
-      body.integration_ids.map((integration_id) => ({ scan_id: scan.id, integration_id })),
+  const { data: scanId, error: rpcErr } = await supabase.rpc('create_scan_with_targets', {
+    p_org_id: orgId,
+    p_run_name: runName,
+    p_scan_mode: body.scan_mode,
+    p_scope_mode: body.scope_mode,
+    p_diff_base: body.diff_base ?? null,
+    p_instruction_text: body.instruction_text ?? null,
+    p_target_id: body.target_id ?? null,
+    p_targets: targetsPayload,
+    p_integration_ids: body.integration_ids,
+  });
+  if (rpcErr || !scanId) {
+    return NextResponse.json(
+      { error: rpcErr?.message ?? 'failed to create scan' },
+      { status: 500 },
     );
-    if (linkErr) {
-      return NextResponse.json({ error: linkErr.message }, { status: 500 });
-    }
   }
 
-  // Audit (service role bypasses RLS).
+  // Audit (service role bypasses RLS). Stays out of the RPC because audit_log
+  // RLS forbids authenticated inserts.
   const admin = createAdminClient();
   await admin.from('audit_log').insert({
     org_id: orgId,
     user_id: user.id,
     action: 'scan.start',
     resource_type: 'scan',
-    resource_id: scan.id,
+    resource_id: scanId,
     metadata: { targets: body.targets, scan_mode: body.scan_mode },
   });
 
-  return NextResponse.json({ scan_id: scan.id, run_name: runName });
+  return NextResponse.json({ scan_id: scanId, run_name: runName });
 }
 
 function inferTargetType(target: string): string {
