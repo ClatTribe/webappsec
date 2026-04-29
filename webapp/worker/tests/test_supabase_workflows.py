@@ -860,17 +860,23 @@ def test_create_scan_with_targets_rls_blocks_cross_org_insert(conn):
 # ===========================================================================
 
 
-def _seed_domain_target(cur, org_id: str, user_id: str, value: str = "acme.com") -> str:
+def _seed_domain_target(
+    cur, org_id: str, user_id: str, value: str = "acme.com",
+    auto_discover: bool = True,
+) -> str:
+    """Insert a domain target. auto_discover defaults to True here so the
+    existing tests that exercise the discovery flow still see the notify;
+    the flag's own behaviour is exercised by the dedicated tests below."""
     cur.execute(
-        "INSERT INTO public.targets (org_id, name, type, value, created_by) "
-        "VALUES (%s, %s, 'domain', %s, %s) RETURNING id",
-        (org_id, value, value, user_id),
+        "INSERT INTO public.targets (org_id, name, type, value, created_by, auto_discover) "
+        "VALUES (%s, %s, 'domain', %s, %s, %s) RETURNING id",
+        (org_id, value, value, user_id, auto_discover),
     )
     return str(cur.fetchone()[0])
 
 
-def test_target_insert_fires_discovery_notify_for_domain(conn):
-    """A new domain target fires `target_discovery_requested`."""
+def test_target_insert_fires_discovery_notify_when_opted_in(conn):
+    """A new domain target with auto_discover=true fires the notify."""
     if psycopg is None:
         pytest.skip("psycopg not installed")
 
@@ -882,7 +888,9 @@ def test_target_insert_fires_discovery_notify_for_domain(conn):
         with conn.cursor() as cur:
             ids = _seed_two_orgs(cur)
             _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
-            target_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+            target_id = _seed_domain_target(
+                cur, ids["org_a"], ids["alice"], auto_discover=True,
+            )
             conn.commit()
 
             received = []
@@ -894,8 +902,143 @@ def test_target_insert_fires_discovery_notify_for_domain(conn):
         listener.close()
 
 
+def test_target_insert_does_not_fire_discovery_when_opted_out(conn):
+    """Domain target with auto_discover=false (the default) is silent —
+    the user gets the target without paying for crt.sh enumeration."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            _seed_domain_target(
+                cur, ids["org_a"], ids["alice"], auto_discover=False,
+            )
+            conn.commit()
+
+            received = []
+            for n in listener.notifies(timeout=0.5):
+                received.append(n.payload)
+            assert received == []
+    finally:
+        listener.close()
+
+
+def test_target_update_fires_discovery_when_flag_flipped_on(conn):
+    """User flips auto_discover from false → true on an existing target.
+    The UPDATE trigger fires the notify so the worker enumerates without
+    requiring the user to delete and recreate the target."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            target_id = _seed_domain_target(
+                cur, ids["org_a"], ids["alice"], auto_discover=False,
+            )
+            conn.commit()
+
+        # Now subscribe — we don't want the (silent) insert to confuse us.
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            cur.execute(
+                "UPDATE public.targets SET auto_discover = true WHERE id = %s",
+                (target_id,),
+            )
+            conn.commit()
+
+            received = []
+            for n in listener.notifies(timeout=2.0):
+                received.append(n.payload)
+                break
+            assert target_id in received
+    finally:
+        listener.close()
+
+
+def test_target_update_does_not_fire_when_flag_flipped_off(conn):
+    """auto_discover true → false should NOT fire (nothing to do)."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            target_id = _seed_domain_target(
+                cur, ids["org_a"], ids["alice"], auto_discover=True,
+            )
+            conn.commit()
+
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            cur.execute(
+                "UPDATE public.targets SET auto_discover = false WHERE id = %s",
+                (target_id,),
+            )
+            conn.commit()
+
+            received = []
+            for n in listener.notifies(timeout=0.5):
+                received.append(n.payload)
+            assert received == []
+    finally:
+        listener.close()
+
+
+def test_target_update_unrelated_field_does_not_fire_discovery(conn):
+    """Editing a target's name (or any non-auto_discover field) should
+    not re-trigger discovery — the trigger is keyed on auto_discover."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            target_id = _seed_domain_target(
+                cur, ids["org_a"], ids["alice"], auto_discover=True,
+            )
+            conn.commit()
+
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            cur.execute(
+                "UPDATE public.targets SET description = 'edited' WHERE id = %s",
+                (target_id,),
+            )
+            conn.commit()
+
+            received = []
+            for n in listener.notifies(timeout=0.5):
+                received.append(n.payload)
+            assert received == []
+    finally:
+        listener.close()
+
+
 def test_target_insert_does_not_fire_discovery_for_non_domain(conn):
-    """The notify trigger only fires on type='domain'."""
+    """The notify trigger only fires on type='domain', regardless of
+    auto_discover."""
     if psycopg is None:
         pytest.skip("psycopg not installed")
 
@@ -908,14 +1051,14 @@ def test_target_insert_does_not_fire_discovery_for_non_domain(conn):
             ids = _seed_two_orgs(cur)
             _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
             cur.execute(
-                "INSERT INTO public.targets (org_id, name, type, value, created_by) "
-                "VALUES (%s, %s, 'repository', %s, %s) RETURNING id",
+                "INSERT INTO public.targets "
+                "(org_id, name, type, value, created_by, auto_discover) "
+                "VALUES (%s, %s, 'repository', %s, %s, true) RETURNING id",
                 (ids["org_a"], "acme/api", "https://github.com/acme/api", ids["alice"]),
             )
             conn.commit()
 
             received = []
-            # Use a tight timeout — should be 0 notifications.
             for n in listener.notifies(timeout=0.5):
                 received.append(n.payload)
             assert received == []

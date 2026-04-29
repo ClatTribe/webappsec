@@ -61,6 +61,16 @@ async def discover_subdomains_for_target(
             target_id, target.get("type"),
         )
         return 0
+    # Defense in depth: the SQL trigger gates on auto_discover, but a stray
+    # NOTIFY (e.g. from manual SQL or a future migration regression) could
+    # bypass it. Re-check at the source of truth — never hit crt.sh for a
+    # target the user didn't opt in.
+    if not target.get("auto_discover"):
+        logger.info(
+            "discovery: target %s has auto_discover=false, skipping",
+            target_id,
+        )
+        return 0
 
     domain = (target.get("value") or "").strip().lower()
     if not domain:
@@ -98,7 +108,7 @@ def _fetch_target(sb: WorkerSupabase, target_id: str) -> dict[str, Any] | None:
     try:
         result = (
             sb.client.table("targets")
-            .select("id, org_id, type, value")
+            .select("id, org_id, type, value, auto_discover")
             .eq("id", target_id)
             .single()
             .execute()

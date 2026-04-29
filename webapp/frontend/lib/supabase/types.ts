@@ -25,6 +25,7 @@ export interface Target {
   last_scan_at: string | null;
   scan_frequency: ScanFrequency;
   status: TargetStatus;
+  auto_discover: boolean;
 }
 
 export interface Profile {

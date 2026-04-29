@@ -31,10 +31,12 @@ export default function NewTargetPage() {
   const [type, setType] = useState<TargetType | null>(null);
   const [description, setDescription] = useState('');
   const [frequency, setFrequency] = useState<ScanFrequency>('manual');
+  const [autoDiscover, setAutoDiscover] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const resolvedType = type ?? inferType(value);
+  const showAutoDiscover = resolvedType === 'domain';
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,6 +55,10 @@ export default function NewTargetPage() {
         value: value.trim(),
         description: description.trim() || undefined,
         scan_frequency: frequency,
+        // Only meaningful for domain targets — `/api/targets` ignores the
+        // field for other types, but we still gate it client-side so the
+        // request body matches what we asked the user.
+        auto_discover: resolvedType === 'domain' ? autoDiscover : false,
       }),
     });
     setSubmitting(false);
@@ -162,6 +168,30 @@ export default function NewTargetPage() {
             ))}
           </div>
         </Field>
+
+        {/* Subdomain auto-discovery — only for domain targets, opt-in.
+            Defaulted off because not every user adding `staging.acme.com`
+            wants their entire `acme.com` surface enumerated. */}
+        {showAutoDiscover && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3.5 py-3 transition-colors hover:border-neutral-700">
+            <input
+              type="checkbox"
+              checked={autoDiscover}
+              onChange={(e) => setAutoDiscover(e.target.checked)}
+              className="mt-0.5 h-4 w-4 flex-shrink-0 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-neutral-100">
+                Discover subdomains via Certificate Transparency logs
+              </div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-neutral-400">
+                We&apos;ll look up <span className="font-mono text-neutral-300">{value || 'this domain'}</span>{' '}
+                in public CT logs and suggest each discovered subdomain as a separate target.
+                You decide which to scan — nothing is auto-scanned. Free, takes ~5 seconds.
+              </div>
+            </div>
+          </label>
+        )}
 
         {error && <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
