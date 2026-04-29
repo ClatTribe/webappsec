@@ -265,17 +265,100 @@ The first thing any SMB dev team asks: "does it run on every PR?"
 
 ## 9. Target coverage for SMB
 
-The asset types our ICP actually has — make scanning each one delightful out of the box.
+Two dimensions to cover for every asset type:
+
+1. **Per-type completeness.** Does the schema + UI capture every option a user has in their head when they say "scan this thing"? (e.g. *which* branch on a repo, *what* credentials for a web app, *which* ports on an IP, *which* subdomains under a domain).
+2. **End-to-end plumbing.** Does the worker translate those options into something Strix actually acts on? Strix's CLI surface today is small (`-t`, `--instruction`, `-m`, `--scope-mode`, `--diff-base`), so most options either get expressed as augmented natural-language instruction text or need a new flag (tracked in [`tools-wishlist.md`](tools-wishlist.md)).
+
+The schema slot is already there — `targets.metadata jsonb` is unused. The proposal: type-discriminate it, validate at the API boundary with zod, and have a worker-side template translate each field into Strix-friendly form before invocation.
+
+### 9.1 Foundational plumbing (do before per-type forms)
 
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
+| ⬜ | **Typed per-type config schema** (`targets.config jsonb`, validated by zod per `targets.type`). Read by the worker, written by per-type UI forms. The single foundational change all the per-type items below depend on. | Today `metadata` is generic + empty. Without a typed slot, every per-type field has to live in free-form `instruction_text` — fragile and unauditable. | New migration with a CHECK that delegates to type-specific Postgres functions (validating jsonb shape) + zod schema in the API. | M |
+| ⬜ | **Per-type forms on `/targets/new`.** Replace the one-size-fits-all form with a switcher: pick a type → see the fields that matter for it. Today's "scan_frequency" + "auto_discover" already do per-type rendering at small scale. | One form for five wildly different concepts (repo, web app, domain, IP, local code) is the wrong default. | Branch the existing `/targets/new` page into per-type subforms or a single dynamic form keyed on `type`. | M |
+| ⬜ | **Worker-side instruction augmenter.** Reads `targets.config`, generates Strix-friendly text appended to the user's free-form `instruction_text` before invocation. E.g. for `repository`: *"Focus on `apps/api/`. Ignore `vendor/`, `node_modules/`. The branch is `develop`."* | Most per-type fields can be expressed in natural language Strix understands without a new CLI flag. The hard ones (auth creds, port specs, rate limits) get tracked in tools-wishlist. | New: `runner._build_instruction(scan, target)` called before subprocess exec. | M |
+
+### 9.2 `repository` targets
+
+Today: schema carries only `value` (URL). Strix clones the default branch and scans everything.
+
+| | Field | What it controls | How to support | Effort |
+|---|---|---|---|---|
+| ⬜ | **`branch`** | Which ref Strix scans. Default `main` / `master` / `develop` is rarely what a security-conscious team wants ("scan staging"). | Worker clones to a per-scan workdir at the chosen ref, then points Strix at the local path. No Strix change needed. | S |
+| ⬜ | **`subdirectory`** | Monorepo: scope to `apps/api/` or `services/billing/`. | Worker `cd`s to the subdir before invoking Strix. | S |
+| ⬜ | **`path_excludes`** | Skip `node_modules/`, `vendor/`, `dist/`, `__pycache__/`, test fixtures. | Augment instruction. | S |
+| ⬜ | **`language_hints`** (e.g. `["python", "typescript"]`) | Primes Strix's static-analysis tools. | Augment instruction. | S |
+| ⬜ | **Public-fork mode** | Read-only scan of a public repo we don't own — agent must not attempt to write findings, open issues, or push branches. | Worker hides the GitHub-write integration when this flag is on. | S |
+
+### 9.3 `web_application` targets — biggest coverage gap
+
+Today: schema carries only `value` (URL). Strix crawls from the root, anonymously, with no rate-limiter. Most real apps live behind auth — the **logged-in surface is invisible to us**.
+
+| | Field | What it controls | How to support | Effort |
+|---|---|---|---|---|
+| ⬜ | **`auth_strategy`** (`cookie` / `bearer` / `basic` / `oauth_creds`) + **`auth_credentials_secret_id`** | The agent scans the logged-in surface, not just public pages. **The single biggest coverage gap today** — without this, every authenticated app gets a partial scan. | Vault secret + per-strategy augmented instruction (Strix's docs already prescribe natural-language credential injection). Stretch: a Strix `--auth-cookie` / `--auth-bearer` CLI flag for clean handoff (wishlist). | M |
+| ⬜ | **`crawl_seeds`** (list of URLs) | Start the crawl from `/login`, `/api`, `/admin` — not just `/`. | Augment instruction. Wishlist: `--seed-url` repeatable. | S |
+| ⬜ | **`excluded_paths`** (glob list) | Don't hit `/api/billing/charge`, `/admin/destroy-account`, anything the user's prod can't safely receive twice. | Augment instruction + a hard wrapper-side egress check (sandbox iptables) so prompt-injection can't bypass. | M |
+| ⬜ | **`api_spec_url`** (OpenAPI / Swagger) | Test every documented endpoint. | Augment instruction with the URL. | S |
+| ⬜ | **`header_overrides`** (list of `"Name: value"`) | API-key auth, custom WAF bypass, `X-Forwarded-For`, etc. Sensitive ones go in Vault. | Augment instruction (non-sensitive) + Vault secret (sensitive). Wishlist: `--header` repeatable. | S |
+| ⬜ | **`rate_limit_qps`** | "Don't exceed 10 req/s — production traffic." | Augment instruction. Strix needs a hard cap to actually honour this — wishlist `--rate-limit`. | M |
+
+### 9.4 `domain` targets
+
+Today: `value` + opt-in `auto_discover` (shipped).
+
+| | Field | What it controls | How to support | Effort |
+|---|---|---|---|---|
+| ⬜ | **`subdomain_includes` / `subdomain_excludes`** (glob) | Even with auto-discover, "scan all `*.acme.com` except `*-staging.*`" or "only `api.*` and `app.*`". | Wrapper filters the discovery set + the per-scan `scan_targets` list. | S |
+| ⬜ | **`dns_only`** flag | Just enumerate; don't probe HTTP. Useful for surface mapping without active probing. | Augment instruction. Wishlist: `--dns-only` Strix flag for cleaner gating. | S |
+
+### 9.5 `ip_address` targets
+
+Today: single IP. Strix decides ports + protocols — usually defaults to "the obvious ones", which is wrong both for narrow (an old IoT device on port 1900) and broad ("scan my office's whole /24") use cases.
+
+| | Field | What it controls | How to support | Effort |
+|---|---|---|---|---|
+| ⬜ | **`port_spec`** (e.g. `80,443,1-1024,8080-8090`) | Which ports actually get probed. | Augment instruction. Wishlist: `--ports` Strix flag — `nmap` is what runs inside Strix anyway, so this is a thin wrapper. | S |
+| ⬜ | **`protocols`** (`tcp` / `udp` / `both`) | UDP needs different scanning behaviour. | Augment instruction. | S |
+| ⬜ | **CIDR / IP-range support** | Existing roadmap item. "Scan my office IP range `203.0.113.0/24`." | Schema validation update + worker fans out scan_targets per host (or passes the CIDR through if Strix can take it). | S |
+
+### 9.6 `local_code` targets
+
+Today: path. The SaaS-deployed worker can't access the user's filesystem — this type is effectively **self-host only**.
+
+| | Field | What it controls | How to support | Effort |
+|---|---|---|---|---|
+| ⬜ | **`language_hints` / `path_excludes`** | Same as `repository`. | Same. | S |
+| ⬜ | **Hide on managed deploys** | `local_code` should only be a selectable type when the worker has volume access. On the cloud product, hide it from `/targets/new`. | Detect from a `WORKER_HAS_LOCAL_VOLUMES` env flag (default off in cloud, on in self-host). | S |
+
+### 9.7 Cross-target infrastructure
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ✅ | **Subdomain auto-discovery (opt-in)** | Shipped in [`migration 015`](webapp/supabase/migrations/20260429000015_target_auto_discover.sql) — see §9.4 above for follow-on includes/excludes. | — | M |
 | ⬜ | **GitHub org bulk-add.** "Connect your GitHub org → see every public repo + every private repo we have access to → tick the ones to scan." | A single click adds 30 targets. Catalyzes "I scanned everything" stories that drive virality. | After GitHub OAuth, fetch `/user/repos` and present a checklist. | M |
-| ✅ | **Subdomain auto-discovery (opt-in).** A `targets.auto_discover` flag (default off) gates the flow. When enabled — either at create time via the `/targets/new` checkbox or later via the "Find subdomains" CTA on the target detail page — `pg_notify('target_discovery_requested')` fires → worker hits `crt.sh` with retry-on-502 backoff → writes unique subdomains to `target_discoveries` → user accepts/dismisses on the panel. Accepted ones become real targets via `promote_discovery_to_target`; dismissed ones are hidden permanently. The trigger and the worker both gate on the flag — defense in depth. | Matches the mental model "scan my company" without surprising users who add a single specific subdomain and don't want full enumeration. | [`worker/src/strix_worker/discovery.py`](webapp/worker/src/strix_worker/discovery.py), [`migration 014`](webapp/supabase/migrations/20260429000014_target_discoveries.sql), [`migration 015`](webapp/supabase/migrations/20260429000015_target_auto_discover.sql), [`components/target/discoveries-panel.tsx`](webapp/frontend/components/target/discoveries-panel.tsx). | M |
-| ⬜ | **CIDR / IP-range targets.** Today only single IPs. Allow `203.0.113.0/24`. | A common SMB request: "scan my office IP range". | Schema validation update; worker iterates. | S |
-| ⬜ | **Recurring crawl-then-scan.** For deployed web apps, do a polite crawl to enumerate endpoints before scanning. | Modern apps have hundreds of endpoints; the scanner shouldn't have to guess. | Pre-scan crawl phase in the worker; expose `--seeded-from-crawl` to Strix. | L |
+| ⬜ | **Recurring crawl-then-scan** for deployed web apps. Pre-scan polite crawl to enumerate endpoints before letting Strix loose. | Modern apps have hundreds of endpoints; the scanner shouldn't have to guess. Pairs with `crawl_seeds` (§9.3). | Pre-scan crawl phase in the worker; passes the discovered URL set into the instruction. | L |
 | ⬜ | **Target health monitoring.** "Is this target up?" — DNS resolution + a single HEAD request before scanning. Surface failures clearly instead of failing 10 minutes in. | Saves $ + frustration. | Pre-flight check in the worker before spawning Strix. | S |
 | ⬜ | **Per-target scan history retention.** SMB users want "last 90 days" not "since the dawn of time". | Storage cost. UX clarity. | Plan-tier-driven retention policy with archive-to-S3 for older runs. | M |
 | ⬜ | **Tag / group targets.** "Production", "Staging", "Customer-facing", arbitrary user tags. Filter by tag. | Once a user has 30 targets, they need taxonomy. | New `tags` + `target_tags` tables. | S |
+
+### 9.8 Strix-side flags this depends on
+
+For the items above marked "wishlist", real CLI flags would beat instruction-text augmentation. Tracked in [`tools-wishlist.md`](tools-wishlist.md) under "Per-target-type CLI flags":
+
+  - `--branch <ref>` (`repository`)
+  - `--auth-cookie` / `--auth-bearer` / `--auth-basic` (`web_application`)
+  - `--seed-url <url>` (repeatable, `web_application`)
+  - `--exclude-path <glob>` (repeatable, `web_application`)
+  - `--openapi <url>` (`web_application`)
+  - `--header <name:value>` (repeatable, `web_application`)
+  - `--rate-limit <qps>` (`web_application`)
+  - `--dns-only` (`domain`)
+  - `--ports <spec>` + `--protocol <tcp|udp|both>` (`ip_address`)
+
+Until these land, augmented instruction text fills the gap — works for ~80% of cases, fragile for credentials and rate-limits where natural-language compliance isn't guaranteed.
 
 ---
 

@@ -61,6 +61,24 @@ The scan UI today shows technical exhaust (agent IDs, tool-call counts, raw URLs
 | 🟢 | **Agent / target context on every `tool.execution.*` event** | We display `agent_name` and `target` per tool call; today we join across multiple events. | Add `agent_name`, `target` directly to `tool.execution.started` / `.updated`. |
 | 🟢 | **`--quiet` mode that still emits `events.jsonl`** | Strix's stdout output is for the CLI user. Server use has no terminal. | Suppress Rich panels, keep file output untouched. (We work around with non-TTY detection but Rich still emits ANSI in some cases.) |
 
+### Priority 2 — per-target-type CLI flags
+
+Strix's CLI today is shaped around "give me a target and an instruction". Most per-target options end up baked into the free-text `--instruction`, which the model honours about 80% of the time — fragile for the 20% (credentials, rate-limits) where compliance matters. Each item below is a thin CLI flag the wrapper would translate from typed `targets.config` (see [roadmap §9](roadmap.md#9-target-coverage-for-smb)).
+
+| | Item | Target type | Why we want it | Proposed shape |
+|---|---|---|---|---|
+| 🟠 | **`--branch <ref>`** | `repository` | Today Strix clones the default branch. Security-conscious teams want to scan `develop` or `staging` — the wrapper can clone locally and pass `-t /path`, but a native flag is cleaner and lets Strix log the ref. | Single string; passed through to `git clone --branch`. |
+| 🔴 | **`--auth-cookie <value>`, `--auth-bearer <token>`, `--auth-basic <user:pass>`** | `web_application` | **Single biggest coverage gap upstream.** Most real apps live behind auth; without a clean way to log in, every authenticated app gets a partial scan. The docs say to put credentials in `--instruction` — works inconsistently and leaks them into events.jsonl. | Stored in env var that Strix reads at LLM-call time and never logs. The agent gets a system-prompt note "you have credentials; use them" rather than the credentials in the prompt. |
+| 🟠 | **`--seed-url <url>`** (repeatable) | `web_application` | Steer the crawl. "Don't start at /, start at /api and /admin." | Repeatable flag; agent treats them as the only crawl entrypoints unless told otherwise. |
+| 🟠 | **`--exclude-path <glob>`** (repeatable) | `web_application` | "Don't hit /api/billing/charge or /admin/destroy-account." Hard rule, not a hint — production safety. | Repeatable. The agent's HTTP tool short-circuits with a logged "skipped (excluded)" event if it tries to navigate to an excluded path. |
+| 🟠 | **`--openapi <url>`** | `web_application` | Test every documented endpoint. Today the agent has to discover the spec via crawl. | Strix fetches + parses + uses it as additional seed context. |
+| 🟢 | **`--header <name:value>`** (repeatable) | `web_application` | API-key auth, custom WAF bypass, `X-Forwarded-For`. | Repeatable; passed on every HTTP request the agent's tools make. |
+| 🟠 | **`--rate-limit <qps>`** | `web_application` | "Don't exceed 10 req/s — production traffic." Today the agent self-limits via natural language, which is unreliable. | Hard cap enforced inside the HTTP tool layer; not just a hint to the model. |
+| 🟢 | **`--dns-only`** | `domain` | "Just enumerate, don't probe HTTP." Surface mapping without active probing. | Disables HTTP-stage tools, keeps DNS / CT / passive recon. |
+| 🟠 | **`--ports <spec>`** + **`--protocol <tcp\|udp\|both>`** | `ip_address` | Strix uses nmap inside; right now it picks a default port set. SMB users want explicit control. | Passed straight into the underlying nmap command. |
+
+The wrapper-side schema + UI for these lives in [roadmap §9.2–9.6](roadmap.md#9-target-coverage-for-smb). Until each flag lands upstream, the wrapper falls back to instruction-text augmentation — works for the easy ones (path excludes, language hints, branch via local clone) but not for the safety-critical ones (rate-limit, exclude-path).
+
 ---
 
 ## Other tools we wrap
