@@ -52,3 +52,6 @@ strix_repos/
 *.pid
 *.sock
 *.tar.gz
+
+# Claude Code session state — runtime lock files, transcripts, etc.
+.claude/
