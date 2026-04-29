@@ -56,14 +56,15 @@ Effort estimates: **S** ≈ a day, **M** ≈ a week, **L** ≈ a month, **XL** �
 7. [Viral & share surface](#7-viral--share-surface)
 8. [CI/CD plumbing](#8-cicd-plumbing)
 9. [Target coverage for SMB](#9-target-coverage-for-smb)
-10. [Triage & remediation](#10-triage--remediation)
-11. [SOC 2 / ISO-light compliance](#11-soc-2--iso-light-compliance)
-12. [Ops & reliability](#12-ops--reliability)
-13. [Security hardening](#13-security-hardening)
-14. [Quality & contributor experience](#14-quality--contributor-experience)
-15. [Deferred — enterprise motion](#15-deferred--enterprise-motion)
-16. [Future / research](#16-future--research)
-17. [Already shipped](#17-already-shipped)
+10. [Triage, remediation & continuous learning](#10-triage-remediation--continuous-learning)
+11. [Engine plugins — multi-tool architecture](#11-engine-plugins--multi-tool-architecture)
+12. [SOC 2 / ISO-light compliance](#12-soc-2--iso-light-compliance)
+13. [Ops & reliability](#13-ops--reliability)
+14. [Security hardening](#14-security-hardening)
+15. [Quality & contributor experience](#15-quality--contributor-experience)
+16. [Deferred — enterprise motion](#16-deferred--enterprise-motion)
+17. [Future / research](#17-future--research)
+18. [Already shipped](#18-already-shipped)
 
 ---
 
@@ -324,7 +325,31 @@ Make the agent feel like a real security engineer, not a stack of regex matches.
 
 ---
 
-## 11. SOC 2 / ISO-light compliance
+## 11. Engine plugins — multi-tool architecture
+
+Today the wrapper is hard-wired to Strix. Adding Semgrep, Trivy, ZAP, Nuclei, GitLeaks, Bandit, or anything else means forking [`runner.py`](webapp/worker/src/strix_worker/runner.py) — Strix-specific assumptions are baked in everywhere (events.jsonl path, `vuln-NNNN.md` markdown shape, the rendered stdout panel regex for token stats, exit-code 0/2 = success, env vars `STRIX_LLM` / `STRIX_BIN` / `STRIX_IMAGE`, the entire module name `strix_worker`).
+
+**The framing this unlocks** keeps the brand promise honest: *"An AI security engineer that runs the right tools for the job."* Strix stays the lead engine — it's the AI agent that exploits and learns. Stateless tools (Semgrep / Trivy / ZAP / Nuclei) become first-pass filters whose output normalises into the same triage flow. The "no false positives" claim has to hold across every tool, not just Strix — which means the items below all feed into the §10 reinforcement-learning loop.
+
+| | Item | Why | Where | Effort |
+|---|---|---|---|---|
+| ⬜ | **Pluggable tool adapter interface.** Abstract the Strix-specific subprocess driver into a `BaseTool` protocol: `build_command(scan, target) → cmd`, `parse_events(stream) → ScanEvent[]`, `parse_findings(workdir) → Finding[]`, `extract_stats(stdout) → StatsSnapshot`, `sandbox_config() → SandboxSpec`. Strix becomes one implementation; each new tool is a ~200-line adapter. | Today every Strix-specific assumption is hard-coded in [`runner.py`](webapp/worker/src/strix_worker/runner.py). Adding any other tool = fork-and-duplicate. | New: `webapp/worker/src/scan_worker/tools/{base,strix,semgrep,trivy,zap,nuclei,gitleaks}.py`. Rename module `strix_worker` → `scan_worker`. | L |
+| ⬜ | **Tool catalog table** (`tools` + `org_tools`). Catalog of supported engines with per-org enable / disable / config. Each row carries supported `target_types`, default config, plan-tier gating, current pinned version. | The frontend needs to know which tools the org can pick from + which require which plan tier. Without a catalog, every tool addition is a hardcoded UI change. | New tables. UI surface in `/settings/scanners`. | M |
+| ⬜ | **`scans.tool` + `findings.detected_by` columns.** Today every scan is implicitly Strix; every finding's source is implicit. Track which engine ran on each scan + which engine(s) found each finding. `detected_by` is a `text[]` so cross-tool dedup can merge sources. | Required for the "Detected by Semgrep + Strix" badge, cross-tool dedup, per-tool retention policy, per-tool cost attribution, per-tool drift detection in the RL loop. | New migration. | S |
+| ⬜ | **Canonical finding schema (the contract).** Every adapter normalises to one shape: `(severity, cwe, category, target, endpoint, file, line, description_md, poc_md, remediation_md)`. Tool-specific extras live in `findings.tool_metadata jsonb`. The triage layer + UI work *only* on canonical fields. | Without this contract, tool diversity bleeds into the UI and the §10 RL loop. With it, adding a tool is invisible to anything downstream. | Document the contract in [`Architecture.md`](Architecture.md). The current schema is mostly there; just needs each adapter to conform. | S |
+| ⬜ | **SARIF intake** (one adapter that unlocks ten tools). Semgrep, CodeQL, Trivy, Snyk, Bandit, GitLeaks, Checkov, KICS, tfsec, tflint all speak SARIF. A single SARIF parser → canonical finding mapper covers them. | Lowest-effort way to support most of the OSS security ecosystem. Pairs symmetrically with the SARIF *export* tracked in §12. | New: `tools/sarif.py`. | M |
+| ⬜ | **Multi-tool scan composition.** One `scans` row fans out to N tool runs; findings aggregate; the scan completes when all tools finish. Default policy routes by target type (repo → Strix + Semgrep + GitLeaks; web app → Strix + ZAP + Nuclei; container image → Trivy; domain → Nuclei + subfinder). | Without this, the UX is "pick one tool" — confusing for users who don't know the difference. With it, the UX is "we picked the right tools for this target". The AI-orchestrator framing only makes sense at the multi-tool layer. | New table `scan_runs` (one per tool per scan). Worker dispatches per tool concurrently, awaits all, finalises one scan row. | M |
+| ⬜ | **Cross-tool finding deduplication.** Generalise the existing fingerprint to be tool-agnostic. Same `(file, line, cwe)` from Strix + Semgrep collapses to one row with `detected_by: ['strix','semgrep']`; users see one finding. The triage signal in §10 trains on the merged record. | A multi-tool scan that returns 3× the findings is the *opposite* of the no-noise promise. | Extend `_compute_fingerprint`; merge logic in `worker_insert_finding`. | M |
+| ⬜ | **Per-target tool routing + override.** Sane defaults per `target.type` so most users don't choose. Power users can override per scan or per target ("never run ZAP on this target"). | Onboarding (§3) should not surface 7 checkboxes on first scan. | UI default in `/scans/new`; per-target override in `/targets/[id]/settings`. Routing table from the tool catalog. | M |
+| ⬜ | **Per-tool resource budgets.** Semgrep finishes in 60 s; Strix runs 30 min. Trivy is fast. ZAP is slow. Different timeouts, memory limits, concurrency caps, cost-cap weightings per tool. | Today the worker's heartbeat / stale-scan / cancel / cost logic uses one timeout. Without per-tool budgets, fast tools wait on slow ones; slow tools get killed by fast-tool sweeps. | `tools.config jsonb` with budget fields. Worker reads at dispatch. | S |
+| ⬜ | **Tool versioning + reproducibility.** Pin the exact tool version on every `scan_runs` row. Findings reference the version. | When Semgrep ships a new ruleset, today's findings shouldn't silently look outdated; we should know which ruleset surfaced what. Lets us replay a scan against the old version on demand. | Schema. Adapter captures version at dispatch. | S |
+| ⬜ | **Per-tool sandbox isolation.** Strix needs `--privileged` Docker for its full agent loop; Trivy needs registry creds; ZAP needs a target URL allow-list; Semgrep needs no network at all. Each adapter declares its sandbox needs (network rules, mounts, dropped capabilities). Worker enforces. | The current blanket privileged mount is overkill for tools that only need a filesystem. Cross-references §14 (Security hardening). | Adapter declares `SandboxSpec`; worker translates to `docker run` flags. | M |
+| ⬜ | **Plan-tier gating per tool.** Free = Strix only (lead engine). Team = + Semgrep + GitLeaks (fast OSS adds). Business = + Trivy + ZAP + Nuclei + custom rule packs. | The pricing page (§5) needs something to differentiate tiers besides scan count. Tool access is the natural lever for technical users. | Tool catalog reads `plan_min` per tool. | S |
+| ⬜ | **Generalise [`tools-wishlist.md`](tools-wishlist.md).** Today it's only Strix asks. Refactor into per-tool subsections, each tracking that tool's upstream gaps. | Same patterns repeat upstream (events stream, semantic categories, summary at end). Tracking them per-tool keeps asks organised when we're talking to multiple maintainers. | Refactor in place. | S |
+
+---
+
+## 12. SOC 2 / ISO-light compliance
 
 SMB compliance is real but lighter than enterprise. Goal: the buyer can hand the auditor a SOC 2 evidence link, not negotiate a 60-day questionnaire.
 
@@ -340,7 +365,7 @@ SMB compliance is real but lighter than enterprise. Goal: the buyer can hand the
 
 ---
 
-## 12. Ops & reliability
+## 13. Ops & reliability
 
 Keep a small ops team alive while we're growing.
 
@@ -356,7 +381,7 @@ Keep a small ops team alive while we're growing.
 
 ---
 
-## 13. Security hardening
+## 14. Security hardening
 
 Beyond what's done. The wrapper inherits Strix's isolation guarantees + adds the org boundary; this section closes the remaining gaps in *our* code.
 
@@ -372,7 +397,7 @@ Beyond what's done. The wrapper inherits Strix's isolation guarantees + adds the
 
 ---
 
-## 14. Quality & contributor experience
+## 15. Quality & contributor experience
 
 | | Item | Why | Where | Effort |
 |---|---|---|---|---|
@@ -385,7 +410,7 @@ Beyond what's done. The wrapper inherits Strix's isolation guarantees + adds the
 
 ---
 
-## 15. Deferred — enterprise motion
+## 16. Deferred — enterprise motion
 
 Items that belong in a later motion once PLG is proven. Listed for completeness; not on the roadmap until Team-tier ARR clears the threshold.
 
@@ -399,7 +424,7 @@ When the time comes, these all build on top of what's already there — none of 
 
 ---
 
-## 16. Future / research
+## 17. Future / research
 
 Bigger ideas, lower confidence on value or feasibility.
 
@@ -412,7 +437,7 @@ Bigger ideas, lower confidence on value or feasibility.
 
 ---
 
-## 17. Already shipped
+## 18. Already shipped
 
 Reverse-chronological log.
 
