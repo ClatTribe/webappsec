@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import FindingCard from '@/components/finding/finding-card';
+import DiscoveriesPanel from '@/components/target/discoveries-panel';
 import type { Finding, Scan, ScanStatus, Target, TargetType } from '@/lib/supabase/types';
 
 const TYPE_ICON: Record<TargetType, LucideIcon> = {
@@ -171,6 +172,10 @@ export default function TargetView({ target: t, scans, findings, initialTab }: P
             <StatTile label="Monitor" value={monitor} tone="amber" Icon={Eye} />
             <StatTile label="Resolved" value={resolved} tone="neutral" Icon={CheckCircle2} />
           </div>
+
+          {/* Subdomain auto-discovery — only renders when there's something
+              to show (renders nothing for non-domain targets). */}
+          <DiscoveriesPanel targetId={t.id} targetType={t.type} />
 
           {/* Top 3 most urgent findings */}
           <section className="space-y-3">

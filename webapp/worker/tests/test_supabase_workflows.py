@@ -848,3 +848,203 @@ def test_create_scan_with_targets_rls_blocks_cross_org_insert(conn):
                     [],
                 ),
             )
+
+
+# ===========================================================================
+# Subdomain auto-discovery — roadmap §9.
+#
+# The worker hits crt.sh on `target_discovery_requested` and writes rows to
+# target_discoveries. The user then accepts (→ promote to a real target) or
+# dismisses each one. Tests below exercise the SQL surface: the trigger, the
+# promote RPC, RLS, and idempotency.
+# ===========================================================================
+
+
+def _seed_domain_target(cur, org_id: str, user_id: str, value: str = "acme.com") -> str:
+    cur.execute(
+        "INSERT INTO public.targets (org_id, name, type, value, created_by) "
+        "VALUES (%s, %s, 'domain', %s, %s) RETURNING id",
+        (org_id, value, value, user_id),
+    )
+    return str(cur.fetchone()[0])
+
+
+def test_target_insert_fires_discovery_notify_for_domain(conn):
+    """A new domain target fires `target_discovery_requested`."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            target_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+            conn.commit()
+
+            received = []
+            for n in listener.notifies(timeout=2.0):
+                received.append(n.payload)
+                break
+            assert target_id in received
+    finally:
+        listener.close()
+
+
+def test_target_insert_does_not_fire_discovery_for_non_domain(conn):
+    """The notify trigger only fires on type='domain'."""
+    if psycopg is None:
+        pytest.skip("psycopg not installed")
+
+    listener = psycopg.connect(DB_URL, autocommit=True, connect_timeout=2)
+    try:
+        with listener.cursor() as lc:
+            lc.execute("LISTEN target_discovery_requested")
+
+        with conn.cursor() as cur:
+            ids = _seed_two_orgs(cur)
+            _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+            cur.execute(
+                "INSERT INTO public.targets (org_id, name, type, value, created_by) "
+                "VALUES (%s, %s, 'repository', %s, %s) RETURNING id",
+                (ids["org_a"], "acme/api", "https://github.com/acme/api", ids["alice"]),
+            )
+            conn.commit()
+
+            received = []
+            # Use a tight timeout — should be 0 notifications.
+            for n in listener.notifies(timeout=0.5):
+                received.append(n.payload)
+            assert received == []
+    finally:
+        listener.close()
+
+
+def test_promote_discovery_creates_new_target_and_links(conn):
+    """User accepts a discovery → a new target row exists, and the
+    discovery row is marked accepted with promoted_target_id set."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        parent_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+
+        # Worker would normally insert discoveries; do it as service_role
+        # to mimic that path.
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute(
+            "INSERT INTO public.target_discoveries (target_id, org_id, source, value) "
+            "VALUES (%s, %s, 'crt_sh', 'api.acme.com') RETURNING id",
+            (parent_id, ids["org_a"]),
+        )
+        disc_id = str(cur.fetchone()[0])
+
+        # Switch back to the user and call the promote RPC.
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        cur.execute("SELECT public.promote_discovery_to_target(%s)", (disc_id,))
+        new_target_id = str(cur.fetchone()[0])
+
+        # The new target exists with the right type/value/parent org.
+        cur.execute(
+            "SELECT type, value, org_id FROM public.targets WHERE id = %s",
+            (new_target_id,),
+        )
+        target_type, target_value, target_org = cur.fetchone()
+        assert target_type == "domain"
+        assert target_value == "api.acme.com"
+        assert str(target_org) == ids["org_a"]
+
+        # The discovery row is now linked.
+        cur.execute(
+            "SELECT status, promoted_target_id FROM public.target_discoveries "
+            "WHERE id = %s",
+            (disc_id,),
+        )
+        status, promoted_id = cur.fetchone()
+        assert status == "accepted"
+        assert str(promoted_id) == new_target_id
+
+
+def test_promote_discovery_is_idempotent(conn):
+    """Pressing Accept twice should not create two targets — return the
+    same one."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        parent_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute(
+            "INSERT INTO public.target_discoveries (target_id, org_id, source, value) "
+            "VALUES (%s, %s, 'crt_sh', 'api.acme.com') RETURNING id",
+            (parent_id, ids["org_a"]),
+        )
+        disc_id = str(cur.fetchone()[0])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        cur.execute("SELECT public.promote_discovery_to_target(%s)", (disc_id,))
+        first = str(cur.fetchone()[0])
+
+        cur.execute("SELECT public.promote_discovery_to_target(%s)", (disc_id,))
+        second = str(cur.fetchone()[0])
+
+        assert first == second
+
+        # Only one target row created.
+        cur.execute(
+            "SELECT count(*) FROM public.targets WHERE value = 'api.acme.com'"
+        )
+        assert cur.fetchone()[0] == 1
+
+
+def test_dismiss_via_rls_update_works_for_org_member(conn):
+    """Org member can mark a discovery dismissed — direct UPDATE through RLS,
+    no RPC needed."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        parent_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute(
+            "INSERT INTO public.target_discoveries (target_id, org_id, source, value) "
+            "VALUES (%s, %s, 'crt_sh', 'api.acme.com') RETURNING id",
+            (parent_id, ids["org_a"]),
+        )
+        disc_id = str(cur.fetchone()[0])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        cur.execute(
+            "UPDATE public.target_discoveries SET status='dismissed' WHERE id = %s",
+            (disc_id,),
+        )
+
+        cur.execute(
+            "SELECT status FROM public.target_discoveries WHERE id = %s", (disc_id,)
+        )
+        assert cur.fetchone()[0] == "dismissed"
+
+
+def test_rls_blocks_cross_org_read_of_discoveries(conn):
+    """Bob cannot see Alice's discoveries — RLS scopes by org."""
+    with conn.cursor() as cur:
+        ids = _seed_two_orgs(cur)
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"])
+        parent_id = _seed_domain_target(cur, ids["org_a"], ids["alice"])
+
+        _set_jwt(cur, sub=ids["alice"], org_id=ids["org_a"], jwt_role="service_role")
+        cur.execute(
+            "INSERT INTO public.target_discoveries (target_id, org_id, source, value) "
+            "VALUES (%s, %s, 'crt_sh', 'api.acme.com') RETURNING id",
+            (parent_id, ids["org_a"]),
+        )
+
+        # Bob switches in.
+        _set_jwt(cur, sub=ids["bob"], org_id=ids["org_b"])
+        cur.execute(
+            "SELECT count(*) FROM public.target_discoveries WHERE target_id = %s",
+            (parent_id,),
+        )
+        assert cur.fetchone()[0] == 0

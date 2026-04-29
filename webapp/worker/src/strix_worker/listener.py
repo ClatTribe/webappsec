@@ -3,12 +3,14 @@
 Picks up:
   - `scan_queued` payloads -> dispatch a new scan run
   - `scan_cancel` payloads -> SIGTERM the matching subprocess (if we own it)
+  - `target_discovery_requested` payloads -> enumerate subdomains via crt.sh
 
 Also runs a periodic stuck-scan sweep so a worker that dies mid-run (or hangs
 on a stalled LLM call) doesn't leave the row in 'running' indefinitely.
 
 Concurrency is bounded by `WORKER_CONCURRENCY`. When at capacity, new
-notifications are queued and processed FIFO.
+notifications are queued and processed FIFO. Discovery jobs run on a
+separate (uncapped) lane — they're cheap HTTP calls, not LLM scans.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import logging
 import psycopg
 
 from .config import WorkerConfig
+from .discovery import discover_subdomains_for_target
 from .runner import cancel_running_scan, run_scan
 from .supabase_client import WorkerSupabase
 
@@ -54,7 +57,11 @@ class ScanQueueListener:
                 async with conn.cursor() as cur:
                     await cur.execute("LISTEN scan_queued")
                     await cur.execute("LISTEN scan_cancel")
-                    logger.info("listening for scan_queued + scan_cancel notifications")
+                    await cur.execute("LISTEN target_discovery_requested")
+                    logger.info(
+                        "listening for scan_queued + scan_cancel + "
+                        "target_discovery_requested notifications"
+                    )
 
                     while not self._stopping.is_set():
                         try:
@@ -88,6 +95,12 @@ class ScanQueueListener:
                     "scan %s cancel notification ignored (not owned by this worker)",
                     payload,
                 )
+        elif channel == "target_discovery_requested":
+            # Discovery jobs are cheap (one HTTP call, parse, write). They
+            # share the worker process but bypass the scan-concurrency
+            # semaphore — no point queuing a 10-second crt.sh call behind
+            # a 30-minute LLM scan.
+            asyncio.create_task(self._dispatch_discovery(payload))
         else:
             logger.debug("ignoring unknown notify channel %s", channel)
 
@@ -97,6 +110,14 @@ class ScanQueueListener:
                 await run_scan(scan_id, self.cfg, self.sb)
             except Exception:  # noqa: BLE001
                 logger.exception("dispatch failed for scan %s", scan_id)
+
+    async def _dispatch_discovery(self, target_id: str) -> None:
+        try:
+            await discover_subdomains_for_target(self.sb, target_id)
+        except Exception:  # noqa: BLE001
+            # Discovery is best-effort; a failure here is logged but
+            # doesn't surface to the user (the target is still scannable).
+            logger.exception("discovery failed for target %s", target_id)
 
     async def _sweep_pending(self) -> None:
         """At startup, look for queued scans that may have been notified while we were down."""
