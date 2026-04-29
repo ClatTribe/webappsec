@@ -26,6 +26,7 @@ export interface Target {
   scan_frequency: ScanFrequency;
   status: TargetStatus;
   auto_discover: boolean;
+  config: Record<string, unknown>;
 }
 
 export interface Profile {

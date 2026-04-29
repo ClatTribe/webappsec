@@ -32,6 +32,17 @@ export default function NewTargetPage() {
   const [description, setDescription] = useState('');
   const [frequency, setFrequency] = useState<ScanFrequency>('manual');
   const [autoDiscover, setAutoDiscover] = useState(false);
+  // Per-type config fields. Each is rendered conditionally based on
+  // resolvedType. Only the relevant subset is sent to the API.
+  const [branch, setBranch] = useState('');
+  const [subdirectory, setSubdirectory] = useState('');
+  const [crawlSeeds, setCrawlSeeds] = useState('');           // comma-separated
+  const [rateLimitQps, setRateLimitQps] = useState('');       // string for input
+  const [subdomainExcludes, setSubdomainExcludes] = useState(''); // comma-separated
+  const [portSpec, setPortSpec] = useState('');
+  const [protocols, setProtocols] = useState<'tcp' | 'udp' | 'both' | ''>('');
+  const [pathExcludes, setPathExcludes] = useState('');       // comma-separated
+  const [languageHints, setLanguageHints] = useState('');     // comma-separated
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +70,19 @@ export default function NewTargetPage() {
         // field for other types, but we still gate it client-side so the
         // request body matches what we asked the user.
         auto_discover: resolvedType === 'domain' ? autoDiscover : false,
+        // Per-target-type config — only include fields relevant to the
+        // resolved type. The API zod re-validates per type.
+        config: buildConfigForType(resolvedType, {
+          branch,
+          subdirectory,
+          crawlSeeds,
+          rateLimitQps,
+          subdomainExcludes,
+          portSpec,
+          protocols,
+          pathExcludes,
+          languageHints,
+        }),
       }),
     });
     setSubmitting(false);
@@ -169,6 +193,108 @@ export default function NewTargetPage() {
           </div>
         </Field>
 
+        {/* Per-type configuration. Each block renders only when the
+            resolved type matches. Optional inputs — leaving them blank
+            falls back to Strix's default behaviour. The API zod validates
+            shape before we hit the DB. */}
+        {resolvedType === 'repository' && (
+          <Field
+            label="Repository options"
+            hint="Leave blank to scan the default branch with no path scoping."
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <SmallInput
+                placeholder="branch (e.g. develop)"
+                value={branch}
+                onChange={setBranch}
+              />
+              <SmallInput
+                placeholder="subdirectory (e.g. apps/api)"
+                value={subdirectory}
+                onChange={setSubdirectory}
+              />
+            </div>
+          </Field>
+        )}
+
+        {resolvedType === 'web_application' && (
+          <Field
+            label="Web app options"
+            hint="Crawl seeds steer where the agent starts. Rate limit is a hint to the agent — for a hard cap, see the Strix wishlist."
+          >
+            <div className="space-y-2">
+              <SmallInput
+                placeholder="Crawl seed URLs (comma-separated, e.g. /login, /api)"
+                value={crawlSeeds}
+                onChange={setCrawlSeeds}
+              />
+              <SmallInput
+                placeholder="Max requests per second (e.g. 10)"
+                value={rateLimitQps}
+                onChange={setRateLimitQps}
+                type="number"
+              />
+            </div>
+          </Field>
+        )}
+
+        {resolvedType === 'domain' && (
+          <Field
+            label="Domain options"
+            hint="Glob excludes are applied to discovered subdomains."
+          >
+            <SmallInput
+              placeholder="Subdomain excludes (comma-separated, e.g. *-staging, internal-*)"
+              value={subdomainExcludes}
+              onChange={setSubdomainExcludes}
+            />
+          </Field>
+        )}
+
+        {resolvedType === 'ip_address' && (
+          <Field
+            label="IP scan options"
+            hint="Leave port spec blank to scan the top-1000 TCP ports."
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <SmallInput
+                placeholder="Port spec (e.g. 80,443,8000-8080)"
+                value={portSpec}
+                onChange={setPortSpec}
+              />
+              <select
+                value={protocols}
+                onChange={(e) =>
+                  setProtocols(e.target.value as 'tcp' | 'udp' | 'both' | '')
+                }
+                className="rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              >
+                <option value="">Default protocols</option>
+                <option value="tcp">TCP only</option>
+                <option value="udp">UDP only</option>
+                <option value="both">TCP + UDP</option>
+              </select>
+            </div>
+          </Field>
+        )}
+
+        {resolvedType === 'local_code' && (
+          <Field label="Code options">
+            <div className="space-y-2">
+              <SmallInput
+                placeholder="Path excludes (comma-separated, e.g. node_modules, vendor, dist)"
+                value={pathExcludes}
+                onChange={setPathExcludes}
+              />
+              <SmallInput
+                placeholder="Language hints (comma-separated, e.g. python, typescript)"
+                value={languageHints}
+                onChange={setLanguageHints}
+              />
+            </div>
+          </Field>
+        )}
+
         {/* Subdomain auto-discovery — only for domain targets, opt-in.
             Defaulted off because not every user adding `staging.acme.com`
             wants their entire `acme.com` surface enumerated. */}
@@ -230,4 +356,88 @@ function Field({
       {hint && <div className="mt-1 text-[11px] text-neutral-500">{hint}</div>}
     </label>
   );
+}
+
+function SmallInput({
+  placeholder,
+  value,
+  onChange,
+  type = 'text',
+}: {
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: 'text' | 'number';
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+    />
+  );
+}
+
+// Pull only the fields relevant to the resolved type. Leaving any optional
+// field blank means "use Strix's default" — we omit the key entirely rather
+// than sending empty strings, so the worker's instruction-augmenter doesn't
+// emit no-op lines.
+function buildConfigForType(
+  type: TargetType,
+  raw: {
+    branch: string;
+    subdirectory: string;
+    crawlSeeds: string;
+    rateLimitQps: string;
+    subdomainExcludes: string;
+    portSpec: string;
+    protocols: string;
+    pathExcludes: string;
+    languageHints: string;
+  },
+): Record<string, unknown> {
+  const list = (s: string) =>
+    s
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+  switch (type) {
+    case 'repository': {
+      const out: Record<string, unknown> = {};
+      if (raw.branch.trim()) out.branch = raw.branch.trim();
+      if (raw.subdirectory.trim()) out.subdirectory = raw.subdirectory.trim();
+      return out;
+    }
+    case 'web_application': {
+      const out: Record<string, unknown> = {};
+      const seeds = list(raw.crawlSeeds);
+      if (seeds.length) out.crawl_seeds = seeds;
+      const qps = parseInt(raw.rateLimitQps, 10);
+      if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
+      return out;
+    }
+    case 'domain': {
+      const out: Record<string, unknown> = {};
+      const excludes = list(raw.subdomainExcludes);
+      if (excludes.length) out.subdomain_excludes = excludes;
+      return out;
+    }
+    case 'ip_address': {
+      const out: Record<string, unknown> = {};
+      if (raw.portSpec.trim()) out.port_spec = raw.portSpec.trim();
+      if (raw.protocols) out.protocols = raw.protocols;
+      return out;
+    }
+    case 'local_code': {
+      const out: Record<string, unknown> = {};
+      const ex = list(raw.pathExcludes);
+      if (ex.length) out.path_excludes = ex;
+      const hints = list(raw.languageHints);
+      if (hints.length) out.language_hints = hints;
+      return out;
+    }
+  }
 }

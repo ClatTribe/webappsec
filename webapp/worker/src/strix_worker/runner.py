@@ -14,6 +14,7 @@ from typing import Any
 
 from .config import WorkerConfig
 from .credentials import materialize_credentials
+from .instruction import build_instruction
 from .supabase_client import WorkerSupabase
 
 
@@ -359,7 +360,11 @@ def _build_cmd(cfg: WorkerConfig, scan: dict[str, Any], targets: list[dict[str, 
     for target in targets:
         cmd += ["-t", target["value"]]
 
-    if instr := scan.get("instruction_text"):
+    # Combine the user's free-form instruction with augmented text derived
+    # from `targets.config` (per-target-type configuration). See
+    # `instruction.build_instruction` for the contract.
+    instr = build_instruction(scan)
+    if instr:
         cmd += ["--instruction", instr]
 
     return cmd
