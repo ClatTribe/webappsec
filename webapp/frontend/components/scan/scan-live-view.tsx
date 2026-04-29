@@ -15,6 +15,8 @@ interface Props {
   agentsCount?: number | null;
   initialHeartbeatAt?: string | null;
   initialCancelRequestedAt?: string | null;
+  initialErrorMessage?: string | null;
+  initialExitCode?: number | null;
 }
 
 // A scan is "stale" if it's still in 'running' but hasn't heartbeat'd in this
@@ -85,6 +87,8 @@ export default function ScanLiveView({
   agentsCount,
   initialHeartbeatAt,
   initialCancelRequestedAt,
+  initialErrorMessage,
+  initialExitCode,
 }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
@@ -94,6 +98,8 @@ export default function ScanLiveView({
   const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(
     initialCancelRequestedAt ?? null,
   );
+  const [errorMessage, setErrorMessage] = useState<string | null>(initialErrorMessage ?? null);
+  const [exitCode, setExitCode] = useState<number | null>(initialExitCode ?? null);
   const [cancelInFlight, setCancelInFlight] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   // A wall-clock tick so the staleness check re-evaluates every minute even
@@ -147,10 +153,14 @@ export default function ScanLiveView({
             status: ScanStatus;
             last_heartbeat_at?: string | null;
             cancel_requested_at?: string | null;
+            error_message?: string | null;
+            exit_code?: number | null;
           };
           setStatus(row.status);
           if (row.last_heartbeat_at !== undefined) setHeartbeatAt(row.last_heartbeat_at);
           if (row.cancel_requested_at !== undefined) setCancelRequestedAt(row.cancel_requested_at);
+          if (row.error_message !== undefined) setErrorMessage(row.error_message);
+          if (row.exit_code !== undefined) setExitCode(row.exit_code);
         },
       )
       .subscribe();
@@ -297,6 +307,21 @@ export default function ScanLiveView({
         </div>
       </section>
 
+      {/* Failure cause — only when the scan ended badly. We surface
+          (1) the structured `error_message` we wrote on finish, and
+          (2) the last few stderr/stdout lines that contain "Error:" /
+          "Exception" — the actual upstream error usually lives there
+          (e.g. a Gemini 503 ServiceUnavailable). Without this the user
+          had to scroll a 200-line raw log to find the real cause. */}
+      {(status === 'failed' || status === 'cancelled') && (
+        <FailureCause
+          status={status}
+          errorMessage={errorMessage}
+          exitCode={exitCode}
+          events={events}
+        />
+      )}
+
       {/* AI investigators — explains what an "agent" is and lists each one. */}
       <AgentsSection events={events} expectedCount={agentsCount ?? 0} />
 
@@ -334,5 +359,90 @@ export default function ScanLiveView({
           this is here for the curious / for debugging, not the primary read. */}
       <BehindTheScenes events={events} />
     </div>
+  );
+}
+
+// Pulls the last meaningful error out of the streamed log events. Strix
+// (and most CLIs) prints the diagnostic line just before exiting; that's
+// where the real cause lives. We scan the last 30 log lines and surface
+// the most recent one that looks like an error.
+function extractLastErrorLine(events: ScanEvent[]): string | null {
+  const ERROR_PATTERN = /\b(error|exception|fatal|failed|unavailable|timeout|denied)\b/i;
+  const tail = events.slice(-30).reverse();
+  for (const ev of tail) {
+    if (ev.event_type !== 'log') continue;
+    const line = (ev.payload as { line?: string } | null)?.line ?? '';
+    // Strip Rich box-drawing chars + leading │/╰/─ so the cause is readable.
+    const cleaned = line.replace(/[│╭╮╰╯─]/g, '').trim();
+    if (cleaned && ERROR_PATTERN.test(cleaned)) {
+      return cleaned.length > 280 ? `${cleaned.slice(0, 280)}…` : cleaned;
+    }
+  }
+  return null;
+}
+
+function FailureCause({
+  status,
+  errorMessage,
+  exitCode,
+  events,
+}: {
+  status: ScanStatus;
+  errorMessage: string | null;
+  exitCode: number | null;
+  events: ScanEvent[];
+}) {
+  const lastErr = extractLastErrorLine(events);
+  const isCancelled = status === 'cancelled';
+  const headline = isCancelled ? 'Scan cancelled' : 'Scan failed';
+  const accent = isCancelled
+    ? 'border-neutral-700 bg-neutral-900/40'
+    : 'border-red-500/30 bg-red-500/5';
+
+  return (
+    <section className={`rounded-2xl border p-5 ${accent}`}>
+      <div className="flex items-start gap-3">
+        <ShieldX
+          className={`mt-0.5 h-5 w-5 flex-shrink-0 ${
+            isCancelled ? 'text-neutral-400' : 'text-red-300'
+          }`}
+          strokeWidth={2}
+        />
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h2
+              className={`text-sm font-semibold ${
+                isCancelled ? 'text-neutral-200' : 'text-red-100'
+              }`}
+            >
+              {headline}
+            </h2>
+            <p className="mt-1 text-xs text-neutral-400">
+              {errorMessage ?? 'No structured error message was recorded.'}
+              {exitCode != null && exitCode !== 0 && (
+                <span className="ml-2 font-mono text-neutral-500">
+                  (exit code {exitCode})
+                </span>
+              )}
+            </p>
+          </div>
+
+          {lastErr && !isCancelled && (
+            <div className="rounded-lg border border-neutral-800/80 bg-neutral-950/60 p-3">
+              <div className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+                Last error from the run
+              </div>
+              <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-red-200/90">
+                {lastErr}
+              </pre>
+              <p className="mt-2 text-[11px] text-neutral-500">
+                Most upstream LLM rate-limits / 5xx errors look like this and
+                are transient — re-run the scan from the target page.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
