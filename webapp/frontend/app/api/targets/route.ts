@@ -9,6 +9,10 @@ const Body = z.object({
   value: z.string().min(1).max(500),
   description: z.string().max(1000).optional(),
   scan_frequency: z.enum(['manual', 'daily', 'weekly', 'monthly']).default('manual'),
+  // Opt-in subdomain enumeration via crt.sh. Only honoured for domain
+  // targets; ignored for everything else. Defaults to false — explicit
+  // opt-in matches the principle of least surprise.
+  auto_discover: z.boolean().default(false),
 });
 
 export async function POST(req: Request) {
@@ -40,6 +44,10 @@ export async function POST(req: Request) {
       value: parsed.data.value,
       description: parsed.data.description ?? null,
       scan_frequency: parsed.data.scan_frequency,
+      // The trigger gates on type='domain' AND auto_discover=true, but we
+      // also force-clear it here for non-domain types so a malformed UI can't
+      // accidentally store auto_discover=true on, say, an IP address.
+      auto_discover: parsed.data.type === 'domain' ? parsed.data.auto_discover : false,
       created_by: user.id,
     })
     .select()

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useTransition } from 'react';
-import { Globe, Plus, X, Loader2, ShieldQuestion, Check } from 'lucide-react';
+import { Globe, Plus, X, Loader2, ShieldQuestion, Check, Search } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { TargetType } from '@/lib/supabase/types';
 
@@ -21,6 +21,8 @@ interface Discovery {
 interface Props {
   targetId: string;
   targetType: TargetType;
+  /** Whether the user has opted in to subdomain discovery for this target. */
+  autoDiscover: boolean;
 }
 
 // Subdomain auto-discovery (roadmap §9). When the user added a `domain`
@@ -29,11 +31,13 @@ interface Props {
 //
 // We don't render anything for non-domain targets, or when no discoveries
 // exist — keeping the page calm on first visit.
-export default function DiscoveriesPanel({ targetId, targetType }: Props) {
+export default function DiscoveriesPanel({ targetId, targetType, autoDiscover }: Props) {
   const supabase = createClient();
   const [discoveries, setDiscoveries] = useState<Discovery[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [enabling, setEnabling] = useState(false);
+  const [enabled, setEnabled] = useState(autoDiscover);
   const [, startTransition] = useTransition();
 
   // Initial load + realtime subscription so freshly-found subdomains
@@ -90,19 +94,85 @@ export default function DiscoveriesPanel({ targetId, targetType }: Props) {
     };
   }, [supabase, targetId, targetType]);
 
+  // Flip targets.auto_discover = true via direct UPDATE under RLS. The
+  // SQL trigger then fires `target_discovery_requested` for the worker,
+  // which kicks off the crt.sh enumeration. We don't need an explicit
+  // notify here — the migration's UPDATE trigger handles it.
+  const onEnableAutoDiscover = () => {
+    setEnabling(true);
+    setError(null);
+    startTransition(async () => {
+      const { error: updErr } = await supabase
+        .from('targets')
+        .update({ auto_discover: true })
+        .eq('id', targetId);
+      if (updErr) {
+        setError(updErr.message);
+        setEnabling(false);
+        return;
+      }
+      setEnabled(true);
+      setEnabling(false);
+    });
+  };
+
   if (targetType !== 'domain') return null;
 
   const pending = (discoveries ?? []).filter((d) => d.status === 'pending');
   const accepted = (discoveries ?? []).filter((d) => d.status === 'accepted');
 
-  // Hide the section entirely until we have something to show. Discovery
-  // typically lands within a few seconds of adding the target — the user
-  // shouldn't see an empty "we're looking" placeholder by default.
-  if (discoveries === null) {
-    return null;
+  // Don't render until the initial query lands.
+  if (discoveries === null) return null;
+
+  // No discoveries AND user hasn't opted in: show a CTA so they can flip the
+  // flag from this page (instead of having to recreate the target).
+  if (!enabled && pending.length === 0 && accepted.length === 0) {
+    return (
+      <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-4">
+        <div className="flex items-start gap-3">
+          <Search className="mt-0.5 h-4 w-4 flex-shrink-0 text-neutral-500" strokeWidth={2} />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[13px] font-semibold text-neutral-200">
+              Find subdomains automatically?
+            </h3>
+            <p className="mt-1 text-[12px] leading-relaxed text-neutral-400">
+              We can look up this domain in public Certificate Transparency logs and suggest each
+              subdomain as a separate target. Off by default — turn it on if you want broader
+              coverage. Free, no scans run automatically.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onEnableAutoDiscover}
+            disabled={enabling}
+            className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[12px] font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {enabling ? (
+              <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2.5} />
+            ) : (
+              <Search className="h-3 w-3" strokeWidth={2.5} />
+            )}
+            {enabling ? 'Searching…' : 'Find subdomains'}
+          </button>
+        </div>
+        {error && (
+          <p className="mt-3 text-[11.5px] text-red-300">{error}</p>
+        )}
+      </section>
+    );
   }
+
+  // Otherwise (enabled, OR has historical data): render the panel as usual.
   if (pending.length === 0 && accepted.length === 0) {
-    return null;
+    // Enabled but the worker hasn't written anything yet → quiet wait.
+    return (
+      <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-4">
+        <div className="flex items-center gap-2 text-[12px] text-neutral-400">
+          <Loader2 className="h-3 w-3 animate-spin text-cyan-300/80" strokeWidth={2.5} />
+          Searching public CT logs for subdomains…
+        </div>
+      </section>
+    );
   }
 
   const onAccept = (d: Discovery) => {

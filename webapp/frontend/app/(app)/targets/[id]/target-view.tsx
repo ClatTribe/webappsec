@@ -173,9 +173,14 @@ export default function TargetView({ target: t, scans, findings, initialTab }: P
             <StatTile label="Resolved" value={resolved} tone="neutral" Icon={CheckCircle2} />
           </div>
 
-          {/* Subdomain auto-discovery — only renders when there's something
-              to show (renders nothing for non-domain targets). */}
-          <DiscoveriesPanel targetId={t.id} targetType={t.type} />
+          {/* Subdomain auto-discovery — only renders for domain targets.
+              When auto_discover is off (default) and no historical data
+              exists, the panel shows an opt-in CTA. */}
+          <DiscoveriesPanel
+            targetId={t.id}
+            targetType={t.type}
+            autoDiscover={t.auto_discover ?? false}
+          />
 
           {/* Top 3 most urgent findings */}
           <section className="space-y-3">
