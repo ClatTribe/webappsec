@@ -226,8 +226,11 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         # window of unassessed findings on the dashboard. Failures here are
         # never fatal — a finding without an `ai_assessment` renders fine,
         # exactly as it did before this feature shipped.
+        # `targets` is the per-scan target snapshot list joined by
+        # fetch_scan; we pass it through so the triage step can build
+        # source-code context for local_code targets (see code_context.py).
         if final_status == "completed":
-            await _run_inline_triage(sb, scan_id, llm_provider, llm_api_key)
+            await _run_inline_triage(sb, scan_id, llm_provider, llm_api_key, targets)
 
     except Exception as e:  # noqa: BLE001
         logger.exception("scan %s failed", scan_id)
@@ -327,12 +330,18 @@ async def _run_inline_triage(
     scan_id: str,
     llm_provider: str,
     llm_api_key: str,
+    scan_targets: list[dict[str, Any]] | None = None,
 ) -> None:
     """Triage every finding from this scan that doesn't already have an AI
     assessment. Emits `triage.started` / `triage.completed` events so the
     live event stream reflects the activity. Never raises — triage failures
     don't fail the scan, they just mean the finding renders without an AI
     verdict (which is fine, that's the pre-feature default).
+
+    `scan_targets` is the per-scan target snapshot list (passed through
+    from `fetch_scan`). When any target is `local_code`, triage gains a
+    "Source code context" section built from the actual file contents
+    around the cited line. See `code_context.gather_for_finding`.
     """
     if not (llm_provider and llm_api_key):
         # The scan ran on a worker-default model with no per-org key, or the
@@ -349,7 +358,11 @@ async def _run_inline_triage(
 
     try:
         stats = await triage_scan_findings(
-            sb, scan_id, model=llm_provider, api_key=llm_api_key
+            sb,
+            scan_id,
+            model=llm_provider,
+            api_key=llm_api_key,
+            scan_targets=scan_targets,
         )
     except Exception:  # noqa: BLE001
         logger.exception("scan %s: inline triage pass crashed", scan_id)

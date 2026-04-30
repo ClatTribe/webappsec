@@ -49,6 +49,15 @@ out false positives, assess realistic reachability, and prioritise what \
 actually needs to be fixed. You are deliberately conservative — when in \
 doubt, mark as monitor, not dismiss.
 
+When a "Source code context" section is present, treat it as ground \
+truth — the actual lines from the file the report cites. Use it to \
+*confirm* (or refute) the report's claim before assigning urgency: does \
+the dangerous call really happen there? Is the user input actually \
+flowing into it, or is the cited line in dead code, a test fixture, or \
+an example file? When the source contradicts the report, lean toward \
+`dismiss` or `monitor` and say so in `reasoning`. When source is absent, \
+fall back to judging from the report alone.
+
 Codebase under test (webappsec):
 - Multi-tenant SaaS that wraps the open-source Strix AI security agent
 - Three tiers: Next.js 14 frontend on Vercel, Postgres+RLS via Supabase, \
@@ -111,9 +120,21 @@ Full markdown report:
 ---
 {description_md}
 ---
-
+{code_context_section}
 Apply the rubric. Return only JSON.
 """
+
+
+def _format_code_context(code_context: str | None) -> str:
+    """Return the code-context section as a leading block, or empty string."""
+    if not code_context:
+        return ""
+    return (
+        "\nSource code context (actual lines from the cited files):\n"
+        "---\n"
+        f"{code_context}\n"
+        "---\n"
+    )
 
 
 def _coerce_assessment(raw: str) -> dict[str, Any]:
@@ -126,8 +147,20 @@ def _coerce_assessment(raw: str) -> dict[str, Any]:
     return json.loads(s.strip())
 
 
-async def assess_one(finding: dict[str, Any], *, model: str, api_key: str) -> dict[str, Any]:
-    """Ask the LLM to triage a single finding. Returns the parsed assessment."""
+async def assess_one(
+    finding: dict[str, Any],
+    *,
+    model: str,
+    api_key: str,
+    code_context: str | None = None,
+) -> dict[str, Any]:
+    """Ask the LLM to triage a single finding. Returns the parsed assessment.
+
+    If `code_context` is provided, it's injected into the prompt as the
+    actual source lines around the cited file/line. The LLM uses it to
+    confirm or refute the report's claim — the system prompt tells it to
+    treat the snippet as ground truth.
+    """
     user = USER_TEMPLATE.format(
         title=finding.get("title") or "",
         severity=(finding.get("severity") or "").upper(),
@@ -139,6 +172,7 @@ async def assess_one(finding: dict[str, Any], *, model: str, api_key: str) -> di
         times_seen=finding.get("times_seen") or 1,
         status=finding.get("status") or "open",
         description_md=(finding.get("description_md") or "")[:8000],
+        code_context_section=_format_code_context(code_context),
     )
 
     # Try the primary model first, then walk the fallback list on 5xx /
@@ -199,6 +233,7 @@ async def triage_scan_findings(
     model: str,
     api_key: str,
     reassess: bool = False,
+    scan_targets: list[dict[str, Any]] | None = None,
 ) -> TriageStats:
     """Triage every finding *detected in this scan* that lacks an assessment.
 
@@ -209,11 +244,21 @@ async def triage_scan_findings(
     right behaviour: the existing assessment is still valid, no need to burn
     tokens.
 
+    When `scan_targets` is provided and any of them is `local_code`, the
+    triage call gets a "Source code context" section built from the cited
+    files in the finding markdown. This lets the LLM confirm reachability
+    against the actual source instead of guessing from prose. See
+    `code_context.gather_for_finding` for the contract and bounds.
+
     Failures are non-fatal at the per-finding level — one bad LLM call
     shouldn't stop the rest. The caller should treat the whole pass as
     best-effort: a failed triage just means the finding renders without an
     AI verdict, exactly as it would have before this feature shipped.
     """
+    # Local import — avoids a hard dep when this module is used in tests
+    # that don't exercise the RAG path.
+    from .code_context import gather_for_finding
+
     rows = (
         sb.client.table("findings")
         .select("*")
@@ -230,24 +275,44 @@ async def triage_scan_findings(
 
     success = 0
     failed = 0
+    rag_hits = 0
     for f in candidates:
         ident = f.get("vuln_id") or f.get("id")
+        code_context: str | None = None
+        if scan_targets:
+            try:
+                code_context = gather_for_finding(f, scan_targets=scan_targets)
+                if code_context:
+                    rag_hits += 1
+            except Exception:  # noqa: BLE001
+                # Code-context assembly is best-effort — never let a bad
+                # file read block triage on the finding itself.
+                logger.exception("triage %s: code-context gather failed", ident)
+
         try:
-            assessment = await assess_one(f, model=model, api_key=api_key)
+            assessment = await assess_one(
+                f, model=model, api_key=api_key, code_context=code_context
+            )
             sb.client.table("findings").update(
                 {"ai_assessment": assessment, "ai_assessed_at": "now()"}
             ).eq("id", f["id"]).execute()
             success += 1
             logger.info(
-                "triage %s urgency=%s reach=%s fp=%s conf=%.2f",
+                "triage %s urgency=%s reach=%s fp=%s conf=%.2f rag=%s",
                 ident,
                 assessment.get("urgency"),
                 assessment.get("reachability"),
                 "yes" if assessment.get("is_likely_false_positive") else "no",
                 float(assessment.get("confidence") or 0.0),
+                "yes" if code_context else "no",
             )
         except Exception as e:  # noqa: BLE001
             failed += 1
             logger.warning("triage %s FAILED: %s", ident, e)
 
+    if rag_hits:
+        logger.info(
+            "triage scan=%s injected source context for %d/%d findings",
+            scan_id, rag_hits, len(candidates),
+        )
     return TriageStats(candidates=len(candidates), success=success, failed=failed, skipped=skipped)
