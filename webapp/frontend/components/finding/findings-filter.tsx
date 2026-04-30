@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ScanLine, Sparkles, Target as TargetIcon } from 'lucide-react';
 import FindingCard from './finding-card';
 import type { AiUrgency, Finding } from '@/lib/supabase/types';
+import { AI_BRAND } from '@/lib/finding-theme';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
@@ -35,7 +36,7 @@ type ViewMode = 'urgent' | 'open' | 'all';
 const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
   {
     value: 'urgent',
-    label: 'Urgent only',
+    label: 'Urgent',
     help: 'AI says fix-now or fix-soon, hides everything else.',
   },
   {
@@ -100,47 +101,33 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     });
   }, [sorted, view]);
 
-  const counts = useMemo(() => {
-    let urgent = 0;
-    let monitor = 0;
-    let dismiss = 0;
-    let unassessed = 0;
-    let resolved = 0;
-    for (const f of targetFiltered) {
-      if (RESOLVED_STATUSES.has(f.status)) {
-        resolved++;
-        continue;
-      }
-      const u = f.ai_assessment?.urgency;
-      if (u === 'fix_now' || u === 'fix_soon') urgent++;
-      else if (u === 'monitor') monitor++;
-      else if (u === 'dismiss') dismiss++;
-      else unassessed++;
-    }
-    return { urgent, monitor, dismiss, unassessed, resolved };
-  }, [targetFiltered]);
+  // A single, calm count — what's currently visible. No 5-pill strip.
+  const totalForView = visible.length;
+  const totalAll = findings.length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg bg-neutral-950/60 p-1 ring-1 ring-neutral-800">
-            {VIEW_MODES.map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setView(m.value)}
-                title={m.help}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  view === m.value
-                    ? 'bg-neutral-800 text-neutral-50 shadow-sm'
-                    : 'text-neutral-400 hover:text-neutral-100'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+    <div className="space-y-5">
+      {/* Filter row — one line, no badges. The cards themselves carry signal. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg bg-neutral-900/60 p-0.5 ring-1 ring-neutral-800/80">
+          {VIEW_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => setView(m.value)}
+              title={m.help}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                view === m.value
+                  ? 'bg-neutral-800 text-neutral-50'
+                  : 'text-neutral-400 hover:text-neutral-100'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        {targetOptions.length > 0 && (
           <div className="relative inline-flex items-center">
             <TargetIcon
               className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cyan-400/70"
@@ -149,12 +136,9 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
             <select
               value={targetFilter}
               onChange={(e) => setTargetFilter(e.target.value)}
-              disabled={targetOptions.length === 0}
-              className="appearance-none rounded-lg border border-neutral-800 bg-neutral-950/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              className="appearance-none rounded-lg border border-neutral-800 bg-neutral-900/60 py-1.5 pl-8 pr-7 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
             >
-              <option value={ALL_TARGETS}>
-                {targetOptions.length === 0 ? 'No targets' : 'All targets'}
-              </option>
+              <option value={ALL_TARGETS}>All targets</option>
               {targetOptions.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
@@ -163,39 +147,25 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
             </select>
             <span className="pointer-events-none absolute right-2 text-neutral-500">▾</span>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="rounded-md bg-red-500/10 px-2 py-0.5 text-red-300 ring-1 ring-red-500/30">
-            {counts.urgent} urgent
-          </span>
-          <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-300 ring-1 ring-amber-500/30">
-            {counts.monitor} monitor
-          </span>
-          <span className="rounded-md bg-neutral-800 px-2 py-0.5 text-neutral-400">
-            {counts.dismiss} dismissed by AI
-          </span>
-          {counts.unassessed > 0 && (
-            <span className="rounded-md bg-neutral-800 px-2 py-0.5 text-neutral-400">
-              {counts.unassessed} not-yet-assessed
-            </span>
-          )}
-          {counts.resolved > 0 && (
-            <span className="rounded-md bg-neutral-800 px-2 py-0.5 text-neutral-400">
-              {counts.resolved} resolved
-            </span>
-          )}
-        </div>
+        )}
+
+        <span className="ml-auto text-[11px] text-neutral-500">
+          {totalForView} of {totalAll}
+        </span>
       </div>
 
-      <div className="flex items-center gap-1.5 px-1 text-[11px] text-neutral-500">
-        <Sparkles className="h-3 w-3 text-violet-400/70" strokeWidth={2.25} />
-        AI triage filters out likely false positives and ranks the rest by reachability +
-        impact. Toggle to <em>All</em> to see everything.
+      {/* AI explainer — the only thing on the page that uses the AI gradient. */}
+      <div className="flex items-start gap-2 px-1 text-[11px] text-neutral-500">
+        <Sparkles className={`mt-0.5 h-3 w-3 flex-shrink-0 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
+        <p>
+          AI triage filters out likely false positives and ranks the rest by reachability and
+          impact. Switch to <em>All</em> to see everything.
+        </p>
       </div>
 
       <div className="space-y-3">
         {visible.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/20 px-6 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/20 px-6 py-12 text-center">
             <p className="text-sm text-neutral-300">
               {view === 'urgent'
                 ? 'No urgent findings — nothing the AI thinks needs immediate action.'
