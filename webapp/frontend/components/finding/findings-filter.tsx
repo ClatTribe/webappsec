@@ -9,7 +9,14 @@ import { AI_BRAND } from '@/lib/finding-theme';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
+  last_seen_scan?: { run_name: string } | null;
   targets?: { name: string; value: string; type: string } | null;
+  finding_occurrences?: {
+    scan_id: string;
+    seen_at: string;
+    reopened: boolean;
+    scans?: { run_name: string } | null;
+  }[] | null;
 };
 
 const ALL_TARGETS = '__all__';

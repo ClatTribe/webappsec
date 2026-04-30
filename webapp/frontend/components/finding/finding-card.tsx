@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -12,6 +13,8 @@ import {
   RotateCcw,
   Sparkles,
   Repeat,
+  History,
+  RefreshCw,
 } from 'lucide-react';
 import type { Finding, FindingStatus } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
@@ -72,13 +75,28 @@ function parseFindingMarkdown(md: string | null): ParsedFinding {
   return { summary: firstPara.trim(), sections };
 }
 
+/**
+ * The findings page query joins `last_seen_scan` and `finding_occurrences`
+ * onto each row. The card uses these to render the cross-scan lifespan
+ * without an extra fetch — see migration 017 for the data shape.
+ */
+export type FindingForCard = Finding & {
+  last_seen_scan?: { run_name: string } | null;
+  finding_occurrences?: {
+    scan_id: string;
+    seen_at: string;
+    reopened: boolean;
+    scans?: { run_name: string } | null;
+  }[] | null;
+};
+
 interface Props {
-  finding: Finding;
+  finding: FindingForCard;
   defaultExpanded?: boolean;
 }
 
 export default function FindingCard({ finding: initial, defaultExpanded = false }: Props) {
-  const [finding, setFinding] = useState<Finding>(initial);
+  const [finding, setFinding] = useState<FindingForCard>(initial);
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [updating, setUpdating] = useState(false);
 
@@ -102,6 +120,18 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   // by default, not three pills competing for attention.
   const aiOneLiner = ai?.recommended_action || ai?.reasoning || summary;
 
+  // Cross-scan history. The occurrence ledger is the source of truth — sort
+  // ascending so the timeline reads "first → last" naturally.
+  const occurrences = (finding.finding_occurrences ?? [])
+    .slice()
+    .sort((a, b) => a.seen_at.localeCompare(b.seen_at));
+  const occurrenceCount = occurrences.length;
+  const reopenedCount = finding.reopened_count ?? 0;
+  // We use the ledger row count for "seen in N scans" (it's per-scan unique),
+  // not `times_seen` which counts every worker report — including retries
+  // within a single scan.
+  const isRecurring = occurrenceCount > 1 || reopenedCount > 0;
+
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
     setUpdating(true);
@@ -121,7 +151,11 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
       .select()
       .single();
     setUpdating(false);
-    if (!error && data) setFinding(data as Finding);
+    // Preserve joined fields (last_seen_scan, finding_occurrences) — the
+    // .select() above only returns columns from the `findings` table.
+    if (!error && data) {
+      setFinding((prev) => ({ ...prev, ...(data as Finding) }));
+    }
   }
 
   return (
@@ -202,16 +236,38 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </div>
             )}
 
-            {/* Row 4: subdued status indicator only when not in default open state.
-                Open status is implied — we don't badge it. */}
-            {finding.status !== 'open' && (
-              <div className="mt-2.5 flex items-center gap-1.5">
-                <span
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusTheme.pill}`}
-                >
-                  <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
-                  {statusTheme.label}
-                </span>
+            {/* Row 4: subdued status + cross-scan recurrence indicators.
+                Open status is implied — we don't badge it. The recurrence
+                pill is the calm signal that this finding has cross-scan
+                history; full timeline is in the expanded view. */}
+            {(finding.status !== 'open' || isRecurring) && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {finding.status !== 'open' && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusTheme.pill}`}
+                  >
+                    <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
+                    {statusTheme.label}
+                  </span>
+                )}
+                {reopenedCount > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30"
+                    title="Marked fixed, but re-detected by a later scan."
+                  >
+                    <RefreshCw className="h-3 w-3" strokeWidth={2.5} />
+                    Reopened{reopenedCount > 1 ? ` ${reopenedCount}×` : ''}
+                  </span>
+                )}
+                {occurrenceCount > 1 && reopenedCount === 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-md bg-neutral-800/80 px-2 py-0.5 text-[10px] font-medium text-neutral-400 ring-1 ring-neutral-700/60"
+                    title="Detected across multiple scans"
+                  >
+                    <Repeat className="h-3 w-3" strokeWidth={2.25} />
+                    {occurrenceCount} scans
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -236,15 +292,6 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             {finding.cwe && (
               <span className="font-mono text-neutral-400">{finding.cwe}</span>
             )}
-            {(finding.times_seen ?? 1) > 1 && (
-              <span
-                className="inline-flex items-center gap-1"
-                title="Same fingerprint detected across multiple scans"
-              >
-                <Repeat className="h-3 w-3" strokeWidth={2.5} />
-                seen {finding.times_seen}×
-              </span>
-            )}
             {finding.target && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-neutral-600">target</span>
@@ -254,6 +301,87 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </span>
             )}
           </div>
+
+          {/* Cross-scan history. The ledger (finding_occurrences) is the source
+              of truth; we show the lifespan as a vertical timeline so the
+              "first" and "last" reads top-to-bottom like a log. Hidden when
+              there's only one occurrence — irrelevant noise in that case. */}
+          {isRecurring && occurrences.length > 0 && (
+            <section className="rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4">
+              <div className="mb-2.5 flex items-center gap-2">
+                <History className="h-3.5 w-3.5 text-neutral-500" strokeWidth={2.25} />
+                <h4 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                  Cross-scan history
+                </h4>
+                <span className="text-[10.5px] text-neutral-500">
+                  {occurrenceCount === 1
+                    ? '1 detection'
+                    : `${occurrenceCount} detections across ${occurrenceCount} scans`}
+                </span>
+              </div>
+              <ol className="space-y-1.5">
+                {occurrences.map((occ, idx) => {
+                  const isFirst = idx === 0;
+                  const isLast = idx === occurrences.length - 1;
+                  const date = new Date(occ.seen_at);
+                  return (
+                    <li
+                      key={occ.scan_id + occ.seen_at}
+                      className="flex items-start gap-2.5 text-[12px] leading-relaxed"
+                    >
+                      <span
+                        className={`mt-1.5 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                          occ.reopened
+                            ? 'bg-amber-400'
+                            : isLast
+                            ? 'bg-cyan-400'
+                            : 'bg-neutral-600'
+                        }`}
+                      />
+                      <span className="font-mono text-[11px] text-neutral-500">
+                        {date.toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </span>
+                      <Link
+                        href={`/scans/${occ.scan_id}`}
+                        className="truncate font-medium text-neutral-300 transition-colors hover:text-cyan-300"
+                      >
+                        {occ.scans?.run_name ?? 'unnamed scan'}
+                      </Link>
+                      {isFirst && (
+                        <span className="rounded bg-neutral-800/80 px-1.5 py-0.5 text-[10px] text-neutral-400">
+                          first
+                        </span>
+                      )}
+                      {isLast && !isFirst && (
+                        <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-300 ring-1 ring-cyan-500/20">
+                          latest
+                        </span>
+                      )}
+                      {occ.reopened && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200 ring-1 ring-amber-400/30"
+                          title="This detection flipped the finding back from 'fixed' to active."
+                        >
+                          <RefreshCw className="h-2.5 w-2.5" strokeWidth={2.5} />
+                          reopened
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+              {reopenedCount > 0 && (
+                <p className="mt-3 text-[11px] leading-relaxed text-amber-200/80">
+                  This finding was marked fixed and re-detected{' '}
+                  {reopenedCount === 1 ? 'once' : `${reopenedCount} times`}. Verify the fix
+                  actually addresses the root cause.
+                </p>
+              )}
+            </section>
+          )}
 
           {ai && urgencyTheme && reachTheme && (() => {
             const UIcon = urgencyTheme.Icon;
