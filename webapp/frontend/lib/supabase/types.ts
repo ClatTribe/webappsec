@@ -135,11 +135,33 @@ export interface Finding {
   triage_notes: string | null;
   fingerprint: string | null;
   created_at: string;
+  // Cross-scan dedup fields. The `findings` row is a *summary*; the per-scan
+  // history lives in `finding_occurrences`. The columns below are
+  // denormalised conveniences populated by `worker_insert_finding`.
   times_seen?: number | null;
+  /** Bookend pair around the finding's lifespan. */
+  first_seen_at?: string | null;
   last_seen_at?: string | null;
   last_seen_scan_id?: string | null;
+  /** Number of times a 'fixed' status was flipped back by recurrence. */
+  reopened_count?: number | null;
   ai_assessment?: AiAssessment | null;
   ai_assessed_at?: string | null;
+}
+
+/**
+ * Per-(finding, scan) ledger row. The unique `(finding_id, scan_id)` key
+ * means at most one entry exists per scan even if the worker retries within
+ * a single run. `reopened` is set on the occurrence that flipped a 'fixed'
+ * finding back to 'triaged_real'.
+ */
+export interface FindingOccurrence {
+  id: string;
+  finding_id: string;
+  scan_id: string;
+  org_id: string;
+  seen_at: string;
+  reopened: boolean;
 }
 
 export type AiUrgency = 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss';

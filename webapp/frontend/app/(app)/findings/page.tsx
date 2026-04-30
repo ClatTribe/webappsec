@@ -9,18 +9,32 @@ const RESOLVED = new Set(['fixed', 'false_positive', 'wont_fix']);
 export default async function FindingsPage() {
   const supabase = createClient();
   // `findings` has two FK relationships to `scans` (`scan_id` and
-  // `last_seen_scan_id`) since migration 010, so we have to disambiguate
-  // the PostgREST embed by FK name. Without this, the query returns 0 rows
-  // with the error "more than one relationship was found".
+  // `last_seen_scan_id`) since migration 010, so we disambiguate the
+  // PostgREST embed by FK name. We also pull the cross-scan occurrence
+  // ledger (migration 017) so the card can show the lifespan of each
+  // finding without an extra round-trip.
   const { data } = await supabase
     .from('findings')
-    .select('*, scans!findings_scan_id_fkey(run_name, status), targets(name, value, type)')
+    .select(
+      `*,
+       scans!findings_scan_id_fkey(run_name, status),
+       last_seen_scan:scans!findings_last_seen_scan_id_fkey(run_name),
+       targets(name, value, type),
+       finding_occurrences(scan_id, seen_at, reopened, scans(run_name))`
+    )
     .order('created_at', { ascending: false })
     .limit(200);
 
   const findings = ((data as (Finding & {
     scans?: { run_name: string; status: string } | null;
+    last_seen_scan?: { run_name: string } | null;
     targets?: { name: string; value: string; type: string } | null;
+    finding_occurrences?: {
+      scan_id: string;
+      seen_at: string;
+      reopened: boolean;
+      scans?: { run_name: string } | null;
+    }[] | null;
   })[]) ?? []);
 
   const open = findings.filter((f) => !RESOLVED.has(f.status));
