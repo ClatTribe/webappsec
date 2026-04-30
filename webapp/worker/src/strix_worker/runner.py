@@ -16,6 +16,7 @@ from .config import WorkerConfig
 from .credentials import materialize_credentials
 from .instruction import build_instruction
 from .supabase_client import WorkerSupabase
+from .triage import triage_scan_findings
 
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,10 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
     final_status = "failed"
     stats = StrixStats()
     cancelled = False
+    # Resolved inside the `with` block; defaulted here so the post-scan
+    # triage call sees them as defined names even if _resolve_llm raised.
+    llm_provider: str = ""
+    llm_api_key: str = ""
 
     try:
         with materialize_credentials(sb, scan_id, integrations) as creds:
@@ -215,6 +220,14 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
 
         # Upload run artifacts (events.jsonl, vuln md, final report) from the scan workdir.
         await _upload_run_artifacts(sb, scan_id, org_id)
+
+        # Inline AI triage. Done *after* findings are written and *before*
+        # finish_scan flips the row to completed so the user never sees a
+        # window of unassessed findings on the dashboard. Failures here are
+        # never fatal — a finding without an `ai_assessment` renders fine,
+        # exactly as it did before this feature shipped.
+        if final_status == "completed":
+            await _run_inline_triage(sb, scan_id, llm_provider, llm_api_key)
 
     except Exception as e:  # noqa: BLE001
         logger.exception("scan %s failed", scan_id)
@@ -307,6 +320,66 @@ def _exit_code_is_signal(exit_code: int | None) -> bool:
     """asyncio.create_subprocess_exec returns negative codes when the child was
     killed by a signal (POSIX convention: -SIGNUM). SIGTERM == 15."""
     return exit_code is not None and exit_code < 0
+
+
+async def _run_inline_triage(
+    sb: WorkerSupabase,
+    scan_id: str,
+    llm_provider: str,
+    llm_api_key: str,
+) -> None:
+    """Triage every finding from this scan that doesn't already have an AI
+    assessment. Emits `triage.started` / `triage.completed` events so the
+    live event stream reflects the activity. Never raises — triage failures
+    don't fail the scan, they just mean the finding renders without an AI
+    verdict (which is fine, that's the pre-feature default).
+    """
+    if not (llm_provider and llm_api_key):
+        # The scan ran on a worker-default model with no per-org key, or the
+        # provider wasn't resolved. Skip silently — the user can still run
+        # `assess_findings.py` manually after configuring a key.
+        logger.info("scan %s: skipping inline triage (no LLM credentials)", scan_id)
+        return
+
+    try:
+        sb.emit_event(scan_id, "triage.started", {"model": llm_provider})
+    except Exception:  # noqa: BLE001
+        # Event emission is cosmetic; never let it block the actual triage.
+        logger.exception("scan %s: triage.started event emit failed", scan_id)
+
+    try:
+        stats = await triage_scan_findings(
+            sb, scan_id, model=llm_provider, api_key=llm_api_key
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: inline triage pass crashed", scan_id)
+        try:
+            sb.emit_event(scan_id, "triage.completed", {"error": "crashed"})
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    logger.info(
+        "scan %s: triage done candidates=%d success=%d failed=%d skipped=%d",
+        scan_id,
+        stats.candidates,
+        stats.success,
+        stats.failed,
+        stats.skipped,
+    )
+    try:
+        sb.emit_event(
+            scan_id,
+            "triage.completed",
+            {
+                "candidates": stats.candidates,
+                "success": stats.success,
+                "failed": stats.failed,
+                "skipped": stats.skipped,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: triage.completed event emit failed", scan_id)
 
 
 # ============================================================

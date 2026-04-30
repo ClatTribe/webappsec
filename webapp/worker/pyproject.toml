@@ -14,6 +14,7 @@ dependencies = [
   "structlog>=24.1.0",
   "boto3>=1.34.0",                  # AWS sts:AssumeRole
   "python-dotenv>=1.0.0",
+  "litellm>=1.40.0",                # inline finding triage at scan finalize
 ]
 
 [project.scripts]
