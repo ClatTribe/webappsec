@@ -260,6 +260,86 @@ async def test_only_findings_for_this_scan_are_triaged(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_assess_one_includes_code_context_in_prompt(monkeypatch):
+    """When code_context is supplied, the user prompt must carry a clearly
+    delimited 'Source code context' section the LLM can read."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(_GOOD_ASSESSMENT)
+
+    monkeypatch.setattr(triage.litellm, "acompletion", _capture)
+
+    snippet = "### webapp/api/handler.py  (around line 42)\n```\n42 | dangerous_call(user_input)\n```"
+    out = await triage.assess_one(
+        _finding("a"),
+        model="gemini/gemini-2.5-flash",
+        api_key="k",
+        code_context=snippet,
+    )
+    assert out["urgency"] == "fix_now"
+
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert "Source code context" in user_msg["content"]
+    assert "dangerous_call(user_input)" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_assess_one_omits_code_context_section_when_none(monkeypatch):
+    """No code_context → no 'Source code context' header in the prompt."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(_GOOD_ASSESSMENT)
+
+    monkeypatch.setattr(triage.litellm, "acompletion", _capture)
+
+    await triage.assess_one(
+        _finding("a"), model="gemini/gemini-2.5-flash", api_key="k", code_context=None
+    )
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert "Source code context" not in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_triage_passes_code_context_for_local_code_targets(monkeypatch, tmp_path):
+    """Integration: triage_scan_findings + a local_code target on disk
+    should result in code context being attached to the triage prompt."""
+    # Set up a tiny on-disk source root the gather_for_finding can resolve.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "auth.py").write_text(
+        "\n".join(f"line_{i}" for i in range(1, 50)) + "\n"
+    )
+
+    finding = _finding("local-1")
+    finding["description_md"] = "Issue at `src/auth.py:20`"
+    sb = FakeSupabase([finding])
+
+    captured: list[dict[str, Any]] = []
+
+    async def _capture(**kwargs):
+        captured.append(kwargs)
+        return _fake_response(_GOOD_ASSESSMENT)
+
+    monkeypatch.setattr(triage.litellm, "acompletion", _capture)
+
+    stats = await triage.triage_scan_findings(
+        sb,
+        SCAN_ID,
+        model="gemini/gemini-2.5-flash",
+        api_key="fake-key",
+        scan_targets=[{"type": "local_code", "value": str(tmp_path)}],
+    )
+    assert stats.success == 1
+    user_msg = next(m for m in captured[0]["messages"] if m["role"] == "user")
+    assert "Source code context" in user_msg["content"]
+    assert "### src/auth.py" in user_msg["content"]
+    assert "line_20" in user_msg["content"]
+
+
+@pytest.mark.asyncio
 async def test_assess_one_strips_fenced_json(monkeypatch):
     """Some providers wrap JSON in ```json fences. _coerce_assessment must strip them."""
     fenced = "```json\n" + json.dumps(_GOOD_ASSESSMENT) + "\n```"
