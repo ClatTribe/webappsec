@@ -5,163 +5,35 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronDown,
-  AlertTriangle,
-  Flame,
-  AlertCircle,
-  Info,
-  CircleDot,
   CheckCircle2,
   XCircle,
   Eye,
   Loader2,
   RotateCcw,
-  Zap,
-  Clock,
-  Eye as EyeIcon,
-  Ban,
   Sparkles,
-  Globe,
-  Lock,
-  ShieldOff,
   Repeat,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import type {
-  AiReachability,
-  AiUrgency,
-  Finding,
-  FindingStatus,
-  Severity,
-} from '@/lib/supabase/types';
+import type { Finding, FindingStatus } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
+import {
+  AI_BRAND,
+  REACHABILITY_THEME,
+  SEVERITY_THEME,
+  STATUS_THEME,
+  URGENCY_THEME,
+} from '@/lib/finding-theme';
 
-const SEVERITY_THEME: Record<
-  Severity,
-  {
-    Icon: typeof AlertTriangle;
-    iconColor: string;
-    cardBg: string;
-    stripe: string;
-    pill: string;
-    tagline: string;
-  }
-> = {
-  critical: {
-    Icon: Flame,
-    iconColor: 'text-red-300',
-    cardBg: 'from-red-950/30 via-neutral-950/0 to-neutral-950/0',
-    stripe: 'from-red-500 via-red-600 to-rose-700 text-red-500',
-    pill: 'bg-red-600/15 text-red-200 ring-1 ring-red-500/30',
-    tagline: 'Active threat — fix immediately.',
-  },
-  high: {
-    Icon: AlertTriangle,
-    iconColor: 'text-orange-300',
-    cardBg: 'from-orange-950/25 via-neutral-950/0 to-neutral-950/0',
-    stripe: 'from-orange-500 to-amber-600 text-orange-500',
-    pill: 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/30',
-    tagline: 'Likely exploitable — fix soon.',
-  },
-  medium: {
-    Icon: AlertCircle,
-    iconColor: 'text-amber-300',
-    cardBg: 'from-amber-950/20 via-neutral-950/0 to-neutral-950/0',
-    stripe: 'from-yellow-500 to-amber-500 text-yellow-500',
-    pill: 'bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30',
-    tagline: 'Possible risk — review and fix.',
-  },
-  low: {
-    Icon: CircleDot,
-    iconColor: 'text-lime-300',
-    cardBg: 'from-emerald-950/15 via-neutral-950/0 to-neutral-950/0',
-    stripe: 'from-lime-500 to-emerald-600 text-lime-500',
-    pill: 'bg-lime-500/15 text-lime-200 ring-1 ring-lime-400/30',
-    tagline: 'Minor concern — fix when convenient.',
-  },
-  info: {
-    Icon: Info,
-    iconColor: 'text-neutral-300',
-    cardBg: 'from-neutral-900/40 via-neutral-950/0 to-neutral-950/0',
-    stripe: 'from-neutral-500 to-neutral-600 text-neutral-500',
-    pill: 'bg-neutral-700/40 text-neutral-200 ring-1 ring-neutral-600/40',
-    tagline: 'Worth noting — not directly exploitable.',
-  },
-};
-
-const URGENCY_THEME: Record<
-  AiUrgency,
-  { label: string; banner: string; pill: string; Icon: LucideIcon; intent: string }
-> = {
-  fix_now: {
-    label: 'Fix now',
-    banner: 'border-red-500/30 bg-red-950/40',
-    pill: 'bg-red-600/20 text-red-200 ring-1 ring-red-500/40',
-    Icon: Zap,
-    intent: 'AI flags this as urgent — confirmed real and reachable.',
-  },
-  fix_soon: {
-    label: 'Fix soon',
-    banner: 'border-orange-500/30 bg-orange-950/30',
-    pill: 'bg-orange-500/20 text-orange-200 ring-1 ring-orange-400/40',
-    Icon: Clock,
-    intent: 'AI flags this as real but not immediately critical.',
-  },
-  monitor: {
-    label: 'Monitor',
-    banner: 'border-amber-500/25 bg-amber-950/20',
-    pill: 'bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30',
-    Icon: EyeIcon,
-    intent: 'AI says: needs human review or upstream change to act on.',
-  },
-  dismiss: {
-    label: 'Dismiss',
-    banner: 'border-neutral-700/40 bg-neutral-900/40',
-    pill: 'bg-neutral-700/40 text-neutral-300 ring-1 ring-neutral-600/40',
-    Icon: Ban,
-    intent: 'AI assessed this as a likely false positive.',
-  },
-};
-
-const REACHABILITY_THEME: Record<
-  AiReachability,
-  { label: string; Icon: LucideIcon; color: string }
-> = {
-  external_unauthenticated: { label: 'Public — no auth', Icon: Globe, color: 'text-red-300' },
-  external_authenticated: { label: 'Any signed-in user', Icon: Globe, color: 'text-orange-300' },
-  internal_only: { label: 'Internal / privileged only', Icon: Lock, color: 'text-amber-300' },
-  unreachable: { label: 'Unreachable', Icon: ShieldOff, color: 'text-neutral-400' },
-};
-
-const STATUS_THEME: Record<
-  FindingStatus,
-  { label: string; pill: string; Icon: typeof CheckCircle2 }
-> = {
-  open: {
-    label: 'Open',
-    pill: 'bg-blue-500/10 text-blue-200 ring-1 ring-blue-400/30',
-    Icon: AlertCircle,
-  },
-  triaged_real: {
-    label: 'Triaged · real',
-    pill: 'bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/30',
-    Icon: Eye,
-  },
-  fixed: {
-    label: 'Fixed',
-    pill: 'bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30',
-    Icon: CheckCircle2,
-  },
-  false_positive: {
-    label: 'False positive',
-    pill: 'bg-neutral-700/50 text-neutral-300 ring-1 ring-neutral-600/40',
-    Icon: XCircle,
-  },
-  wont_fix: {
-    label: "Won't fix",
-    pill: 'bg-neutral-700/50 text-neutral-300 ring-1 ring-neutral-600/40',
-    Icon: XCircle,
-  },
-};
+// FindingCard — collapsed-state design follows a single-signal rule:
+//   - Severity is communicated *only* by the left-edge gradient band.
+//   - Title is the hero. Two-line max.
+//   - AI urgency pill on the right is the single action signal.
+//   - The AI one-liner ("why it matters / what to do") is surfaced by default
+//     so users can decide without expanding.
+//   - Status, CVSS, CWE, repeat count, HTTP method/endpoint live in the
+//     expanded view as metadata. They were creating noise on every row.
+//
+// The point: a busy finding list should *look* calm. Severity is in the
+// peripheral band; the foreground tells you what to do.
 
 const SECTION_LABELS: Record<string, string> = {
   description: 'What is the issue',
@@ -210,20 +82,25 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [updating, setUpdating] = useState(false);
 
-  const theme = SEVERITY_THEME[finding.severity];
+  const sev = SEVERITY_THEME[finding.severity];
   const statusTheme = STATUS_THEME[finding.status];
   const ai = finding.ai_assessment ?? null;
   const urgencyTheme = ai ? URGENCY_THEME[ai.urgency] : null;
   const reachTheme = ai ? REACHABILITY_THEME[ai.reachability] : null;
   const { summary, sections } = parseFindingMarkdown(finding.description_md);
-  const Icon = theme.Icon;
+  const SevIcon = sev.Icon;
   const StatusIcon = statusTheme.Icon;
   const isResolved =
     finding.status === 'fixed' ||
     finding.status === 'false_positive' ||
     finding.status === 'wont_fix';
-  // AI says "dismiss" → treat the card as low-priority visual weight.
   const aiDismissed = ai?.urgency === 'dismiss';
+  const muted = isResolved || aiDismissed;
+
+  // What we surface as the "AI one-liner" — prefer recommended_action, then
+  // reasoning, then the parsed description summary. We want one calm sentence
+  // by default, not three pills competing for attention.
+  const aiOneLiner = ai?.recommended_action || ai?.reasoning || summary;
 
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
@@ -249,112 +126,147 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-xl border border-neutral-800/80 bg-gradient-to-b ${theme.cardBg} transition-all hover:border-neutral-700/80 ${
-        isResolved || aiDismissed ? 'opacity-70 saturate-50' : ''
+      className={`group relative overflow-hidden rounded-xl border border-neutral-800/70 bg-neutral-900/30 transition-all hover:border-neutral-700/80 hover:bg-neutral-900/50 ${
+        muted ? 'opacity-60' : ''
       }`}
     >
-      <div className={`severity-stripe h-[3px] bg-gradient-to-r ${theme.stripe}`} />
+      {/* The single severity signal — a thin gradient band on the left edge. */}
+      <div className={`absolute inset-y-0 left-0 w-[3px] ${sev.band}`} aria-hidden />
 
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="block w-full px-6 py-5 text-left"
+        className="block w-full px-6 py-5 pl-7 text-left"
       >
         <div className="flex items-start gap-4">
-          <div className="mt-1 flex-shrink-0">
-            <Icon className={`h-5 w-5 ${theme.iconColor}`} strokeWidth={2} />
+          {/* Severity icon disc — small, peripheral. Same colour as the band. */}
+          <div
+            className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ring-1 ring-white/5 ${sev.iconBg}`}
+            aria-label={`${sev.label} severity`}
+          >
+            <SevIcon className={`h-3.5 w-3.5 ${sev.iconColor}`} strokeWidth={2.25} />
           </div>
+
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {urgencyTheme && (() => {
-                const UIcon = urgencyTheme.Icon;
-                return (
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${urgencyTheme.pill}`}
-                    title={ai?.reasoning ?? undefined}
-                  >
-                    <UIcon className="h-3 w-3" strokeWidth={2.5} />
-                    AI · {urgencyTheme.label}
-                  </span>
-                );
-              })()}
-              <span
-                className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${theme.pill}`}
+            {/* Row 1: title (hero) + urgency pill on the right. */}
+            <div className="flex items-start justify-between gap-3">
+              <h3
+                className={`text-[15px] font-semibold leading-snug sm:text-base ${
+                  isResolved ? 'text-neutral-300 line-through decoration-neutral-700' : 'text-neutral-50'
+                }`}
               >
-                {finding.severity}
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusTheme.pill}`}
-              >
-                <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
-                {statusTheme.label}
-              </span>
-              {(finding.times_seen ?? 1) > 1 && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-md bg-neutral-900/60 px-2 py-0.5 text-[10px] font-semibold text-neutral-300 ring-1 ring-neutral-800"
-                  title="Same fingerprint detected across multiple scans"
-                >
-                  <Repeat className="h-3 w-3" strokeWidth={2.5} />
-                  seen {finding.times_seen}×
-                </span>
-              )}
-              {finding.cvss != null && (
-                <span className="rounded-md bg-neutral-900/60 px-2 py-0.5 font-mono text-[10px] text-neutral-300 ring-1 ring-neutral-800">
-                  CVSS {finding.cvss}
-                </span>
-              )}
-              {finding.cwe && (
-                <span className="rounded-md bg-neutral-900/60 px-2 py-0.5 font-mono text-[10px] text-neutral-400 ring-1 ring-neutral-800">
-                  {finding.cwe}
-                </span>
-              )}
-              {(finding.endpoint || finding.method) && (
-                <span className="rounded-md bg-neutral-900/60 px-2 py-0.5 font-mono text-[10px] text-cyan-300 ring-1 ring-neutral-800">
-                  {[finding.method, finding.endpoint].filter(Boolean).join(' ')}
-                </span>
-              )}
+                <span className="line-clamp-2">{finding.title}</span>
+              </h3>
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                {urgencyTheme && (() => {
+                  const UIcon = urgencyTheme.Icon;
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider ${urgencyTheme.pill}`}
+                      title={urgencyTheme.intent}
+                    >
+                      <UIcon className="h-3 w-3" strokeWidth={2.5} />
+                      {urgencyTheme.label}
+                    </span>
+                  );
+                })()}
+                <ChevronDown
+                  className={`h-4 w-4 text-neutral-500 transition-transform duration-200 ${
+                    expanded ? 'rotate-180 text-neutral-300' : ''
+                  }`}
+                  strokeWidth={2}
+                />
+              </div>
             </div>
 
-            <h3
-              className={`mt-2.5 text-base font-semibold leading-snug sm:text-[17px] ${
-                isResolved ? 'text-neutral-300 line-through decoration-neutral-700' : 'text-neutral-50'
-              }`}
-            >
-              {finding.title}
-            </h3>
-
-            <p className="mt-1 text-xs italic text-neutral-500">{theme.tagline}</p>
-
-            {summary && (
-              <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-neutral-300">
-                {summary}
+            {/* Row 2: target / endpoint as a single mono line. Subdued. */}
+            {(finding.endpoint || finding.target) && (
+              <p className="mt-1 truncate font-mono text-[11.5px] text-neutral-500">
+                {finding.endpoint
+                  ? [finding.method, finding.endpoint].filter(Boolean).join(' ')
+                  : finding.target}
               </p>
             )}
-          </div>
 
-          <ChevronDown
-            className={`mt-1 h-4 w-4 flex-shrink-0 text-neutral-500 transition-transform duration-200 ${
-              expanded ? 'rotate-180 text-neutral-300' : ''
-            }`}
-            strokeWidth={2}
-          />
+            {/* Row 3: AI one-liner — the *why*. Visible by default with a small
+                gradient mark to keep the AI brand cue without a heavy banner. */}
+            {aiOneLiner && (
+              <div className="mt-2.5 flex items-start gap-2">
+                <Sparkles
+                  className={`mt-0.5 h-3 w-3 flex-shrink-0 ${ai ? AI_BRAND.iconColor : 'text-neutral-500'}`}
+                  strokeWidth={2.25}
+                />
+                <p className="line-clamp-2 text-[13px] leading-relaxed text-neutral-300">
+                  {aiOneLiner}
+                </p>
+              </div>
+            )}
+
+            {/* Row 4: subdued status indicator only when not in default open state.
+                Open status is implied — we don't badge it. */}
+            {finding.status !== 'open' && (
+              <div className="mt-2.5 flex items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusTheme.pill}`}
+                >
+                  <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
+                  {statusTheme.label}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </button>
 
       {expanded && (
-        <div className="space-y-6 border-t border-neutral-800/60 bg-neutral-950/30 px-6 py-6">
+        <div className="space-y-6 border-t border-neutral-800/60 bg-neutral-950/40 px-6 py-6 pl-7">
+          {/* Compact metadata strip — the small facts that aren't worth a row
+              in the collapsed view but still matter when you're looking. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-neutral-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${sev.iconBg.replace('/15', '/80')}`} />
+              <span className="text-neutral-400">{sev.label}</span>
+            </span>
+            {finding.cvss != null && (
+              <span className="font-mono">
+                <span className="text-neutral-600">CVSS</span>{' '}
+                <span className="text-neutral-300">{finding.cvss}</span>
+              </span>
+            )}
+            {finding.cwe && (
+              <span className="font-mono text-neutral-400">{finding.cwe}</span>
+            )}
+            {(finding.times_seen ?? 1) > 1 && (
+              <span
+                className="inline-flex items-center gap-1"
+                title="Same fingerprint detected across multiple scans"
+              >
+                <Repeat className="h-3 w-3" strokeWidth={2.5} />
+                seen {finding.times_seen}×
+              </span>
+            )}
+            {finding.target && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="text-neutral-600">target</span>
+                <code className="rounded bg-neutral-900/80 px-1.5 py-0.5 font-mono text-cyan-300/90 ring-1 ring-neutral-800">
+                  {finding.target}
+                </code>
+              </span>
+            )}
+          </div>
+
           {ai && urgencyTheme && reachTheme && (() => {
             const UIcon = urgencyTheme.Icon;
             const RIcon = reachTheme.Icon;
             return (
-              <section className={`rounded-lg border ${urgencyTheme.banner} p-4`}>
+              <section className={`rounded-lg p-4 ${AI_BRAND.bgTint} ${AI_BRAND.ring}`}>
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-black/30 ring-1 ring-white/5">
-                    <Sparkles className="h-3.5 w-3.5 text-violet-300" strokeWidth={2.25} />
+                  <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-neutral-950/60 ring-1 ring-white/5">
+                    <Sparkles className={`h-3.5 w-3.5 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
                         AI assessment
                       </span>
                       <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${urgencyTheme.pill}`}>
@@ -369,7 +281,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                         confidence {Math.round(ai.confidence * 100)}%
                       </span>
                       {ai.is_likely_false_positive && (
-                        <span className="rounded-md bg-neutral-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase text-neutral-300 ring-1 ring-neutral-600/40">
+                        <span className="rounded-md bg-zinc-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-300 ring-1 ring-zinc-600/40">
                           likely FP
                         </span>
                       )}
@@ -393,14 +305,6 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </section>
             );
           })()}
-          {finding.target && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-neutral-500">Target:</span>
-              <code className="rounded bg-neutral-900/80 px-2 py-0.5 font-mono text-cyan-300 ring-1 ring-neutral-800">
-                {finding.target}
-              </code>
-            </div>
-          )}
 
           {sections.length === 0 && finding.description_md && (
             <Markdown body={finding.description_md} />
