@@ -135,6 +135,23 @@ export interface ScanRecurrenceSummary {
   reopened: number;
 }
 
+/**
+ * One step in the heuristic "kill-chain" reconstruction (pillar 1 item 2).
+ * The `event_type` is from Strix's vocabulary; the `payload` is the raw
+ * scan_event payload. UI extracts a friendly label per event_type.
+ */
+export interface KillChainStep {
+  created_at: string;
+  event_type: string;
+  payload: Record<string, unknown> | null;
+}
+
+export interface KillChainResponse {
+  agent_id: string | null;
+  finding_at: string;
+  steps: KillChainStep[];
+}
+
 export interface ScanTarget {
   id: string;
   scan_id: string;
