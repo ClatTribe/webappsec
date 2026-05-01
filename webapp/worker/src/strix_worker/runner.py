@@ -12,6 +12,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from .code_context import parse_code_analysis_section
 from .config import WorkerConfig
 from .credentials import materialize_credentials
 from .instruction import build_instruction
@@ -698,6 +699,13 @@ def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
             cwe=cwe, endpoint=endpoint, target=target, title=title,
         )
 
+        # Pull Strix's structured code_locations back out of the `## Code
+        # Analysis` section and persist them as JSONB. Downstream the
+        # triage RAG path consumes these snippets directly — no need to
+        # re-read source from disk, and works for repository targets too
+        # (whose sandbox-cloned source is gone by triage time).
+        affected_files = parse_code_analysis_section(text)
+
         sb.insert_finding(
             scan_id=scan_id,
             vuln_id=vuln_file.stem,
@@ -712,6 +720,7 @@ def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:
                 "endpoint": endpoint,
                 "method": method,
                 "fingerprint": fingerprint,
+                "affected_files": affected_files or None,
             },
         )
     except Exception as e:  # noqa: BLE001

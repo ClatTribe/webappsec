@@ -1,30 +1,29 @@
 """Source-code context for LLM-based finding triage.
 
-This is the worker side of "AI triage with codebase context (RAG)" — Stage
-A.1. Today the triage LLM sees only the finding markdown, so when it judges
-reachability ("is this exploitable?") it has to *guess* from prose. With the
-actual source around the cited line it can *confirm*.
+This is the worker side of "AI triage with codebase context (RAG)". Today
+the triage LLM sees only the finding markdown, so when it judges
+reachability ("is this exploitable?") it has to *guess* from prose. With
+the actual source around the cited line it can *confirm*.
 
-Stage A.1 (this module): for `local_code` targets the source is on the
-worker host. We extract file references from the finding markdown, resolve
-them under the target root (with strict path-traversal guards), and read a
-window of lines around any cited line numbers. The result is a small,
-bounded prompt section the triage LLM consumes alongside the description.
+There are two paths in here, in order of preference:
 
-Out of scope here, deferred to Stage A.2:
-- `repository` targets — Strix clones the repo inside its sandbox container,
-  which is gone by triage time. To support these we'd shallow-clone in the
-  worker at triage finalize, which means re-materialising integration
-  credentials past the original `with materialize_credentials(...)` scope.
-  Real work, separate PR.
-- pgvector-backed similarity search to surface *related* code beyond what
-  Strix explicitly mentioned. The roadmap row's L-effort estimate covers
-  that; A.1 ships the headline value (Strix's mentioned files visible to
-  the LLM) at a fraction of the cost.
+1. **Strix's structured `code_locations`** — Strix already extracts file
+   path, line range, the snippet, and (often) a suggested-fix diff for
+   every code-related finding. It serialises these into the `## Code
+   Analysis` section of `vuln-NNNN.md`. Our `_ingest_finding` parses that
+   section back into structured form and persists it in
+   `findings.affected_files` (JSONB). At triage time we read those rows
+   directly into the prompt — no file IO, works for *every* target type
+   (repository, local_code, anything Strix produces locations for).
 
-The whole function is best-effort. If anything goes wrong — file missing,
-binary file, path traversal attempt, oversize file — we return None and the
-finding is triaged exactly as it was before this module existed.
+2. **Disk-read fallback** for local_code targets when no structured
+   `code_locations` exist. We extract path-shaped tokens from
+   `description_md`, resolve them under the target root with strict
+   traversal guards, and read line windows. Slower, less precise, only
+   used when Strix didn't give us structured data.
+
+The whole function is best-effort. Every failure mode returns None and
+the finding is triaged exactly as it was before this module existed.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import textwrap
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,6 +70,159 @@ class FileRef:
     """A file path mentioned in a finding, optionally with a line number."""
     path: str
     line: int | None
+
+
+# ---------------------------------------------------------------------------
+# Parsing Strix's `## Code Analysis` markdown section
+# ---------------------------------------------------------------------------
+#
+# Strix's tracer.py serialises each code_location as roughly:
+#
+#     **Location 1:** `webapp/api/foo.py` (line 42)
+#       short label
+#       ```
+#       snippet body
+#       ```
+#
+#       **Suggested Fix:**
+#     ```diff
+#     - old line
+#     + new line
+#     ```
+#
+# We invert this back into the same dict shape Strix's in-memory
+# `code_locations` had, so downstream code can treat it as ground truth.
+# This parser is intentionally lenient: Strix's markdown writer has minor
+# indentation quirks (only the first line of a snippet gets indented
+# after the opening fence), and older versions may differ. When in doubt,
+# capture less — it's better to miss a snippet than to include garbage.
+
+_CODE_ANALYSIS_HEADING = re.compile(r"^##\s+Code\s+Analysis\s*$", re.MULTILINE | re.IGNORECASE)
+_LOCATION_HEADER = re.compile(
+    r"\*\*Location\s+\d+:\*\*\s*"
+    r"`(?P<path>[^`\n]+)`"
+    r"(?:\s*\(lines?\s+(?P<start>\d+)(?:\s*-\s*(?P<end>\d+))?\))?",
+)
+_SNIPPET_FENCE = re.compile(
+    r"^[ \t]*```[a-zA-Z0-9_-]*\s*\n(?P<body>.*?)\n[ \t]*```",
+    re.MULTILINE | re.DOTALL,
+)
+_DIFF_FENCE = re.compile(
+    r"\*\*Suggested\s+Fix:?\*\*\s*\n[ \t]*```diff\s*\n(?P<body>.*?)\n[ \t]*```",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_code_analysis_section(md: str | None) -> list[dict[str, Any]]:
+    """Pull Strix's structured code_locations back out of a vuln markdown.
+
+    Returns a list of dicts with the same keys Strix uses internally:
+    `{path, line?, end_line?, label?, snippet?, fix_before?, fix_after?}`.
+    Empty list when the section is absent or unparseable.
+
+    The result is suitable to pass straight into `worker_insert_finding`'s
+    `payload.affected_files` JSONB. Stable downstream contract.
+    """
+    if not md:
+        return []
+    heading = _CODE_ANALYSIS_HEADING.search(md)
+    if not heading:
+        return []
+
+    # Section runs from the heading to the next H2 or EOF.
+    section_start = heading.end()
+    next_h2 = re.search(r"\n##\s+\S", md[section_start:])
+    section_end = section_start + next_h2.start() if next_h2 else len(md)
+    section = md[section_start:section_end]
+
+    # Split on Location boundaries — keep the boundary text in each part.
+    raw_blocks = re.split(r"(?=\*\*Location\s+\d+:\*\*)", section)
+    blocks = [b for b in raw_blocks if "**Location" in b]
+
+    out: list[dict[str, Any]] = []
+    for block in blocks:
+        loc = _parse_one_location(block)
+        if loc and loc.get("path"):
+            out.append(loc)
+    return out
+
+
+def _parse_one_location(block: str) -> dict[str, Any] | None:
+    header = _LOCATION_HEADER.search(block)
+    if not header:
+        return None
+    loc: dict[str, Any] = {"path": header.group("path").strip()}
+    if header.group("start"):
+        loc["line"] = int(header.group("start"))
+    if header.group("end"):
+        loc["end_line"] = int(header.group("end"))
+
+    # Body = everything after the header line.
+    body_start = header.end()
+    body = block[body_start:]
+
+    # Snippet: first non-diff fence after the header. Strix uses bare ```
+    # for snippets and ```diff for suggested fixes — match the bare form
+    # by excluding `diff`-tagged opens.
+    snippet = _extract_snippet(body)
+    if snippet:
+        loc["snippet"] = snippet
+
+    diff = _DIFF_FENCE.search(body)
+    if diff:
+        before, after = _split_unified_diff(diff.group("body"))
+        if before:
+            loc["fix_before"] = before
+        if after:
+            loc["fix_after"] = after
+
+    # Label: the first non-empty, non-fence, non-bold line directly under
+    # the header — Strix indents it by 2 spaces.
+    label = _extract_label(body)
+    if label:
+        loc["label"] = label
+
+    return loc
+
+
+def _extract_snippet(body: str) -> str | None:
+    """First triple-fence block in `body` that isn't a ```diff block."""
+    # Trim everything from `**Suggested Fix:**` onward — that's diff territory.
+    cutoff = re.search(r"\*\*Suggested\s+Fix:?\*\*", body, re.IGNORECASE)
+    search_in = body[: cutoff.start()] if cutoff else body
+    m = _SNIPPET_FENCE.search(search_in)
+    if not m:
+        return None
+    raw = m.group("body")
+    # Strix only indents the first line of the snippet by 2 spaces; the
+    # rest is whatever indentation the source had. textwrap.dedent does
+    # the right thing only on uniform indents, so we manually peel a
+    # leading 2-space prefix on a per-line basis if present.
+    lines = raw.splitlines()
+    return "\n".join(line[2:] if line.startswith("  ") else line for line in lines).rstrip()
+
+
+def _split_unified_diff(diff_body: str) -> tuple[str, str]:
+    """Pull `- ` and `+ ` lines out of a unified-style diff block."""
+    befores: list[str] = []
+    afters: list[str] = []
+    for line in diff_body.splitlines():
+        if line.startswith("- "):
+            befores.append(line[2:])
+        elif line.startswith("+ "):
+            afters.append(line[2:])
+    return "\n".join(befores), "\n".join(afters)
+
+
+def _extract_label(body: str) -> str | None:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```") or stripped.startswith("**"):
+            return None
+        return stripped
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -261,49 +414,159 @@ def _local_code_root(scan_targets: list[dict[str, Any]]) -> str | None:
 def gather_for_finding(
     finding: dict[str, Any],
     *,
-    scan_targets: list[dict[str, Any]],
+    scan_targets: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Build a bounded source-code context block for one finding's triage.
 
-    Returns the formatted context string (with file headers + line-numbered
-    snippets) ready to embed in the prompt, or None if no usable source
-    could be assembled.
+    Two paths, in preference order:
 
-    Strategy:
-      - Resolve the local_code root for this scan, if any.
-      - Extract file refs from the finding's `description_md` (and the
-        structured `affected_files` column when populated by the worker).
-      - Read each ref's file window, in order, until we hit either the
-        per-finding char budget or the per-finding file count cap.
-      - Skip files that don't exist, look binary, escape the root, or
-        refuse to decode.
+      1. **Structured snippets from `affected_files`** (Strix's own
+         `code_locations`). When present, we render the snippets directly
+         into the prompt — no file IO, no path-traversal exposure, works
+         for repository targets too. This is the common case.
+
+      2. **Disk read** for `local_code` targets when no structured
+         snippets exist. Extract file refs from `description_md`, resolve
+         under the target root, read line windows.
+
+    Returns the formatted context string (with file headers + snippets +
+    optional fix-diff blocks) or None if no usable source could be
+    assembled.
     """
+    structured = _structured_chunks(finding)
+    if structured:
+        return structured
+
+    if scan_targets:
+        return _disk_chunks(finding, scan_targets)
+    return None
+
+
+def _structured_chunks(finding: dict[str, Any]) -> str | None:
+    """Render `affected_files` entries that already carry snippets.
+
+    Each entry can be either a path string (no usable structured data, so
+    skipped here) or an object with at least `path` + `snippet`. Strix
+    produces the latter; we just format them.
+    """
+    raw = finding.get("affected_files") or []
+    if not isinstance(raw, list):
+        return None
+
+    chunks: list[str] = []
+    used = 0
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("snippet"):
+            continue  # No snippet to render — defer to disk-read fallback.
+        path = entry.get("path") or entry.get("file")
+        if not path:
+            continue
+
+        line = entry.get("line") or entry.get("start_line")
+        end_line = entry.get("end_line")
+        line_label = _format_line_label(line, end_line)
+
+        snippet = _bound_snippet(str(entry["snippet"]))
+        label = entry.get("label")
+
+        block_lines = [f"### {path}{line_label}"]
+        if label:
+            block_lines.append(_clamp_line(str(label), 200))
+        block_lines.append("```")
+        block_lines.append(snippet)
+        block_lines.append("```")
+
+        # If Strix attached a suggested-fix diff, surface it. This is
+        # gold for triage: the agent's own fix proposal is a strong
+        # reachability signal — if the patch makes sense, the bug is
+        # real; if it patches dead code, the LLM should mark it dismiss.
+        before = entry.get("fix_before")
+        after = entry.get("fix_after")
+        if before or after:
+            block_lines.append("Suggested fix (from agent):")
+            block_lines.append("```diff")
+            for ln in (before or "").splitlines():
+                block_lines.append("- " + _clamp_line(ln, 200))
+            for ln in (after or "").splitlines():
+                block_lines.append("+ " + _clamp_line(ln, 200))
+            block_lines.append("```")
+
+        block = "\n".join(block_lines)
+        if used + len(block) > _MAX_CONTEXT_CHARS:
+            chunks.append(
+                f"_(further locations truncated — context budget reached at {used} chars)_"
+            )
+            break
+        chunks.append(block)
+        used += len(block)
+        if len(chunks) >= _MAX_FILES_PER_FINDING:
+            break
+
+    if not chunks:
+        return None
+    return "\n\n".join(chunks)
+
+
+def _format_line_label(line: int | None, end_line: int | None) -> str:
+    if line and end_line and end_line != line:
+        return f"  (lines {line}-{end_line})"
+    if line:
+        return f"  (line {line})"
+    return ""
+
+
+def _clamp_line(text: str, max_chars: int) -> str:
+    if len(text) > max_chars:
+        return text[:max_chars] + "  # …truncated"
+    return text
+
+
+def _bound_snippet(snippet: str) -> str:
+    """Cap a snippet at the per-file char budget and clamp long lines."""
+    out_lines = []
+    total = 0
+    for line in snippet.splitlines():
+        line = _clamp_line(line, 200)
+        if total + len(line) + 1 > _MAX_CONTEXT_CHARS // 2:
+            out_lines.append("# …snippet truncated")
+            break
+        out_lines.append(line)
+        total += len(line) + 1
+    return "\n".join(out_lines)
+
+
+def _disk_chunks(
+    finding: dict[str, Any],
+    scan_targets: list[dict[str, Any]],
+) -> str | None:
+    """Fallback: regex-extract file refs from prose, read from local_code disk."""
     root = _local_code_root(scan_targets)
     if not root:
-        return None  # No source we can reach for this scan.
+        return None
 
     md = finding.get("description_md") or ""
     refs = extract_file_references(md)
 
-    # `affected_files` is a JSONB column — list of strings, or list of
-    # objects with {path, line}. Gracefully accept either.
+    # `affected_files` may also list bare path strings (no snippet); merge them.
     raw_aff = finding.get("affected_files") or []
     if isinstance(raw_aff, list):
         for entry in raw_aff:
             if isinstance(entry, str):
                 refs.append(FileRef(path=entry, line=None))
-            elif isinstance(entry, dict):
+            elif isinstance(entry, dict) and not entry.get("snippet"):
                 p = entry.get("path") or entry.get("file")
                 if p:
-                    line_v = entry.get("line")
+                    line_v = entry.get("line") or entry.get("start_line")
                     refs.append(FileRef(path=p, line=int(line_v) if line_v else None))
 
-    # De-dup again after merging the two sources, preserving order.
-    seen_paths: set[str] = set()
+    # De-dup, preserving order.
+    seen: set[str] = set()
     unique_refs: list[FileRef] = []
     for r in refs:
-        if r.path not in seen_paths:
-            seen_paths.add(r.path)
+        if r.path not in seen:
+            seen.add(r.path)
             unique_refs.append(r)
     if not unique_refs:
         return None
