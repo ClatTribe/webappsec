@@ -9,6 +9,7 @@ For the design rationale and historical alternatives considered, see [`docs/weba
 ## Table of contents
 
 1. [System overview](#1-system-overview)
+   - [1.1 Design principles](#11-design-principles)
 2. [Scan handling — multi-user, parallel, isolated](#2-scan-handling--multi-user-parallel-isolated)
 3. [User and integration data handling](#3-user-and-integration-data-handling)
 4. [Roadmap](#4-roadmap)
@@ -66,6 +67,20 @@ Three independently deployable tiers. Each holds a different kind of state, comm
 | **Compute** | Fly.io (or any Docker host) | Worker process that runs Strix subprocesses |
 
 Strix itself runs as a one-shot subprocess inside the worker — no long-lived agent, no shared state across scans. The contract between the worker and Strix is just CLI flags + env vars + the on-disk `<cwd>/strix_runs/<run>/` tree, exactly as a human would invoke it.
+
+### 1.1 Design principles
+
+These are the doctrines we hold across every PR. Roll them forward when designing new features.
+
+**Strix is the source of truth for detection and triage data — `webappsec` is the wrapper.** Strix is the security agent: it has first-hand view of the source, the running app, the network behaviour, the actual exploit attempt. Anything Strix already produces — file paths, line numbers, code snippets, suggested-fix diffs, vulnerability metadata, event timelines — must be consumed by the worker as structured data, not re-derived downstream. Before adding any extractor, regex parser, or post-process layer in the worker, **read [`strix/telemetry/tracer.py`](https://github.com/usestrix/strix/blob/main/strix/telemetry/tracer.py)** (and surrounding files) to confirm Strix isn't already emitting the data you'd be re-deriving. A real example: PR #31 shipped a regex-over-markdown extractor for `affected_files`; PR #32 then deleted most of it once we noticed Strix had been emitting `code_locations` structurally all along. Don't repeat that.
+
+**Layer additional analysis on top of Strix's output, never replace it.** The wrapper *adds*: multi-tenant persistence, RLS, the cyan-violet AI-triage layer, cross-scan deduplication, RAG context, the live UI. Each of these takes Strix's output as input and enriches it. None should reinterpret Strix's findings — if Strix said `severity=critical`, we store and surface `critical`, even when downstream AI triage says `dismiss`. The two signals coexist; the user sees both.
+
+**Mirror Strix's data model where it makes sense.** Our `findings.affected_files` JSONB column carries the same shape as Strix's `code_locations`. Our `scan_events.event_type` mirrors Strix's `event_type` (`finding.created`, `agent.created`, `tool.execution_started`). Schema fidelity to Strix is a feature — it makes the wrapper's job thin and keeps drift catchable.
+
+**When Strix is missing something we need, prefer upstream contributions over wrapper-side workarounds.** Wrapper-side regex over Strix's prose is a maintenance treadmill (Strix changes its markdown → our parser breaks). If `vulnerabilities.csv` lacks the columns we need, the right move is a small upstream PR to extend it, not a richer parser in `runner.py`. Wrapper-side workarounds belong as *fallbacks* for older Strix versions, not as the primary path.
+
+**One exception: tenant boundaries.** Anything related to multi-tenant isolation (RLS, org_id keying, vault encryption, credential materialisation) is the wrapper's exclusive responsibility. Strix is single-tenant by design — it scans one target as one user. The wrapper is what makes it safe to run thousands of scans for hundreds of orgs in parallel without crossover. That code lives here, not upstream.
 
 ---
 
