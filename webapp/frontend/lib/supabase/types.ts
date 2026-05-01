@@ -164,6 +164,39 @@ export interface FindingOccurrence {
   reopened: boolean;
 }
 
+/**
+ * One labeled training pair — a user's triage decision on a finding.
+ * Captured by a Postgres trigger on every status change made by an
+ * authenticated user (worker auto-flips don't produce signals; see
+ * migration 018). Per-org RLS; the loop never trains across tenants.
+ */
+export interface TriageSignal {
+  id: string;
+  finding_id: string;
+  org_id: string;
+  decided_by: string | null;       // null on backfill rows; users always have it
+  decided_at: string;
+  prior_status: FindingStatus;
+  decision: FindingStatus;
+  triage_notes: string | null;
+  ai_prediction: AiAssessment | null;  // snapshot at decision time
+  finding_features: Record<string, unknown> | null;
+}
+
+/**
+ * Aggregated breakdown of how this org has triaged "similar" findings
+ * before. Returned by the `triage_history_for_finding` RPC. Phase 1
+ * defines similar as same CWE + same target. Phase 2 will replace this
+ * with vector-similarity. Returns null when no neighbours exist.
+ */
+export interface TriageHistory {
+  total: number;
+  fixed: number;
+  triaged_real: number;
+  false_positive: number;
+  wont_fix: number;
+}
+
 export type AiUrgency = 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss';
 export type AiReachability =
   | 'external_unauthenticated'
