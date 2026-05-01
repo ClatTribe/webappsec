@@ -340,6 +340,120 @@ async def test_triage_passes_code_context_for_local_code_targets(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_embed_finding_returns_768d_vector(monkeypatch):
+    """embed_finding calls litellm.aembedding and returns a normalised list."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+
+        class _Resp:
+            data = [{"embedding": [0.01] * 768}]
+
+        return _Resp()
+
+    monkeypatch.setattr(triage.litellm, "aembedding", _capture)
+
+    out = await triage.embed_finding(
+        _finding("a"),
+        api_key="fake-key",
+    )
+    assert out is not None
+    assert len(out) == 768
+    assert all(isinstance(x, float) for x in out)
+    # The embedder is called with the title + structured fields, not the
+    # raw description prose alone — that's what makes the embedding
+    # stable across LLM rewordings.
+    assert captured["model"] == triage.EMBEDDING_MODEL
+    assert "Title:" in captured["input"]
+
+
+@pytest.mark.asyncio
+async def test_embed_finding_returns_none_on_wrong_dim(monkeypatch):
+    """A surprising-dim response from the API must not poison the DB."""
+    async def _bad_dim(**kwargs):
+        class _Resp:
+            data = [{"embedding": [0.01] * 384}]  # not 768
+        return _Resp()
+
+    monkeypatch.setattr(triage.litellm, "aembedding", _bad_dim)
+
+    out = await triage.embed_finding(_finding("a"), api_key="k")
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_embed_finding_returns_none_on_api_failure(monkeypatch):
+    """Network/API failures must degrade gracefully — triage continues."""
+    async def _boom(**kwargs):
+        raise RuntimeError("API down")
+
+    monkeypatch.setattr(triage.litellm, "aembedding", _boom)
+
+    out = await triage.embed_finding(_finding("a"), api_key="k")
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_triage_writes_embedding_alongside_assessment(monkeypatch):
+    """Integration: triage_scan_findings writes both ai_assessment AND
+    embedding to the findings row when both calls succeed."""
+    sb = FakeSupabase([_finding("a")])
+
+    monkeypatch.setattr(
+        triage.litellm,
+        "acompletion",
+        AsyncMock(return_value=_fake_response(_GOOD_ASSESSMENT)),
+    )
+
+    async def _emb(**kwargs):
+        class _Resp:
+            data = [{"embedding": [0.5] * 768}]
+        return _Resp()
+
+    monkeypatch.setattr(triage.litellm, "aembedding", _emb)
+
+    stats = await triage.triage_scan_findings(
+        sb, SCAN_ID, model="gemini/gemini-2.5-flash", api_key="fake-key",
+    )
+    assert stats.success == 1
+    assert len(sb.update_calls) == 1
+    update = sb.update_calls[0]
+    assert update["ai_assessment"]["urgency"] == "fix_now"
+    # Embedding is sent as a pgvector text literal "[v1,v2,...]".
+    assert update["embedding"].startswith("[")
+    assert update["embedding"].endswith("]")
+
+
+@pytest.mark.asyncio
+async def test_triage_writes_assessment_even_when_embedding_fails(monkeypatch):
+    """Embedding failure must NOT block the assessment write."""
+    sb = FakeSupabase([_finding("a")])
+
+    monkeypatch.setattr(
+        triage.litellm,
+        "acompletion",
+        AsyncMock(return_value=_fake_response(_GOOD_ASSESSMENT)),
+    )
+
+    async def _boom(**kwargs):
+        raise RuntimeError("embedding API down")
+
+    monkeypatch.setattr(triage.litellm, "aembedding", _boom)
+
+    stats = await triage.triage_scan_findings(
+        sb, SCAN_ID, model="gemini/gemini-2.5-flash", api_key="fake-key",
+    )
+    assert stats.success == 1
+    assert len(sb.update_calls) == 1
+    update = sb.update_calls[0]
+    # Assessment landed.
+    assert update["ai_assessment"]["urgency"] == "fix_now"
+    # Embedding column NOT included in the update.
+    assert "embedding" not in update
+
+
+@pytest.mark.asyncio
 async def test_assess_one_strips_fenced_json(monkeypatch):
     """Some providers wrap JSON in ```json fences. _coerce_assessment must strip them."""
     fenced = "```json\n" + json.dumps(_GOOD_ASSESSMENT) + "\n```"

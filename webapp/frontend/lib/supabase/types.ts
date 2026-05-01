@@ -186,8 +186,9 @@ export interface TriageSignal {
 /**
  * Aggregated breakdown of how this org has triaged "similar" findings
  * before. Returned by the `triage_history_for_finding` RPC. Phase 1
- * defines similar as same CWE + same target. Phase 2 will replace this
- * with vector-similarity. Returns null when no neighbours exist.
+ * defines similar as same CWE + same target. Returns null when no
+ * neighbours exist. Used by the "Your team's pattern" UI for its
+ * interpretability — exact-match counts the user can audit.
  */
 export interface TriageHistory {
   total: number;
@@ -195,6 +196,21 @@ export interface TriageHistory {
   triaged_real: number;
   false_positive: number;
   wont_fix: number;
+}
+
+/**
+ * Per-org KNN inference output for a single finding. Returned by the
+ * `predict_triage_for_finding` RPC. Vector-similarity over the org's
+ * embedded triage_signals. Returns null when the finding has no
+ * embedding (worker hadn't run yet) or the org has no labelled signals
+ * (cold start). Used by the Phase 3 confidence-display + auto-dismiss
+ * UIs; not for the deterministic "team pattern" display.
+ */
+export interface TriagePrediction {
+  n_neighbours: number;
+  mean_similarity: number;
+  p_false_positive: number;
+  p_real: number;
 }
 
 export type AiUrgency = 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss';
