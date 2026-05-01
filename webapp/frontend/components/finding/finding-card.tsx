@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -15,8 +15,9 @@ import {
   Repeat,
   History,
   RefreshCw,
+  Brain,
 } from 'lucide-react';
-import type { Finding, FindingStatus } from '@/lib/supabase/types';
+import type { Finding, FindingStatus, TriageHistory } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import {
   AI_BRAND,
@@ -131,6 +132,30 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   // not `times_seen` which counts every worker report — including retries
   // within a single scan.
   const isRecurring = occurrenceCount > 1 || reopenedCount > 0;
+
+  // Cross-finding triage history: lazy-fetch on expand. Returns an aggregated
+  // breakdown ("you've decided on N similar findings before — X dismissed, Y
+  // confirmed real") for findings sharing the same CWE + target. The RPC
+  // respects RLS, so a user only ever sees their own org's signal. Cached
+  // per finding-id in component state — cheap, only fetched when needed.
+  const [triageHistory, setTriageHistory] = useState<TriageHistory | null>(null);
+  const [triageHistoryLoaded, setTriageHistoryLoaded] = useState(false);
+  useEffect(() => {
+    if (!expanded || triageHistoryLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.rpc('triage_history_for_finding', {
+        p_finding_id: finding.id,
+      });
+      if (cancelled) return;
+      setTriageHistory((data as TriageHistory | null) ?? null);
+      setTriageHistoryLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, triageHistoryLoaded, finding.id]);
 
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
@@ -383,6 +408,56 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             </section>
           )}
 
+          {/* Cross-finding triage history. Shows how this org has decided on
+              similar findings before (same CWE + target). The system
+              "remembers" — clicks aren't lost. Phase 1 of the per-tenant
+              triage learning loop; phase 2 will replace the SQL aggregation
+              with a vector-similarity model but the UI shape stays the same. */}
+          {triageHistory && triageHistory.total > 0 && (
+            <section className="rounded-lg border border-violet-500/15 bg-violet-500/[0.04] p-4">
+              <div className="mb-2.5 flex items-center gap-2">
+                <Brain className="h-3.5 w-3.5 text-violet-300" strokeWidth={2.25} />
+                <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+                  Your team's pattern
+                </h4>
+                <span className="text-[10.5px] text-neutral-500">
+                  {triageHistory.total} similar finding{triageHistory.total === 1 ? '' : 's'} triaged before
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <TriageStat
+                  count={triageHistory.false_positive}
+                  label="False positive"
+                  tone="zinc"
+                />
+                <TriageStat
+                  count={triageHistory.wont_fix}
+                  label="Won't fix"
+                  tone="zinc"
+                />
+                <TriageStat
+                  count={triageHistory.triaged_real}
+                  label="Confirmed real"
+                  tone="amber"
+                />
+                <TriageStat count={triageHistory.fixed} label="Fixed" tone="emerald" />
+              </div>
+              <p className="mt-3 text-[11px] leading-relaxed text-neutral-400">
+                {(() => {
+                  const dismissed = triageHistory.false_positive + triageHistory.wont_fix;
+                  const real = triageHistory.triaged_real + triageHistory.fixed;
+                  if (dismissed > real * 2) {
+                    return `Most similar findings were dismissed. Lean toward false-positive unless you can verify exploitability.`;
+                  }
+                  if (real > dismissed * 2) {
+                    return `Most similar findings were confirmed real. Treat this seriously.`;
+                  }
+                  return `Mixed history — your team's call could go either way.`;
+                })()}
+              </p>
+            </section>
+          )}
+
           {ai && urgencyTheme && reachTheme && (() => {
             const UIcon = urgencyTheme.Icon;
             const RIcon = reachTheme.Icon;
@@ -568,6 +643,35 @@ function TriageButton({
       <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
       {children}
     </button>
+  );
+}
+
+const STAT_TONE: Record<string, string> = {
+  zinc: 'text-neutral-400',
+  amber: 'text-amber-300',
+  emerald: 'text-emerald-300',
+};
+
+function TriageStat({
+  count,
+  label,
+  tone,
+}: {
+  count: number;
+  label: string;
+  tone: keyof typeof STAT_TONE;
+}) {
+  const t = STAT_TONE[tone];
+  const dim = count === 0;
+  return (
+    <div className="rounded-md bg-neutral-900/60 px-2.5 py-2 ring-1 ring-neutral-800/80">
+      <div className={`text-lg font-semibold tracking-tight ${dim ? 'text-neutral-700' : t}`}>
+        {count}
+      </div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-neutral-500">
+        {label}
+      </div>
+    </div>
   );
 }
 
