@@ -122,7 +122,7 @@ Full markdown report:
 ---
 {description_md}
 ---
-{code_context_section}
+{code_context_section}{triage_priors_section}
 Apply the rubric. Return only JSON.
 """
 
@@ -137,6 +137,45 @@ def _format_code_context(code_context: str | None) -> str:
         f"{code_context}\n"
         "---\n"
     )
+
+
+def _format_triage_priors(priors: dict[str, Any] | None) -> str:
+    """Format prior decisions on the same fingerprint as a prompt section.
+
+    The KNN model handles "similar findings" via embeddings. THIS section
+    is for *exact-fingerprint* prior decisions — much stronger signal.
+    "User dismissed this exact fingerprint 3 times" is near-deterministic;
+    the LLM should weight it heavily over the report's own claims.
+    """
+    if not priors:
+        return ""
+    parts: list[str] = []
+    real = (priors.get("triaged_real") or 0) + (priors.get("fixed") or 0)
+    dismissed = (priors.get("false_positive") or 0) + (priors.get("wont_fix") or 0)
+    total = priors.get("total") or 0
+    if total == 0:
+        return ""
+    parts.append(
+        f"This exact fingerprint has been triaged {total} time(s) before by this org's team:"
+    )
+    if dismissed:
+        parts.append(
+            f"  - {dismissed} dismissed (false_positive: {priors.get('false_positive') or 0}, "
+            f"wont_fix: {priors.get('wont_fix') or 0})"
+        )
+    if real:
+        parts.append(
+            f"  - {real} confirmed real (triaged_real: {priors.get('triaged_real') or 0}, "
+            f"fixed: {priors.get('fixed') or 0})"
+        )
+    if priors.get("last_decided_at"):
+        parts.append(f"  - Most recent decision: {priors['last_decided_at']}")
+    parts.append(
+        "Treat this as strong signal. If the team consistently dismissed this "
+        "fingerprint, lean dismiss; if they consistently confirmed it real, "
+        "lean fix_now/fix_soon."
+    )
+    return "\nPrior triage on this fingerprint:\n" + "\n".join(parts) + "\n"
 
 
 def _coerce_assessment(raw: str) -> dict[str, Any]:
@@ -155,6 +194,7 @@ async def assess_one(
     model: str,
     api_key: str,
     code_context: str | None = None,
+    triage_priors: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Ask the LLM to triage a single finding. Returns the parsed assessment.
 
@@ -162,6 +202,11 @@ async def assess_one(
     actual source lines around the cited file/line. The LLM uses it to
     confirm or refute the report's claim — the system prompt tells it to
     treat the snippet as ground truth.
+
+    If `triage_priors` is provided (from `triage_priors_for_finding` RPC),
+    it carries this org's prior decisions on the *exact same fingerprint*
+    as labelled signal. Stronger than the KNN model's similarity-based
+    suggestions because exact-match matters more.
     """
     user = USER_TEMPLATE.format(
         title=finding.get("title") or "",
@@ -175,6 +220,7 @@ async def assess_one(
         status=finding.get("status") or "open",
         description_md=(finding.get("description_md") or "")[:8000],
         code_context_section=_format_code_context(code_context),
+        triage_priors_section=_format_triage_priors(triage_priors),
     )
 
     # Try the primary model first, then walk the fallback list on 5xx /
@@ -482,6 +528,18 @@ def _fetch_prediction(sb: WorkerSupabase, finding_id: str) -> dict[str, Any] | N
         return None
 
 
+def _fetch_triage_priors(sb: WorkerSupabase, finding_id: str) -> dict[str, Any] | None:
+    """Call triage_priors_for_finding. Returns None when no prior signal."""
+    try:
+        result = sb.client.rpc(
+            "triage_priors_for_finding", {"p_finding_id": finding_id}
+        ).execute()
+        return result.data if isinstance(result.data, dict) else None
+    except Exception:  # noqa: BLE001
+        logger.exception("triage_priors_for_finding RPC failed for %s", finding_id)
+        return None
+
+
 @dataclass
 class TriageStats:
     """Outcome of a triage pass over one scan's findings."""
@@ -559,13 +617,21 @@ async def triage_scan_findings(
                 logger.exception("triage %s: code-context gather failed", ident)
 
         try:
+            # Fetch prior triage decisions on this fingerprint — strong
+            # prompt signal when present. Sync RPC; if the org has no
+            # priors it returns None and assess_one omits the section.
+            priors = _fetch_triage_priors(sb, f["id"])
+
             # Run the LLM judgment and the embedding in parallel — both
             # take a network round-trip; no reason to serialise. The
             # embedding is best-effort: if it fails the assessment still
             # lands and the finding renders with an AI verdict, just
             # without contributing to the per-org KNN model.
             assess_task = asyncio.create_task(
-                assess_one(f, model=model, api_key=api_key, code_context=code_context)
+                assess_one(
+                    f, model=model, api_key=api_key,
+                    code_context=code_context, triage_priors=priors,
+                )
             )
             embed_task = asyncio.create_task(embed_finding(f, api_key=api_key))
             assessment = await assess_task

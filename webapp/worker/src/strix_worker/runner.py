@@ -16,6 +16,7 @@ from .code_context import parse_code_analysis_section
 from .config import WorkerConfig
 from .credentials import materialize_credentials
 from .instruction import build_instruction
+from .summary import summarize_scan
 from .supabase_client import WorkerSupabase
 from .triage import triage_scan_findings
 
@@ -394,6 +395,14 @@ async def _run_inline_triage(
         )
     except Exception:  # noqa: BLE001
         logger.exception("scan %s: triage.completed event emit failed", scan_id)
+
+    # Plain-language scan summary. Runs after triage so the LLM has the
+    # AI-assessed urgency breakdown to fold in. Best-effort: a missing
+    # summary just hides the scan-page section, never fails the scan.
+    try:
+        await summarize_scan(sb, scan_id, model=llm_provider, api_key=llm_api_key)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: summary generation crashed", scan_id)
 
 
 # ============================================================
