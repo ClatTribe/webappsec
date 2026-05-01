@@ -642,6 +642,69 @@ class _DismissTestSB:
 
 
 @pytest.mark.asyncio
+async def test_assess_one_includes_triage_priors_when_present(monkeypatch):
+    """When triage_priors carries this org's prior decisions on the same
+    fingerprint, the prompt must surface that as strong signal."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(_GOOD_ASSESSMENT)
+
+    monkeypatch.setattr(triage.litellm, "acompletion", _capture)
+
+    priors = {
+        "total": 5,
+        "false_positive": 4,
+        "wont_fix": 0,
+        "triaged_real": 1,
+        "fixed": 0,
+        "last_decided_at": "2026-04-30T12:00:00",
+    }
+    await triage.assess_one(
+        _finding("a"),
+        model="gemini/gemini-2.5-flash",
+        api_key="k",
+        triage_priors=priors,
+    )
+
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert "Prior triage on this fingerprint" in user_msg["content"]
+    assert "5 time(s)" in user_msg["content"]
+    assert "4 dismissed" in user_msg["content"]
+    assert "1 confirmed real" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_assess_one_omits_priors_section_when_empty(monkeypatch):
+    """No priors → no 'Prior triage' header in the prompt."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(_GOOD_ASSESSMENT)
+
+    monkeypatch.setattr(triage.litellm, "acompletion", _capture)
+
+    await triage.assess_one(
+        _finding("a"), model="gemini/gemini-2.5-flash", api_key="k", triage_priors=None
+    )
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert "Prior triage on this fingerprint" not in user_msg["content"]
+
+    # A priors object with total=0 must also be treated as "no signal".
+    captured.clear()
+    await triage.assess_one(
+        _finding("a"),
+        model="gemini/gemini-2.5-flash",
+        api_key="k",
+        triage_priors={"total": 0, "false_positive": 0, "triaged_real": 0, "wont_fix": 0, "fixed": 0},
+    )
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert "Prior triage on this fingerprint" not in user_msg["content"]
+
+
+@pytest.mark.asyncio
 async def test_assess_one_strips_fenced_json(monkeypatch):
     """Some providers wrap JSON in ```json fences. _coerce_assessment must strip them."""
     fenced = "```json\n" + json.dumps(_GOOD_ASSESSMENT) + "\n```"
