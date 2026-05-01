@@ -95,6 +95,19 @@ FAKE_STRIX_SUCCESS = textwrap.dedent('''\
             "poc_description": "Visit /search?q=' OR '1'='1 to bypass auth.",
             "poc_script_code": "curl 'https://example.com/search?q=%27+OR+%271%27%3D%271'",
             "remediation_steps": "Use parameterised queries or an ORM.",
+            # Strix's structured code_locations — the source of truth that
+            # downstream RAG triage consumes via parse_code_analysis_section.
+            "code_locations": [
+                {
+                    "file": "webapp/api/search.py",
+                    "start_line": 42,
+                    "end_line": 42,
+                    "label": "user input flows into raw SQL",
+                    "snippet": "sql = SELECT_USERS_WHERE_NAME + q",
+                    "fix_before": "sql = SELECT_USERS_WHERE_NAME + q",
+                    "fix_after": "db.execute(SELECT_USERS_WHERE_NAME_PARAM, [q])",
+                },
+            ],
         },
         {
             "id": "vuln-0002",
@@ -113,6 +126,7 @@ FAKE_STRIX_SUCCESS = textwrap.dedent('''\
             "poc_description": "POST <script>alert(1)</script> as comment body.",
             "poc_script_code": "curl -X POST -d 'body=<script>alert(1)</script>' .../comments",
             "remediation_steps": "HTML-escape user input on render.",
+            "code_locations": [],  # exercises the empty path
         },
     ]
 
@@ -145,6 +159,32 @@ FAKE_STRIX_SUCCESS = textwrap.dedent('''\
             out.write("```\\n")
             out.write(f"{r[\'poc_script_code\']}\\n")
             out.write("```\\n\\n")
+            # ## Code Analysis — exact format from tracer.save_run_data:699-727
+            if r.get("code_locations"):
+                out.write("## Code Analysis\\n\\n")
+                for i, loc in enumerate(r["code_locations"]):
+                    line_ref = ""
+                    if loc.get("start_line") is not None:
+                        if loc.get("end_line") and loc["end_line"] != loc["start_line"]:
+                            line_ref = f" (lines {loc[\'start_line\']}-{loc[\'end_line\']})"
+                        else:
+                            line_ref = f" (line {loc[\'start_line\']})"
+                    out.write(f"**Location {i + 1}:** `{loc[\'file\']}`{line_ref}\\n")
+                    if loc.get("label"):
+                        out.write(f"  {loc[\'label\']}\\n")
+                    if loc.get("snippet"):
+                        out.write(f"  ```\\n  {loc[\'snippet\']}\\n  ```\\n")
+                    if loc.get("fix_before") or loc.get("fix_after"):
+                        out.write("\\n  **Suggested Fix:**\\n")
+                        out.write("```diff\\n")
+                        if loc.get("fix_before"):
+                            for line in loc["fix_before"].splitlines():
+                                out.write(f"- {line}\\n")
+                        if loc.get("fix_after"):
+                            for line in loc["fix_after"].splitlines():
+                                out.write(f"+ {line}\\n")
+                        out.write("```\\n")
+                    out.write("\\n")
             out.write("## Remediation\\n\\n")
             out.write(f"{r[\'remediation_steps\']}\\n\\n")
 
@@ -508,6 +548,20 @@ async def test_run_scan_collects_all_reports(fake_scan, cfg_factory):
 
     assert "concatenates user input" in by_id["vuln-0001"]["payload"]["description_md"]
     assert "reflected without escaping" in by_id["vuln-0002"]["payload"]["description_md"]
+
+    # ---- 5b. Strix's `## Code Analysis` parsed back into structured affected_files ----
+    # vuln-0001 has one code_location with snippet + suggested fix; the
+    # ingest path must round-trip those out of the markdown.
+    aff = by_id["vuln-0001"]["payload"]["affected_files"]
+    assert isinstance(aff, list) and len(aff) == 1
+    loc = aff[0]
+    assert loc["path"] == "webapp/api/search.py"
+    assert loc["line"] == 42
+    assert "SELECT_USERS_WHERE_NAME" in loc["snippet"]
+    assert loc["fix_before"].startswith("sql = SELECT_USERS_WHERE_NAME")
+    assert "db.execute" in loc["fix_after"]
+    # vuln-0002 had no code_locations — payload should be None (not [], not missing).
+    assert by_id["vuln-0002"]["payload"]["affected_files"] is None
 
     # ---- 6. events.jsonl streamed live into scan_events ----
     # The structured events Strix writes to events.jsonl mirror into scan_events
