@@ -9,6 +9,12 @@ import {
   Wrench,
   Info,
   ChevronRight,
+  Search,
+  KeyRound,
+  Bug,
+  Globe,
+  Network,
+  FileCode,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ScanEvent } from '@/lib/supabase/types';
@@ -142,6 +148,128 @@ function friendlyName(agent: AgentSummary, ordinal: number): string {
   return agent.name;
 }
 
+// ---------------------------------------------------------------------------
+// Agent specialisation heuristic — pillar 1 item 1.
+//
+// Strix doesn't tag sub-agents with a semantic category yet (see
+// tools-wishlist.md §0 "Per-agent task category tag"). Until that lands,
+// we infer the role from each agent's tool-call pattern. The signal is
+// noisy — a single agent can dabble across categories — so we score every
+// category, take the top, and only commit to a label if the lead is
+// meaningful. Otherwise, fall back to no chip.
+// ---------------------------------------------------------------------------
+
+type AgentCategory =
+  | 'recon'
+  | 'auth'
+  | 'injection'
+  | 'ssrf'
+  | 'web_app'
+  | 'code_audit';
+
+interface CategoryMeta {
+  label: string;
+  Icon: LucideIcon;
+  cls: string;
+}
+
+const CATEGORY_META: Record<AgentCategory, CategoryMeta> = {
+  recon:        { label: 'Recon',     Icon: Search,    cls: 'bg-cyan-500/10 text-cyan-200 ring-cyan-500/30' },
+  auth:         { label: 'Auth',      Icon: KeyRound,  cls: 'bg-orange-500/10 text-orange-200 ring-orange-400/30' },
+  injection:    { label: 'Injection', Icon: Bug,       cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30' },
+  ssrf:         { label: 'SSRF',      Icon: Network,   cls: 'bg-violet-500/10 text-violet-200 ring-violet-500/30' },
+  web_app:      { label: 'Web app',   Icon: Globe,     cls: 'bg-emerald-500/10 text-emerald-200 ring-emerald-500/30' },
+  code_audit:   { label: 'Code audit',Icon: FileCode,  cls: 'bg-amber-500/10 text-amber-200 ring-amber-400/30' },
+};
+
+const SQL_INJECTION_HINTS = ["'", '"', 'union', 'select', 'or 1=1', '-- ', '/*', 'sleep('];
+const CMD_INJECTION_HINTS = ['; ls', '; cat', '|cat', '`whoami`', '$(', '&&', '||'];
+const TEMPLATE_INJECTION_HINTS = ['{{', '${', '#{', '<%', '%>'];
+const XSS_HINTS = ['<script', 'onerror=', 'onload=', 'javascript:', 'svg onload'];
+const SSRF_HOST_HINTS = [
+  '127.0.0.1', 'localhost', '0.0.0.0', '::1',
+  '169.254.', '169.254.169.254',          // cloud metadata + link-local
+  'metadata.google', 'metadata.azure',
+  'internal.', '.internal',
+  '.local', '.lan',
+];
+const AUTH_PATH_HINTS = ['/login', '/signin', '/signup', '/register', '/auth/', '/oauth/', '/sso/', '/saml/', '/.well-known/'];
+
+function inferAgentCategory(agent: AgentSummary): AgentCategory | null {
+  // Skip agents with too few signals — categorising 1–2 calls is mostly
+  // noise. The "Investigator #N" fallback handles those gracefully.
+  if (agent.toolCalls.length < 3) return null;
+
+  const scores: Record<AgentCategory, number> = {
+    recon: 0, auth: 0, injection: 0, ssrf: 0, web_app: 0, code_audit: 0,
+  };
+
+  for (const call of agent.toolCalls) {
+    const tool = call.tool_name.toLowerCase();
+    const surface = (call.surface ?? '').toLowerCase();
+
+    // Code-audit signals — file/grep tools dominate.
+    if (tool.startsWith('file_') || tool === 'file_grep' || tool === 'file_search') {
+      scores.code_audit += 2;
+      continue;
+    }
+
+    // Recon signals: terminal commands (likely nmap/dig/whatweb), well-known paths.
+    if (tool === 'terminal_execute') {
+      scores.recon += 1.5;
+    }
+    if (surface.includes('/.well-known/') || surface.includes('robots.txt') || surface.includes('sitemap')) {
+      scores.recon += 1;
+    }
+
+    // Auth signals: login/signup/auth/oauth paths.
+    for (const hint of AUTH_PATH_HINTS) {
+      if (surface.includes(hint)) {
+        scores.auth += 1;
+        break;
+      }
+    }
+
+    // SSRF signals: surface contains internal/metadata host hints.
+    for (const hint of SSRF_HOST_HINTS) {
+      if (surface.includes(hint)) {
+        scores.ssrf += 2;
+        break;
+      }
+    }
+
+    // Injection signals: payload markers in the surface URL/path.
+    let injHit = false;
+    for (const hint of [...SQL_INJECTION_HINTS, ...CMD_INJECTION_HINTS, ...TEMPLATE_INJECTION_HINTS, ...XSS_HINTS]) {
+      if (surface.includes(hint)) {
+        scores.injection += 1.5;
+        injHit = true;
+        break;
+      }
+    }
+    // URL-encoded forms of the same — common when payloads land in querystrings.
+    if (!injHit && (surface.includes('%27') || surface.includes('%22') || surface.includes('%3cscript'))) {
+      scores.injection += 1.5;
+    }
+
+    // Generic web-app signal: HTTP/browser tools without other category hits.
+    if (tool === 'http_request' || tool.startsWith('browser_') || tool === 'proxy_inspect') {
+      scores.web_app += 0.5;
+    }
+  }
+
+  // Pick the category with the highest score, but only commit if it's
+  // clearly above noise. Threshold: ≥ 3 absolute score AND ≥ 1.5x the
+  // runner-up. Otherwise return null and the UI shows no chip.
+  const sorted = (Object.entries(scores) as [AgentCategory, number][])
+    .sort((a, b) => b[1] - a[1]);
+  const [topCat, topScore] = sorted[0];
+  const runnerUp = sorted[1]?.[1] ?? 0;
+  if (topScore < 3) return null;
+  if (runnerUp > 0 && topScore < runnerUp * 1.5) return null;
+  return topCat;
+}
+
 export default function AgentsSection({
   events,
   expectedCount,
@@ -198,6 +326,9 @@ export default function AgentsSection({
             const isOpen = expanded.has(agent.id);
             const pill = STATUS_PILL[agent.status];
             const PillIcon = pill.Icon;
+            const category = inferAgentCategory(agent);
+            const categoryMeta = category ? CATEGORY_META[category] : null;
+            const CategoryIcon = categoryMeta?.Icon;
             return (
               <div
                 key={agent.id}
@@ -225,6 +356,15 @@ export default function AgentsSection({
                       <span className="text-sm font-semibold text-neutral-100">
                         {friendlyName(agent, ordinal)}
                       </span>
+                      {categoryMeta && CategoryIcon && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider ring-1 ${categoryMeta.cls}`}
+                          title="Inferred from this agent's tool-call pattern. Heuristic — not a strict label."
+                        >
+                          <CategoryIcon className="h-3 w-3" strokeWidth={2.5} />
+                          {categoryMeta.label}
+                        </span>
+                      )}
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider ring-1 ${pill.cls}`}
                       >

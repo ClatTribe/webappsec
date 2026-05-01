@@ -16,10 +16,13 @@ import {
   History,
   RefreshCw,
   Brain,
+  Footprints,
 } from 'lucide-react';
 import type {
   Finding,
   FindingStatus,
+  KillChainResponse,
+  KillChainStep,
   TriageHistory,
   TriagePrediction,
 } from '@/lib/supabase/types';
@@ -150,19 +153,29 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   // FP — confirm?" suggestion banner. Lazy-fetched alongside the history.
   const [prediction, setPrediction] = useState<TriagePrediction | null>(null);
   const [predictionLoaded, setPredictionLoaded] = useState(false);
+  // Heuristic kill-chain timeline — pillar 1 item 2. Lazy-fetched so the
+  // collapsed-state findings list query stays cheap. We label this as
+  // "approximate" in the UI because the underlying RPC uses a time-window
+  // heuristic until the upstream P4 ask (agent_id on every tool event)
+  // makes it deterministic.
+  const [killChain, setKillChain] = useState<KillChainResponse | null>(null);
+  const [killChainLoaded, setKillChainLoaded] = useState(false);
   useEffect(() => {
-    if (!expanded || (triageHistoryLoaded && predictionLoaded)) return;
+    if (!expanded || (triageHistoryLoaded && predictionLoaded && killChainLoaded)) return;
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      // Fire both RPCs in parallel — they're independent.
-      const [historyRes, predRes] = await Promise.all([
+      // Fire all three RPCs in parallel — they're independent.
+      const [historyRes, predRes, chainRes] = await Promise.all([
         triageHistoryLoaded
           ? Promise.resolve({ data: triageHistory })
           : supabase.rpc('triage_history_for_finding', { p_finding_id: finding.id }),
         predictionLoaded
           ? Promise.resolve({ data: prediction })
           : supabase.rpc('predict_triage_for_finding', { p_finding_id: finding.id }),
+        killChainLoaded
+          ? Promise.resolve({ data: killChain })
+          : supabase.rpc('kill_chain_for_finding', { p_finding_id: finding.id }),
       ]);
       if (cancelled) return;
       if (!triageHistoryLoaded) {
@@ -173,12 +186,16 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
         setPrediction((predRes.data as TriagePrediction | null) ?? null);
         setPredictionLoaded(true);
       }
+      if (!killChainLoaded) {
+        setKillChain((chainRes.data as KillChainResponse | null) ?? null);
+        setKillChainLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, triageHistoryLoaded, predictionLoaded, finding.id]);
+  }, [expanded, triageHistoryLoaded, predictionLoaded, killChainLoaded, finding.id]);
 
   // Suggestion threshold: surface a "Likely false positive — confirm?"
   // prompt when the model is fairly sure but not auto-dismiss-sure.
@@ -672,6 +689,16 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             );
           })()}
 
+          {/* Heuristic kill-chain — pillar 1 item 2. Tells the story of how
+              the agent reached this finding step by step (browsed page →
+              tried payload → got reflection → confirmed). Approximate by
+              construction: same-scan events in the 5-minute window before
+              `finding.created`, optionally filtered to the agent that
+              filed the report. Hidden when the RPC returns no steps. */}
+          {killChain && killChain.steps.length > 0 && (
+            <KillChainSection chain={killChain} />
+          )}
+
           {sections.length === 0 && finding.description_md && (
             <Markdown body={finding.description_md} />
           )}
@@ -835,6 +862,132 @@ function TriageStat({
         {label}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Kill-chain section — pillar 1 item 2.
+//
+// Renders the chronological timeline of agent actions in the 5-minute
+// window before this finding was filed. The data is best-effort (see the
+// `kill_chain_for_finding` RPC docs); the UI surface labels it as
+// "approximate timeline" so users don't read deterministic kill-chain
+// reconstruction into a heuristic grouping.
+// ---------------------------------------------------------------------------
+
+const KILL_CHAIN_TOOL_LABELS: Record<string, string> = {
+  agent_finish: 'Wrapped up',
+  browser_navigate: 'Browsed',
+  browser_click: 'Clicked',
+  browser_fill: 'Filled a form',
+  browser_screenshot: 'Captured screenshot',
+  browser_javascript: 'Ran JavaScript',
+  http_request: 'Sent HTTP request',
+  terminal_execute: 'Ran shell command',
+  file_read: 'Read source',
+  file_write: 'Wrote file',
+  file_edit: 'Edited file',
+  file_search: 'Searched code',
+  file_grep: 'Searched code',
+  proxy_inspect: 'Inspected traffic',
+  proxy_replay: 'Replayed request',
+  notes_write: 'Took notes',
+  create_subagent: 'Spawned sub-agent',
+  create_vulnerability_report: 'Filed report',
+};
+
+function killChainStepLabel(step: KillChainStep): {
+  label: string;
+  surface: string | null;
+} {
+  const payload = (step.payload as Record<string, unknown> | null) ?? {};
+  if (step.event_type === 'chat.message') {
+    // chat.message is the LLM's reasoning between actions. Surface a
+    // short snippet so users see the *thinking* between tool calls.
+    const inner = (payload.payload as Record<string, unknown> | undefined) ?? {};
+    const text =
+      (inner.content as string | undefined) ??
+      (payload.content as string | undefined) ??
+      (payload.message as string | undefined) ??
+      '';
+    const trimmed = (text || '').trim().replace(/\s+/g, ' ');
+    return {
+      label: 'Reasoning',
+      surface: trimmed ? (trimmed.length > 140 ? trimmed.slice(0, 140) + '…' : trimmed) : null,
+    };
+  }
+  // tool.execution.started — pull tool_name + a useful surface field.
+  const inner = (payload.payload as Record<string, unknown> | undefined) ?? {};
+  const actor = (payload.actor as Record<string, unknown> | undefined) ?? {};
+  const toolName =
+    (actor.tool_name as string | undefined) ??
+    (inner.tool_name as string | undefined) ??
+    'unknown tool';
+  const args = (inner.args as Record<string, unknown> | undefined) ?? {};
+  let surface: string | null = null;
+  for (const k of ['url', 'endpoint', 'target', 'path', 'command', 'pattern']) {
+    const v = args[k];
+    if (typeof v === 'string' && v.trim()) {
+      surface = v.length > 200 ? v.slice(0, 200) + '…' : v;
+      break;
+    }
+  }
+  return {
+    label: KILL_CHAIN_TOOL_LABELS[toolName] ?? toolName,
+    surface,
+  };
+}
+
+function KillChainSection({ chain }: { chain: KillChainResponse }) {
+  return (
+    <section className="rounded-lg border border-violet-500/15 bg-violet-500/[0.03] p-4">
+      <div className="mb-2.5 flex items-center gap-2">
+        <Footprints className="h-3.5 w-3.5 text-violet-300" strokeWidth={2.25} />
+        <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+          How the agent reached this
+        </h4>
+        <span
+          className="text-[10.5px] text-neutral-500"
+          title="Approximate timeline. Reconstructed from scan events in the 5-minute window before the finding was filed; same-agent filtering when the upstream attribution is present."
+        >
+          {chain.steps.length} step{chain.steps.length === 1 ? '' : 's'} · approximate
+        </span>
+      </div>
+      <ol className="space-y-2">
+        {chain.steps.map((step, i) => {
+          const { label, surface } = killChainStepLabel(step);
+          const isReasoning = step.event_type === 'chat.message';
+          return (
+            <li key={`${step.created_at}-${i}`} className="flex items-start gap-3">
+              <span className="mt-0.5 inline-block w-5 flex-shrink-0 text-right font-mono text-[11px] text-neutral-600">
+                {i + 1}.
+              </span>
+              <span
+                className={`mt-1 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                  isReasoning ? 'bg-violet-400' : 'bg-cyan-400'
+                }`}
+              />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex flex-wrap items-baseline gap-x-2 text-[12.5px]">
+                  <span className={isReasoning ? 'italic text-violet-200' : 'font-medium text-amber-300/90'}>
+                    {label}
+                  </span>
+                  {surface && (
+                    <span
+                      className={`min-w-0 flex-1 truncate font-mono text-[11.5px] ${
+                        isReasoning ? 'text-neutral-400' : 'text-neutral-300'
+                      }`}
+                    >
+                      {surface}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
