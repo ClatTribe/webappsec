@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User,
@@ -12,8 +12,11 @@ import {
   AlertCircle,
   KeyRound,
   Trash2,
+  Brain,
+  RotateCcw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 interface Props {
   userEmail: string;
@@ -71,6 +74,15 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
         <LlmSection
           org={org}
           onSaved={() => router.refresh()}
+        />
+      )}
+
+      {/* AI triage controls. Drift metric for everyone in the org;
+          reset/trim actions gated to owner+admin server-side
+          (reset_triage_signals RPC enforces it). */}
+      {org && (
+        <TriageControlsSection
+          isAdmin={orgRole === 'owner' || orgRole === 'admin'}
         />
       )}
     </div>
@@ -567,5 +579,189 @@ function FeedbackPill({ feedback }: { feedback: NonNullable<Feedback> }) {
       <Icon className="h-3 w-3" strokeWidth={2.5} />
       {feedback.text}
     </span>
+  );
+}
+
+// ============== AI TRIAGE CONTROLS ==============
+// Drift metric (everyone in the org) + reset / trim actions (owner+admin
+// only; the RPC enforces the role check server-side, the UI just hides
+// the buttons for non-admins to keep the surface tidy).
+
+interface TriageDrift {
+  explored_count: number;
+  triaged_count: number;
+  override_count: number;
+  override_rate: number;
+  drift_warning: boolean;
+}
+
+function TriageControlsSection({ isAdmin }: { isAdmin: boolean }) {
+  const [drift, setDrift] = useState<TriageDrift | null>(null);
+  const [signalCount, setSignalCount] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [confirmOpen, setConfirmOpen] = useState<null | { action: 'trim' | 'reset' }>(null);
+
+  const refresh = async () => {
+    const supabase = createClient();
+    const [{ data: driftData }, { count }] = await Promise.all([
+      supabase.rpc('triage_drift_for_org'),
+      supabase.from('triage_signals').select('id', { count: 'exact', head: true }),
+    ]);
+    setDrift((driftData as TriageDrift | null) ?? null);
+    setSignalCount(count ?? 0);
+    setLoaded(true);
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const performAction = async (action: 'trim' | 'reset') => {
+    setBusy(true);
+    setFeedback(null);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc('reset_triage_signals', {
+      p_keep_days: action === 'trim' ? 90 : null,
+    });
+    setBusy(false);
+    setConfirmOpen(null);
+    if (error) {
+      setFeedback({ kind: 'error', text: error.message });
+      return;
+    }
+    setFeedback({
+      kind: 'success',
+      text: `Removed ${data ?? 0} ${action === 'trim' ? 'signal(s) older than 90 days' : 'signal(s) — model reset to cold start'}.`,
+    });
+    await refresh();
+  };
+
+  return (
+    <Section
+      title="AI triage learning"
+      Icon={Brain}
+      hint="The model learns from every triage you do — Fixed, Confirmed real, False positive, Won't fix. The signal stays inside this org and is never used to train anything for another tenant."
+    >
+      {!loaded && (
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading model state…
+        </div>
+      )}
+
+      {loaded && (
+        <>
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1.5">
+            <div>
+              <div className="text-2xl font-semibold tracking-tight text-neutral-100">
+                {signalCount ?? 0}
+              </div>
+              <div className="text-[10.5px] uppercase tracking-wider text-neutral-500">
+                training signals
+              </div>
+            </div>
+            {drift && (
+              <>
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight text-neutral-100">
+                    {Math.round((1 - drift.override_rate) * 100)}%
+                  </div>
+                  <div className="text-[10.5px] uppercase tracking-wider text-neutral-500">
+                    auto-dismiss accuracy
+                  </div>
+                </div>
+                <div className="text-[11px] text-neutral-500">
+                  Measured against {drift.triaged_count} ε-explored finding
+                  {drift.triaged_count === 1 ? '' : 's'} (5% sample of would-have-been
+                  auto-dismissed). Of those, you overrode {drift.override_count}.
+                </div>
+              </>
+            )}
+          </div>
+
+          {drift?.drift_warning && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3 text-[12px] leading-relaxed text-amber-100">
+              <span className="font-medium">Your team's triage patterns may have shifted.</span>{' '}
+              The model is being overridden more than 20% of the time on findings it would have
+              auto-dismissed. Consider trimming to recent signal only so the model recalibrates
+              against your current preferences.
+            </div>
+          )}
+
+          {!drift && (
+            <p className="text-[11.5px] text-neutral-500">
+              No drift data yet — once the auto-dismiss policy has surfaced a few findings via
+              its 5% ε-greedy sample and you've triaged them, an accuracy estimate appears here.
+            </p>
+          )}
+
+          {isAdmin && (
+            <div className="flex flex-wrap gap-2 border-t border-neutral-800/60 pt-4">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen({ action: 'trim' })}
+                disabled={busy || !signalCount}
+                className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.25} />
+                Retrain on last 90 days
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmOpen({ action: 'reset' })}
+                disabled={busy || !signalCount}
+                className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-red-300 ring-1 ring-red-500/30 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={2.25} />
+                Reset all training data
+              </button>
+            </div>
+          )}
+
+          {feedback && <FeedbackPill feedback={feedback} />}
+        </>
+      )}
+
+      {confirmOpen && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-4">
+          <p className="text-[12.5px] leading-relaxed text-amber-100">
+            {confirmOpen.action === 'trim' ? (
+              <>
+                Trim signals older than 90 days. The model will recalibrate using only your
+                team's recent triage. <span className="text-amber-200">This can't be undone.</span>
+              </>
+            ) : (
+              <>
+                Reset all {signalCount} training signals. The auto-dismiss model returns to
+                cold-start — no findings will be auto-dismissed until your team triages a fresh
+                batch.{' '}
+                <span className="text-amber-200">This can't be undone.</span>
+              </>
+            )}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => performAction(confirmOpen.action)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 ring-1 ring-amber-400/30 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
+            >
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              {confirmOpen.action === 'trim' ? 'Trim signals' : 'Reset model'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(null)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-300 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }

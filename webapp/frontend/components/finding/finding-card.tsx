@@ -191,6 +191,19 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
     && prediction.p_false_positive >= PRED_SUGGESTION_THRESHOLD
     && prediction.p_false_positive < 0.95;
 
+  // Active learning band: when the model is genuinely 50/50, the marginal
+  // information gain from a user click is highest — that's where we most
+  // want their input. Show a calm hint (not action buttons; the existing
+  // triage UI does the work) so the user knows their decision matters.
+  // Requires at least 5 neighbours so we don't ping the user with
+  // "we're not sure" on the first finding of every kind.
+  const showActiveLearningHint =
+    prediction !== null
+    && finding.status === 'open'
+    && prediction.n_neighbours >= 5
+    && prediction.p_false_positive >= 0.4
+    && prediction.p_false_positive <= 0.6;
+
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
     setUpdating(true);
@@ -413,6 +426,26 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                     </button>
                   </div>
                 </div>
+              </div>
+            </section>
+          )}
+
+          {/* Active learning hint. The 0.4–0.6 confidence band is exactly
+              where each user click yields the most information for the
+              model. We don't add action buttons — the existing triage row
+              does the work — just signal that this one is high-value
+              feedback. */}
+          {showActiveLearningHint && prediction && (
+            <section className="rounded-lg border border-violet-500/20 bg-violet-500/[0.03] p-3">
+              <div className="flex items-start gap-2.5">
+                <Brain className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-violet-300" strokeWidth={2.25} />
+                <p className="text-[12px] leading-relaxed text-neutral-300">
+                  <span className={`font-medium ${AI_BRAND.gradientText}`}>
+                    We're not sure about this one.
+                  </span>{' '}
+                  Your team's decisions on the {prediction.n_neighbours} most-similar findings
+                  split roughly evenly. Your call here helps us learn.
+                </p>
               </div>
             </section>
           )}
