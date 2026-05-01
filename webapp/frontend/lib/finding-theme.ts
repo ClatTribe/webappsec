@@ -178,6 +178,14 @@ export const STATUS_THEME: Record<
     pill: 'bg-zinc-700/50 text-zinc-300 ring-1 ring-zinc-600/40',
     Icon: XCircle,
   },
+  dismissed_by_ai: {
+    // Distinct from `false_positive` (user policy). Picks up the cyan
+    // AI brand colour so a user scanning the list can tell at a glance
+    // which dismissals were system-driven and reversible.
+    label: 'AI dismissed',
+    pill: 'bg-cyan-500/10 text-cyan-200 ring-1 ring-cyan-500/30',
+    Icon: Ban,
+  },
 };
 
 // ---------------------------------------------------------------------------

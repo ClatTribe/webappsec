@@ -17,7 +17,12 @@ import {
   RefreshCw,
   Brain,
 } from 'lucide-react';
-import type { Finding, FindingStatus, TriageHistory } from '@/lib/supabase/types';
+import type {
+  Finding,
+  FindingStatus,
+  TriageHistory,
+  TriagePrediction,
+} from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import {
   AI_BRAND,
@@ -140,22 +145,51 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   // per finding-id in component state — cheap, only fetched when needed.
   const [triageHistory, setTriageHistory] = useState<TriageHistory | null>(null);
   const [triageHistoryLoaded, setTriageHistoryLoaded] = useState(false);
+  // Per-org KNN prediction (vector-similarity) — distinct from triageHistory
+  // (exact-match aggregation). Used for the confidence badge + the "Likely
+  // FP — confirm?" suggestion banner. Lazy-fetched alongside the history.
+  const [prediction, setPrediction] = useState<TriagePrediction | null>(null);
+  const [predictionLoaded, setPredictionLoaded] = useState(false);
   useEffect(() => {
-    if (!expanded || triageHistoryLoaded) return;
+    if (!expanded || (triageHistoryLoaded && predictionLoaded)) return;
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      const { data } = await supabase.rpc('triage_history_for_finding', {
-        p_finding_id: finding.id,
-      });
+      // Fire both RPCs in parallel — they're independent.
+      const [historyRes, predRes] = await Promise.all([
+        triageHistoryLoaded
+          ? Promise.resolve({ data: triageHistory })
+          : supabase.rpc('triage_history_for_finding', { p_finding_id: finding.id }),
+        predictionLoaded
+          ? Promise.resolve({ data: prediction })
+          : supabase.rpc('predict_triage_for_finding', { p_finding_id: finding.id }),
+      ]);
       if (cancelled) return;
-      setTriageHistory((data as TriageHistory | null) ?? null);
-      setTriageHistoryLoaded(true);
+      if (!triageHistoryLoaded) {
+        setTriageHistory((historyRes.data as TriageHistory | null) ?? null);
+        setTriageHistoryLoaded(true);
+      }
+      if (!predictionLoaded) {
+        setPrediction((predRes.data as TriagePrediction | null) ?? null);
+        setPredictionLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [expanded, triageHistoryLoaded, finding.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, triageHistoryLoaded, predictionLoaded, finding.id]);
+
+  // Suggestion threshold: surface a "Likely false positive — confirm?"
+  // prompt when the model is fairly sure but not auto-dismiss-sure.
+  // Worker uses 0.95 to auto-dismiss; we surface the suggestion in the
+  // 0.70 – 0.95 band so the user is in the loop on borderline cases.
+  const PRED_SUGGESTION_THRESHOLD = 0.7;
+  const showFpSuggestion =
+    prediction !== null
+    && finding.status === 'open'
+    && prediction.p_false_positive >= PRED_SUGGESTION_THRESHOLD
+    && prediction.p_false_positive < 0.95;
 
   async function setStatus(newStatus: FindingStatus) {
     if (updating || newStatus === finding.status) return;
@@ -301,6 +335,88 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
       {expanded && (
         <div className="space-y-6 border-t border-neutral-800/60 bg-neutral-950/40 px-6 py-6 pl-7">
+          {/* AI auto-dismissal banner. The user must always be able to find
+              what the model hid and override it in one click — that's the
+              non-negotiable reversibility property. We prefer this banner
+              right at the top so the policy decision is unmistakable. */}
+          {finding.status === 'dismissed_by_ai' && finding.auto_dismiss_reason && (
+            <section className={`rounded-lg p-4 ${AI_BRAND.bgTint} ${AI_BRAND.ring}`}>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-neutral-950/60 ring-1 ring-white/5">
+                  <Brain className={`h-3.5 w-3.5 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+                      AI auto-dismissed
+                    </span>
+                    <span className="text-[10.5px] text-neutral-500">
+                      {Math.round(finding.auto_dismiss_reason.p_false_positive * 100)}%
+                      confidence · {finding.auto_dismiss_reason.n_neighbours} similar
+                      decisions
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[13px] leading-relaxed text-neutral-200">
+                    Your team has dismissed this kind of finding before with high
+                    consistency, so we hid it for you. You can override if this one's
+                    different.
+                  </p>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setStatus('open')}
+                      disabled={updating}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-cyan-400/30 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.25} />
+                      Restore — this isn't a false positive
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* "Likely false positive" suggestion: the model is fairly sure but
+              not auto-dismiss-sure (0.70–0.95 band). Surface to the user;
+              either button writes a triage_signal — that's the active-
+              learning loop closing. */}
+          {showFpSuggestion && prediction && (
+            <section className="rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-500/15 ring-1 ring-amber-400/30">
+                  <Brain className="h-3.5 w-3.5 text-amber-200" strokeWidth={2.25} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] leading-relaxed text-neutral-200">
+                    <span className="font-medium text-amber-200">Likely false positive.</span>{' '}
+                    Based on {prediction.n_neighbours} similar findings — {Math.round(prediction.p_false_positive * 100)}% have been dismissed by your team.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setStatus('false_positive')}
+                      disabled={updating}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 ring-1 ring-zinc-700 transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <XCircle className="h-3.5 w-3.5" strokeWidth={2.25} />
+                      Confirm — false positive
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatus('triaged_real')}
+                      disabled={updating}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-200 ring-1 ring-amber-400/30 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Eye className="h-3.5 w-3.5" strokeWidth={2.25} />
+                      Override — it's real
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Compact metadata strip — the small facts that aren't worth a row
               in the collapsed view but still matter when you're looking. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-neutral-500">
@@ -323,6 +439,20 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 <code className="rounded bg-neutral-900/80 px-1.5 py-0.5 font-mono text-cyan-300/90 ring-1 ring-neutral-800">
                   {finding.target}
                 </code>
+              </span>
+            )}
+            {prediction && prediction.n_neighbours > 0 && (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`Based on ${prediction.n_neighbours} similar finding${prediction.n_neighbours === 1 ? '' : 's'} (vector similarity over your org's prior triage decisions). Mean similarity ${prediction.mean_similarity.toFixed(2)}.`}
+              >
+                <Brain className={`h-3 w-3 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
+                <span className="text-neutral-400">
+                  AI: {Math.round(prediction.p_false_positive * 100)}% likely FP
+                </span>
+                <span className="text-neutral-600">
+                  · n={prediction.n_neighbours}
+                </span>
               </span>
             )}
           </div>

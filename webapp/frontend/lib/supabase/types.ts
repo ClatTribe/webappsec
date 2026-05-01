@@ -6,7 +6,17 @@ export type ScanStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancel
 export type ScanMode = 'quick' | 'standard' | 'deep';
 export type ScopeMode = 'auto' | 'diff' | 'full';
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type FindingStatus = 'open' | 'triaged_real' | 'false_positive' | 'wont_fix' | 'fixed';
+export type FindingStatus =
+  | 'open'
+  | 'triaged_real'
+  | 'false_positive'
+  | 'wont_fix'
+  | 'fixed'
+  // Set by the worker's auto-dismiss path when the per-org KNN model is
+  // very confident this is a false positive AND the same fingerprint has
+  // been dismissed by the org before. Distinct from `false_positive` (user
+  // policy) so it's auditable and one-click-reversible. See migration 020.
+  | 'dismissed_by_ai';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
 export type TargetType = 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
@@ -147,6 +157,23 @@ export interface Finding {
   reopened_count?: number | null;
   ai_assessment?: AiAssessment | null;
   ai_assessed_at?: string | null;
+  /**
+   * Snapshot of the prediction + policy decision that drove an
+   * auto-dismiss. Populated only when status = 'dismissed_by_ai'.
+   * The UI shows it in the "AI auto-dismissed" banner so the user
+   * can see why and override.
+   */
+  auto_dismiss_reason?: AutoDismissReason | null;
+}
+
+export interface AutoDismissReason {
+  p_false_positive: number;
+  n_neighbours: number;
+  mean_similarity?: number;
+  threshold: number;
+  decided_at: string;
+  /** True if epsilon-greedy fired and we surfaced anyway (rare; stays absent otherwise). */
+  epsilon_explore?: boolean;
 }
 
 /**

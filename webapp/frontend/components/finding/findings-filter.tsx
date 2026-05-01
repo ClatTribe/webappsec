@@ -21,7 +21,11 @@ type FindingWithScan = Finding & {
 
 const ALL_TARGETS = '__all__';
 
-const RESOLVED_STATUSES = new Set(['fixed', 'false_positive', 'wont_fix']);
+// Statuses that count as "resolved" for the default Open / Urgent views.
+// `dismissed_by_ai` is included here — those are findings the model auto-
+// hid; they shouldn't clutter the default list. The "All" view shows them,
+// and the dedicated "AI dismissed" tab lets the user audit + override.
+const RESOLVED_STATUSES = new Set(['fixed', 'false_positive', 'wont_fix', 'dismissed_by_ai']);
 
 const URGENCY_RANK: Record<AiUrgency, number> = {
   fix_now: 0,
@@ -38,7 +42,7 @@ const SEVERITY_RANK: Record<string, number> = {
   info: 4,
 };
 
-type ViewMode = 'urgent' | 'open' | 'all';
+type ViewMode = 'urgent' | 'open' | 'ai_dismissed' | 'all';
 
 const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
   {
@@ -50,6 +54,11 @@ const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
     value: 'open',
     label: 'Open',
     help: 'Anything not yet fixed / dismissed / wont-fix.',
+  },
+  {
+    value: 'ai_dismissed',
+    label: 'AI dismissed',
+    help: 'Findings the model auto-hid. Review and override if needed.',
   },
   {
     value: 'all',
@@ -97,6 +106,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     return sorted.filter((f) => {
       const isResolved = RESOLVED_STATUSES.has(f.status);
       if (view === 'all') return true;
+      if (view === 'ai_dismissed') return f.status === 'dismissed_by_ai';
       if (view === 'open') return !isResolved;
       // 'urgent': AI says fix_now or fix_soon AND not resolved.
       const u = f.ai_assessment?.urgency;
@@ -178,6 +188,8 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
                 ? 'No urgent findings — nothing the AI thinks needs immediate action.'
                 : view === 'open'
                 ? 'No open findings — everything has been triaged.'
+                : view === 'ai_dismissed'
+                ? "No AI-dismissed findings — the model hasn't auto-dismissed anything for this org yet."
                 : 'No findings match the current filter.'}
             </p>
             {findings.length > 0 && view !== 'all' && (

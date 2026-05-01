@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -327,6 +328,160 @@ def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.7f}" for x in vec) + "]"
 
 
+# ---------------------------------------------------------------------------
+# Auto-dismiss — phase 3 of the triage learning loop
+# ---------------------------------------------------------------------------
+#
+# Policy (intentionally conservative):
+#
+#   1. The per-org KNN must say `p_false_positive >= AUTO_DISMISS_THRESHOLD`.
+#   2. The same finding fingerprint must already be dismissed by this org.
+#      Pure-similarity isn't enough; we need a hard precedent. Without
+#      this guard, one bad embedding could cascade into widespread
+#      dismissal of a brand-new bug class.
+#   3. `severity != 'critical'`. Hard catastrophe floor — we never auto-
+#      dismiss a critical finding regardless of confidence. The expected
+#      cost of hiding a real critical is unbounded.
+#   4. ε-greedy escape valve: AUTO_DISMISS_EPSILON of eligible
+#      auto-dismissals are *not* dismissed, surfaced to the user
+#      instead. Prevents the filter-bubble drift where the model
+#      auto-dismisses everything that looks like X, the user never sees
+#      X, no new labels for X arrive, and the model's view of X drifts
+#      forever from reality. The ε path generates a labeled signal
+#      every time the user touches it, which is exactly the active-
+#      learning behaviour we want.
+
+AUTO_DISMISS_THRESHOLD = 0.95
+AUTO_DISMISS_EPSILON = 0.05  # 5%: surface anyway, log for accuracy audit
+
+# Suggestion threshold (UI surfaces "Likely false positive — confirm?")
+SUGGESTION_THRESHOLD = 0.70
+
+
+def _has_same_fingerprint_dismissed(
+    sb: WorkerSupabase, org_id: str, fingerprint: str | None
+) -> bool:
+    """Has this org dismissed any finding with the same fingerprint before?
+
+    Required guard before auto-dismiss. Without it, a new bug class with
+    high similarity to an old dismissed class would chain-dismiss on its
+    first detection. The fingerprint hash is loose enough that two
+    LLM-rewordings of the same finding agree, tight enough that
+    different bugs don't.
+    """
+    if not fingerprint:
+        return False
+    rows = (
+        sb.client.table("findings")
+        .select("id")
+        .eq("org_id", org_id)
+        .eq("fingerprint", fingerprint)
+        .in_("status", ["false_positive", "wont_fix", "dismissed_by_ai"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return len(rows) > 0
+
+
+def _eligible_for_auto_dismiss(
+    finding: dict[str, Any],
+    prediction: dict[str, Any] | None,
+    *,
+    has_same_fingerprint_dismissed: bool,
+) -> bool:
+    """Pure-policy gate, no I/O. All four hard rules from the doctrine."""
+    if prediction is None:
+        return False
+    p_fp = prediction.get("p_false_positive")
+    if p_fp is None or float(p_fp) < AUTO_DISMISS_THRESHOLD:
+        return False
+    if (finding.get("severity") or "").lower() == "critical":
+        return False
+    if not has_same_fingerprint_dismissed:
+        return False
+    return True
+
+
+def _maybe_auto_dismiss(
+    sb: WorkerSupabase,
+    finding: dict[str, Any],
+    prediction: dict[str, Any] | None,
+) -> bool:
+    """Apply the policy. Returns True if the finding was auto-dismissed.
+
+    Writes the audit row (`auto_dismiss_reason`) regardless of whether
+    ε-greedy fired — when it does fire, the row records `epsilon_explore:
+    true` so a future drift audit can compare ε-explore outcomes against
+    auto-dismiss outcomes (calibration check).
+    """
+    org_id = finding.get("org_id")
+    fingerprint = finding.get("fingerprint")
+    if not (org_id and fingerprint):
+        return False
+
+    has_precedent = _has_same_fingerprint_dismissed(sb, org_id, fingerprint)
+    eligible = _eligible_for_auto_dismiss(
+        finding, prediction, has_same_fingerprint_dismissed=has_precedent
+    )
+    if not eligible:
+        return False
+
+    # ε-greedy: with probability AUTO_DISMISS_EPSILON, surface anyway.
+    # We still record an audit row tagged `epsilon_explore: true` so the
+    # divergence is measurable later.
+    if random.random() < AUTO_DISMISS_EPSILON:
+        sb.client.table("findings").update(
+            {
+                "auto_dismiss_reason": {
+                    **(prediction or {}),
+                    "threshold": AUTO_DISMISS_THRESHOLD,
+                    "epsilon_explore": True,
+                }
+            }
+        ).eq("id", finding["id"]).execute()
+        logger.info(
+            "auto-dismiss eligible but ε-explored: %s p_fp=%.3f",
+            finding.get("vuln_id") or finding.get("id"),
+            float(prediction["p_false_positive"]),
+        )
+        return False
+
+    sb.client.table("findings").update(
+        {
+            "status": "dismissed_by_ai",
+            "auto_dismiss_reason": {
+                **(prediction or {}),
+                "threshold": AUTO_DISMISS_THRESHOLD,
+            },
+        }
+    ).eq("id", finding["id"]).execute()
+    logger.info(
+        "auto-dismissed %s p_fp=%.3f n=%d",
+        finding.get("vuln_id") or finding.get("id"),
+        float(prediction["p_false_positive"]),
+        int(prediction.get("n_neighbours") or 0),
+    )
+    return True
+
+
+def _fetch_prediction(sb: WorkerSupabase, finding_id: str) -> dict[str, Any] | None:
+    """Call predict_triage_for_finding. Service-role bypasses RLS, so we
+    rely on the `where org_id = …` clause inside the function for isolation
+    (which it has — see migration 019). Returns None on cold start or
+    any RPC error (caller must treat as 'no signal').
+    """
+    try:
+        result = sb.client.rpc(
+            "predict_triage_for_finding", {"p_finding_id": finding_id}
+        ).execute()
+        return result.data if isinstance(result.data, dict) else None
+    except Exception:  # noqa: BLE001
+        logger.exception("predict_triage_for_finding RPC failed for %s", finding_id)
+        return None
+
+
 @dataclass
 class TriageStats:
     """Outcome of a triage pass over one scan's findings."""
@@ -427,8 +582,21 @@ async def triage_scan_findings(
                 update_payload
             ).eq("id", f["id"]).execute()
             success += 1
+
+            # Auto-dismiss decision. Runs *after* the assessment + embedding
+            # land so the KNN sees this finding's vector and the prediction
+            # is computed against the most current org state. Only attempt
+            # when we have an embedding — without it the KNN can't run.
+            auto_dismissed = False
+            if embedding is not None:
+                # Build a feature dict the policy can read. We just wrote
+                # the embedding, so the in-memory `f` row needs the org_id
+                # which is already there from the scan-find query.
+                prediction = _fetch_prediction(sb, f["id"])
+                auto_dismissed = _maybe_auto_dismiss(sb, f, prediction)
+
             logger.info(
-                "triage %s urgency=%s reach=%s fp=%s conf=%.2f rag=%s emb=%s",
+                "triage %s urgency=%s reach=%s fp=%s conf=%.2f rag=%s emb=%s auto=%s",
                 ident,
                 assessment.get("urgency"),
                 assessment.get("reachability"),
@@ -436,6 +604,7 @@ async def triage_scan_findings(
                 float(assessment.get("confidence") or 0.0),
                 "yes" if code_context else "no",
                 "yes" if embedding is not None else "no",
+                "yes" if auto_dismissed else "no",
             )
         except Exception as e:  # noqa: BLE001
             failed += 1

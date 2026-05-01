@@ -453,6 +453,194 @@ async def test_triage_writes_assessment_even_when_embedding_fails(monkeypatch):
     assert "embedding" not in update
 
 
+def _prediction(p_fp: float, n: int = 10) -> dict[str, Any]:
+    return {"p_false_positive": p_fp, "p_real": 1 - p_fp, "n_neighbours": n}
+
+
+def test_eligibility_requires_high_p_fp():
+    f = _finding("a", severity="medium")
+    # Below threshold — not eligible.
+    assert not triage._eligible_for_auto_dismiss(
+        f, _prediction(0.94), has_same_fingerprint_dismissed=True
+    )
+    # At threshold — eligible.
+    assert triage._eligible_for_auto_dismiss(
+        f, _prediction(0.95), has_same_fingerprint_dismissed=True
+    )
+    # Far above — eligible.
+    assert triage._eligible_for_auto_dismiss(
+        f, _prediction(0.99), has_same_fingerprint_dismissed=True
+    )
+
+
+def test_eligibility_requires_same_fingerprint_precedent():
+    f = _finding("a", severity="medium")
+    # No precedent — never eligible, even at high confidence.
+    assert not triage._eligible_for_auto_dismiss(
+        f, _prediction(0.99), has_same_fingerprint_dismissed=False
+    )
+
+
+def test_eligibility_critical_severity_floor():
+    """Catastrophe boundary: never auto-dismiss critical regardless of
+    model confidence. The expected cost of hiding a real critical is
+    unbounded; we'd rather waste user time on FPs there."""
+    f = _finding("a", severity="critical")
+    assert not triage._eligible_for_auto_dismiss(
+        f, _prediction(0.99), has_same_fingerprint_dismissed=True
+    )
+    # Sanity check the floor is severity-specific: same prediction +
+    # high severity does dismiss.
+    f_high = _finding("a", severity="high")
+    assert triage._eligible_for_auto_dismiss(
+        f_high, _prediction(0.99), has_same_fingerprint_dismissed=True
+    )
+
+
+def test_eligibility_returns_false_for_missing_prediction():
+    f = _finding("a", severity="medium")
+    assert not triage._eligible_for_auto_dismiss(
+        f, None, has_same_fingerprint_dismissed=True
+    )
+
+
+def test_maybe_auto_dismiss_writes_dismissed_status(monkeypatch):
+    """Eligible finding + ε-greedy doesn't fire → status flipped, audit row written."""
+    f = _make_finding_for_dismiss(severity="medium")
+    sb = _DismissTestSB(has_precedent=True)
+
+    # Force ε-greedy to NOT fire.
+    monkeypatch.setattr(triage.random, "random", lambda: 0.99)
+
+    dismissed = triage._maybe_auto_dismiss(sb, f, _prediction(0.97, n=12))
+    assert dismissed is True
+    assert len(sb.updates) == 1
+    update = sb.updates[0]
+    assert update["status"] == "dismissed_by_ai"
+    assert update["auto_dismiss_reason"]["p_false_positive"] == 0.97
+    assert update["auto_dismiss_reason"]["threshold"] == triage.AUTO_DISMISS_THRESHOLD
+    assert "epsilon_explore" not in update["auto_dismiss_reason"]
+
+
+def test_maybe_auto_dismiss_epsilon_greedy_surfaces(monkeypatch):
+    """ε-greedy fires → status NOT flipped, but audit row records the explore."""
+    f = _make_finding_for_dismiss(severity="medium")
+    sb = _DismissTestSB(has_precedent=True)
+
+    # Force ε-greedy to fire (random < AUTO_DISMISS_EPSILON).
+    monkeypatch.setattr(triage.random, "random", lambda: 0.01)
+
+    dismissed = triage._maybe_auto_dismiss(sb, f, _prediction(0.97, n=12))
+    assert dismissed is False
+    assert len(sb.updates) == 1
+    update = sb.updates[0]
+    assert "status" not in update  # NOT flipped
+    assert update["auto_dismiss_reason"]["epsilon_explore"] is True
+    assert update["auto_dismiss_reason"]["p_false_positive"] == 0.97
+
+
+def test_maybe_auto_dismiss_skips_when_no_precedent(monkeypatch):
+    f = _make_finding_for_dismiss(severity="medium")
+    sb = _DismissTestSB(has_precedent=False)
+    monkeypatch.setattr(triage.random, "random", lambda: 0.99)
+
+    dismissed = triage._maybe_auto_dismiss(sb, f, _prediction(0.99, n=20))
+    assert dismissed is False
+    assert sb.updates == []  # No audit row either — fully skipped.
+
+
+def test_maybe_auto_dismiss_skips_critical(monkeypatch):
+    f = _make_finding_for_dismiss(severity="critical")
+    sb = _DismissTestSB(has_precedent=True)
+    monkeypatch.setattr(triage.random, "random", lambda: 0.99)
+
+    dismissed = triage._maybe_auto_dismiss(sb, f, _prediction(0.99, n=50))
+    assert dismissed is False
+    assert sb.updates == []
+
+
+def test_maybe_auto_dismiss_skips_when_no_prediction(monkeypatch):
+    """Cold start: predict_triage returned None (no neighbours).
+    Auto-dismiss must be a no-op."""
+    f = _make_finding_for_dismiss(severity="medium")
+    sb = _DismissTestSB(has_precedent=True)
+    monkeypatch.setattr(triage.random, "random", lambda: 0.99)
+
+    dismissed = triage._maybe_auto_dismiss(sb, f, None)
+    assert dismissed is False
+    assert sb.updates == []
+
+
+# --- helpers for the auto-dismiss tests -------------------------------------
+
+def _make_finding_for_dismiss(*, severity: str) -> dict[str, Any]:
+    """Return a finding dict shaped like a row from `findings`. The
+    auto-dismiss path needs id, org_id, fingerprint, severity."""
+    return {
+        "id": "ad-test-finding",
+        "vuln_id": "vuln-ad",
+        "org_id": "ad-test-org",
+        "fingerprint": "AD_FP_HASH",
+        "severity": severity,
+    }
+
+
+class _DismissTestSB:
+    """Fake Supabase client tailored to the auto-dismiss policy paths.
+
+    Captures every UPDATE payload so tests can assert the exact column
+    set we sent. Implements the two query shapes _maybe_auto_dismiss
+    needs: a precedent-check select with .in_/.eq chain, and an
+    update().eq() chain.
+    """
+
+    def __init__(self, *, has_precedent: bool) -> None:
+        self.has_precedent = has_precedent
+        self.updates: list[dict[str, Any]] = []
+        self.client = self  # for sb.client.table() access pattern
+
+    def table(self, _name: str) -> "_DismissTestSB._Table":
+        return _DismissTestSB._Table(self)
+
+    class _Table:
+        def __init__(self, sb: "_DismissTestSB") -> None:
+            self._sb = sb
+            self._is_select = False
+            self._update_payload: dict[str, Any] | None = None
+            self._eq: dict[str, Any] = {}
+            self._in: tuple[str, list[Any]] | None = None
+
+        def select(self, _cols: str) -> "_DismissTestSB._Table":
+            self._is_select = True
+            return self
+
+        def update(self, payload: dict[str, Any]) -> "_DismissTestSB._Table":
+            self._update_payload = payload
+            return self
+
+        def eq(self, col: str, val: Any) -> "_DismissTestSB._Table":
+            self._eq[col] = val
+            return self
+
+        def in_(self, col: str, vals: list[Any]) -> "_DismissTestSB._Table":
+            self._in = (col, vals)
+            return self
+
+        def limit(self, _n: int) -> "_DismissTestSB._Table":
+            return self
+
+        def execute(self) -> Any:
+            from types import SimpleNamespace
+
+            if self._is_select:
+                # Precedent check.
+                rows = [{"id": "x"}] if self._sb.has_precedent else []
+                return SimpleNamespace(data=rows)
+            # Update.
+            self._sb.updates.append(self._update_payload or {})
+            return SimpleNamespace(data=None)
+
+
 @pytest.mark.asyncio
 async def test_assess_one_strips_fenced_json(monkeypatch):
     """Some providers wrap JSON in ```json fences. _coerce_assessment must strip them."""
