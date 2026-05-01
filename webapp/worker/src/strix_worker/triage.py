@@ -21,6 +21,7 @@ the same fingerprint, and it saves tokens.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -213,6 +214,119 @@ def need_assess(finding: dict[str, Any]) -> bool:
     return not finding.get("ai_assessment")
 
 
+# ---------------------------------------------------------------------------
+# Embeddings — vector representation for the per-tenant KNN model
+# ---------------------------------------------------------------------------
+
+# Gemini's free-tier embedding model. 768 dims, same key the org already
+# uses for triage. If we switch providers later, only this constant + the
+# `findings.embedding` column dimensions need to move together.
+EMBEDDING_MODEL = "gemini/text-embedding-004"
+EMBEDDING_DIMS = 768
+
+# Soft cap on what we feed the embedder. Embedding APIs typically accept
+# up to ~8K tokens; we stay well under to avoid surprises and keep cost
+# predictable. Truncation discards trailing remediation prose, which
+# matters less for similarity than the title + description + snippet.
+_EMBED_INPUT_CHAR_BUDGET = 6000
+
+
+def _embed_input(finding: dict[str, Any]) -> str:
+    """Build the text we embed for a finding.
+
+    What we want the vector to capture: *what the bug is and where it
+    lives*, not the prose styling. So: title + the most-informative
+    structured fields + a slice of the description + any snippet Strix
+    attached. Keeps the embedding stable across LLM rewordings.
+    """
+    parts: list[str] = []
+    title = finding.get("title")
+    if title:
+        parts.append(f"Title: {title}")
+    cwe = finding.get("cwe")
+    if cwe:
+        parts.append(f"CWE: {cwe}")
+    target = finding.get("target")
+    if target:
+        parts.append(f"Target: {target}")
+    endpoint = finding.get("endpoint")
+    if endpoint:
+        method = finding.get("method") or "ANY"
+        parts.append(f"Endpoint: {method} {endpoint}")
+
+    # Snippet from Strix's structured code_locations carries the most
+    # discriminative signal — the actual vulnerable lines.
+    affected = finding.get("affected_files") or []
+    if isinstance(affected, list):
+        for entry in affected[:2]:
+            if isinstance(entry, dict) and entry.get("snippet"):
+                parts.append(f"Code: {entry['snippet']}")
+
+    desc = finding.get("description_md") or ""
+    if desc:
+        parts.append(f"Description: {desc[:3000]}")
+
+    text = "\n".join(parts)
+    return text[:_EMBED_INPUT_CHAR_BUDGET] if len(text) > _EMBED_INPUT_CHAR_BUDGET else text
+
+
+async def embed_finding(
+    finding: dict[str, Any],
+    *,
+    api_key: str,
+    model: str = EMBEDDING_MODEL,
+) -> list[float] | None:
+    """Compute a 768-d embedding for a finding. Returns None on failure.
+
+    Failures are *never* fatal to triage. A finding without an embedding
+    still gets its `ai_assessment` written; it just doesn't contribute
+    to the per-org KNN model until the next time it (or a similar one)
+    is re-embedded.
+    """
+    text = _embed_input(finding)
+    if not text:
+        return None
+
+    try:
+        resp = await litellm.aembedding(
+            model=model,
+            api_key=api_key,
+            input=text,
+            num_retries=2,
+        )
+        # LiteLLM normalises responses to OpenAI shape: {data: [{embedding: [...]}]}
+        data = resp.data if hasattr(resp, "data") else resp.get("data")
+        if not data:
+            return None
+        vec = data[0].get("embedding") if isinstance(data[0], dict) else data[0].embedding
+        if not vec or len(vec) != EMBEDDING_DIMS:
+            logger.warning(
+                "embedding for %s returned unexpected dim: got=%d want=%d",
+                finding.get("vuln_id") or finding.get("id"),
+                0 if not vec else len(vec),
+                EMBEDDING_DIMS,
+            )
+            return None
+        return list(vec)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "embedding for %s FAILED: %s",
+            finding.get("vuln_id") or finding.get("id"),
+            e,
+        )
+        return None
+
+
+def _vec_literal(vec: list[float]) -> str:
+    """Format a Python float list as a pgvector literal: '[0.1,0.2,...]'.
+
+    The supabase-py client ships JSON over PostgREST; pgvector accepts
+    its bracketed text form on assignment. We send a string to keep the
+    payload portable across client versions.
+    """
+    return "[" + ",".join(f"{x:.7f}" for x in vec) + "]"
+
+
 @dataclass
 class TriageStats:
     """Outcome of a triage pass over one scan's findings."""
@@ -290,21 +404,38 @@ async def triage_scan_findings(
                 logger.exception("triage %s: code-context gather failed", ident)
 
         try:
-            assessment = await assess_one(
-                f, model=model, api_key=api_key, code_context=code_context
+            # Run the LLM judgment and the embedding in parallel — both
+            # take a network round-trip; no reason to serialise. The
+            # embedding is best-effort: if it fails the assessment still
+            # lands and the finding renders with an AI verdict, just
+            # without contributing to the per-org KNN model.
+            assess_task = asyncio.create_task(
+                assess_one(f, model=model, api_key=api_key, code_context=code_context)
             )
+            embed_task = asyncio.create_task(embed_finding(f, api_key=api_key))
+            assessment = await assess_task
+            embedding = await embed_task
+
+            update_payload: dict[str, Any] = {
+                "ai_assessment": assessment,
+                "ai_assessed_at": "now()",
+            }
+            if embedding is not None:
+                update_payload["embedding"] = _vec_literal(embedding)
+
             sb.client.table("findings").update(
-                {"ai_assessment": assessment, "ai_assessed_at": "now()"}
+                update_payload
             ).eq("id", f["id"]).execute()
             success += 1
             logger.info(
-                "triage %s urgency=%s reach=%s fp=%s conf=%.2f rag=%s",
+                "triage %s urgency=%s reach=%s fp=%s conf=%.2f rag=%s emb=%s",
                 ident,
                 assessment.get("urgency"),
                 assessment.get("reachability"),
                 "yes" if assessment.get("is_likely_false_positive") else "no",
                 float(assessment.get("confidence") or 0.0),
                 "yes" if code_context else "no",
+                "yes" if embedding is not None else "no",
             )
         except Exception as e:  # noqa: BLE001
             failed += 1
