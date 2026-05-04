@@ -187,6 +187,61 @@ async def test_summary_prompt_includes_recurrence_when_present(monkeypatch):
     assert "still active: 1" in user_msg["content"]
 
 
+@pytest.mark.asyncio
+async def test_summarize_scan_prefers_engine_run_summary_json(monkeypatch, tmp_path):
+    """When run_summary.json is present, the engine's authored summary is
+    used directly — no LLM call. Doctrine: the engine's source-of-truth
+    output beats wrapper-side derivation."""
+    sb = _make_sb()
+
+    # Plant the engine artifact at the path summarize_scan reads from.
+    workdir = tmp_path / "strix-runs" / SCAN_ID / "strix_runs" / "fake-run"
+    workdir.mkdir(parents=True)
+    engine_doc = {
+        "schema_version": 1,
+        "summary_text": "Scanned acme.com (domain) in 2.1m. Found 1 medium SSRF and 2 info notes.",
+        "duration_seconds": 126.4,
+        "findings_summary": {
+            "total": 3,
+            "by_severity": {"medium": 1, "info": 2},
+            "by_category": {"ssrf": 1, "info_disclosure": 2},
+        },
+        "top_findings": [{"id": "vuln-001", "title": "SSRF on /api/import", "severity": "medium"}],
+        "checks": {"total": 38, "by_result": {"vulnerable": 1, "not_vulnerable": 28, "inconclusive": 9}},
+        "generated_at": "2026-05-08T12:00:00Z",
+    }
+    (workdir / "run_summary.json").write_text(json.dumps(engine_doc))
+
+    # Repoint the summary module's hard-coded `/tmp/strix-runs` prefix at
+    # our tmp dir so the test is hermetic.
+    monkeypatch.setattr(summary, "_read_engine_run_summary",
+        lambda scan_id: engine_doc if scan_id == SCAN_ID else None)
+
+    # Even if litellm is callable, it must NOT be invoked on the engine path.
+    llm_called = {"count": 0}
+    async def _should_not_be_called(**kwargs):
+        llm_called["count"] += 1
+        return _resp("{}")
+    monkeypatch.setattr(summary.litellm, "acompletion", _should_not_be_called)
+
+    out = await summary.summarize_scan(
+        sb, SCAN_ID, model="gemini/gemini-2.5-flash", api_key="fake",
+    )
+
+    assert out is not None
+    assert out["text"] == engine_doc["summary_text"]
+    assert out["source"] == "engine_run_summary_json"
+    assert out["model"] == "engine"
+    assert out["stats"]["findings_total"] == 3
+    assert out["stats"]["fix_soon"] == 1  # one medium → fix_soon bucket
+    assert out["stats"]["by_category"]["ssrf"] == 1
+    assert out["duration_seconds"] == 126.4
+    assert llm_called["count"] == 0  # critical: LLM was NOT called
+    # Persisted to scans.summary as a single update.
+    assert len(sb.summary_writes) == 1
+    assert sb.summary_writes[0]["summary"]["source"] == "engine_run_summary_json"
+
+
 def _resp(content: str):
     """litellm-shaped response object with a single message."""
     class _Msg:

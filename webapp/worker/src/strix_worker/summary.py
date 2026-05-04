@@ -29,7 +29,9 @@ The summary is honest about what we know vs guess:
 
 from __future__ import annotations
 
+import json
 import logging
+import pathlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -223,6 +225,83 @@ def _build_user_prompt(facts: dict[str, Any], stats: SummaryStats) -> str:
     )
 
 
+def _normalize_engine_summary(engine_summary: dict[str, Any]) -> dict[str, Any]:
+    """Map the engine's run_summary.json shape to the scans.summary JSONB
+    shape the UI expects. Preserves the engine's `summary_text` verbatim;
+    derives stats from the engine's structured `findings_summary` and
+    `checks` blocks. Source is tagged as `engine` so the UI / future
+    drift-detection can distinguish."""
+    fs = engine_summary.get("findings_summary") or {}
+    by_sev = fs.get("by_severity") or {}
+    by_cat = fs.get("by_category") or {}
+    checks = engine_summary.get("checks") or {}
+    by_check_result = checks.get("by_result") or {}
+
+    findings_total = fs.get("total")
+    if findings_total is None:
+        findings_total = sum(by_sev.values()) if by_sev else 0
+
+    # Map engine severity counts onto the wrapper UI's existing
+    # fix_now / fix_soon / monitor / dismiss_or_fp buckets. The engine
+    # doesn't distinguish AI-urgency, so we approximate with severity
+    # ordinality (critical+high → fix_now, medium → fix_soon, low → monitor,
+    # info → none of the above; AI triage will refine post-hoc).
+    fix_now = (by_sev.get("critical") or 0) + (by_sev.get("high") or 0)
+    fix_soon = by_sev.get("medium") or 0
+    monitor = by_sev.get("low") or 0
+
+    return {
+        "text": engine_summary.get("summary_text") or "",
+        "model": "engine",  # not an LLM model — flags this as engine-authored
+        "generated_at": engine_summary.get("generated_at") or "now()",
+        "source": "engine_run_summary_json",
+        "stats": {
+            "findings_total": int(findings_total or 0),
+            "fix_now": int(fix_now),
+            "fix_soon": int(fix_soon),
+            "monitor": int(monitor),
+            "dismiss_or_fp": 0,
+            "endpoints_touched": 0,
+            "by_severity": by_sev,
+            "by_category": by_cat,
+            "checks_total": int(checks.get("total") or 0),
+            "checks_clean": int(by_check_result.get("not_vulnerable") or 0),
+            "checks_inconclusive": int(by_check_result.get("inconclusive") or 0),
+        },
+        "top_findings": engine_summary.get("top_findings") or [],
+        "duration_seconds": engine_summary.get("duration_seconds"),
+    }
+
+
+def _read_engine_run_summary(scan_id: str) -> dict[str, Any] | None:
+    """Read the engine's run_summary.json artifact if present.
+
+    Path: /tmp/strix-runs/<scan_id>/strix_runs/<run_name>/run_summary.json.
+    The engine writes this at run end (PR #31) with `summary_text`,
+    `findings_summary.by_severity / by_category`, `top_findings`, etc.
+    Per the doctrine, we prefer the engine's authored summary over our
+    wrapper-side LLM call.
+
+    Returns None when the file is absent or unreadable; caller falls back
+    to the LLM-driven path.
+    """
+    base = pathlib.Path(f"/tmp/strix-runs/{scan_id}/strix_runs")
+    if not base.exists():
+        return None
+    for run_dir in base.iterdir():
+        if not run_dir.is_dir():
+            continue
+        summary_path = run_dir / "run_summary.json"
+        if not summary_path.is_file():
+            continue
+        try:
+            return json.loads(summary_path.read_text())
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: run_summary.json unreadable", scan_id)
+            return None
+    return None
+
+
 async def summarize_scan(
     sb: WorkerSupabase,
     scan_id: str,
@@ -232,11 +311,35 @@ async def summarize_scan(
 ) -> dict[str, Any] | None:
     """Generate + persist the plain-language summary for one scan.
 
-    Returns the `summary` dict that was written, or None on failure.
+    Three paths, in priority order:
+
+      1. Engine's `run_summary.json` artifact — preferred. The engine
+         authors a richer summary including `summary_text`, severity +
+         category breakdown, top findings. Wrapper drops in directly.
+      2. Wrapper-side LLM call — fallback. Writes a tighter summary
+         tuned for the screenshot-and-forward use case.
+      3. Null — when both above fail; UI degrades gracefully.
+
     Failures are non-fatal at the caller — a missing summary just means
     the scan-page section is hidden, exactly as for scans that completed
     before this feature shipped.
     """
+    # Path 1: engine-authored summary.
+    engine_summary = _read_engine_run_summary(scan_id)
+    if engine_summary and engine_summary.get("summary_text"):
+        payload = _normalize_engine_summary(engine_summary)
+        try:
+            sb.client.table("scans").update({"summary": payload}).eq("id", scan_id).execute()
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: failed to write engine summary", scan_id)
+            return None
+        logger.info(
+            "summary scan=%s source=engine findings=%s",
+            scan_id, payload["stats"].get("findings_total"),
+        )
+        return payload
+
+    # Path 2: wrapper LLM fallback.
     facts = _gather_scan_facts(sb, scan_id)
     stats = _compute_stats(facts)
 

@@ -28,6 +28,20 @@ import {
   Globe,
   Lock,
   ShieldOff,
+  Bug,
+  Database,
+  Mail,
+  Network,
+  Key,
+  Package,
+  KeyRound,
+  Code2,
+  Server,
+  Files,
+  Link2,
+  Repeat,
+  Eye as EyeOpen,
+  HelpCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
@@ -204,3 +218,167 @@ export const AI_BRAND = {
   /** Icon colour for AI icons (Sparkles, brain, etc.). */
   iconColor: 'text-cyan-300',
 } as const;
+
+// ---------------------------------------------------------------------------
+// Finding categories — engine PR #137's `category` field. Domain scans now
+// produce findings in `email_security`, `dns_security`, `secret_leak`,
+// `vulnerable_dependency`, `authentication_bypass`, plus expanded
+// `info_disclosure` and `subdomain_takeover`. Until this map exists, those
+// findings render as raw category strings or "Other".
+//
+// Unknown categories fall back to the `_default` entry (HelpCircle / neutral).
+// ---------------------------------------------------------------------------
+
+export interface CategoryTheme {
+  Icon: LucideIcon;
+  label: string;
+  /** Tailwind classes for the small inline chip on the finding card. */
+  pill: string;
+  /** Plain colour name for the icon when used standalone. */
+  iconColor: string;
+}
+
+export const CATEGORY_THEME: Record<string, CategoryTheme> = {
+  // Engine surface in domain scans (PRs #19 + #26 + #27 + #28).
+  email_security: {
+    Icon: Mail,
+    label: 'Email security',
+    pill: 'bg-violet-500/10 text-violet-200 ring-violet-500/30',
+    iconColor: 'text-violet-300',
+  },
+  dns_security: {
+    Icon: Network,
+    label: 'DNS security',
+    pill: 'bg-cyan-500/10 text-cyan-200 ring-cyan-500/30',
+    iconColor: 'text-cyan-300',
+  },
+  subdomain_takeover: {
+    Icon: Globe,
+    label: 'Subdomain takeover',
+    pill: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    iconColor: 'text-rose-300',
+  },
+  secret_leak: {
+    Icon: KeyRound,
+    label: 'Leaked secret',
+    pill: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    iconColor: 'text-orange-300',
+  },
+  vulnerable_dependency: {
+    Icon: Package,
+    label: 'Vulnerable component',
+    pill: 'bg-amber-500/10 text-amber-200 ring-amber-400/30',
+    iconColor: 'text-amber-300',
+  },
+  authentication_bypass: {
+    Icon: KeyRound,
+    label: 'Auth bypass',
+    pill: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    iconColor: 'text-rose-300',
+  },
+  info_disclosure: {
+    Icon: Info,
+    label: 'Info disclosure',
+    pill: 'bg-zinc-500/15 text-zinc-300 ring-zinc-500/30',
+    iconColor: 'text-zinc-400',
+  },
+
+  // Engine taxonomy for web-app finding types — usage.md §2.3 lists these.
+  sqli: {
+    Icon: Database,
+    label: 'SQL injection',
+    pill: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    iconColor: 'text-rose-300',
+  },
+  xss: {
+    Icon: Bug,
+    label: 'XSS',
+    pill: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    iconColor: 'text-orange-300',
+  },
+  cmd_injection: {
+    Icon: Bug,
+    label: 'Command injection',
+    pill: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    iconColor: 'text-rose-300',
+  },
+  ssrf: {
+    Icon: Network,
+    label: 'SSRF',
+    pill: 'bg-violet-500/10 text-violet-200 ring-violet-500/30',
+    iconColor: 'text-violet-300',
+  },
+  auth: {
+    Icon: KeyRound,
+    label: 'Auth',
+    pill: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    iconColor: 'text-orange-300',
+  },
+  authz: {
+    Icon: Lock,
+    label: 'Authorization',
+    pill: 'bg-amber-500/10 text-amber-200 ring-amber-400/30',
+    iconColor: 'text-amber-300',
+  },
+  idor: {
+    Icon: Files,
+    label: 'IDOR',
+    pill: 'bg-amber-500/10 text-amber-200 ring-amber-400/30',
+    iconColor: 'text-amber-300',
+  },
+  crypto: {
+    Icon: Key,
+    label: 'Crypto',
+    pill: 'bg-cyan-500/10 text-cyan-200 ring-cyan-500/30',
+    iconColor: 'text-cyan-300',
+  },
+  csrf: {
+    Icon: Repeat,
+    label: 'CSRF',
+    pill: 'bg-amber-500/10 text-amber-200 ring-amber-400/30',
+    iconColor: 'text-amber-300',
+  },
+  path_traversal: {
+    Icon: Server,
+    label: 'Path traversal',
+    pill: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    iconColor: 'text-rose-300',
+  },
+  misconfig: {
+    Icon: Code2,
+    label: 'Misconfiguration',
+    pill: 'bg-zinc-500/15 text-zinc-300 ring-zinc-500/30',
+    iconColor: 'text-zinc-400',
+  },
+  race_condition: {
+    Icon: Repeat,
+    label: 'Race condition',
+    pill: 'bg-violet-500/10 text-violet-200 ring-violet-500/30',
+    iconColor: 'text-violet-300',
+  },
+  open_redirect: {
+    Icon: Link2,
+    label: 'Open redirect',
+    pill: 'bg-amber-500/10 text-amber-200 ring-amber-400/30',
+    iconColor: 'text-amber-300',
+  },
+  other: {
+    Icon: HelpCircle,
+    label: 'Other',
+    pill: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
+    iconColor: 'text-neutral-400',
+  },
+
+  _default: {
+    Icon: HelpCircle,
+    label: 'Other',
+    pill: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
+    iconColor: 'text-neutral-400',
+  },
+};
+
+/** Look up a category theme; falls back gracefully on unknown strings. */
+export function getCategoryTheme(category: string | null | undefined): CategoryTheme {
+  if (!category) return CATEGORY_THEME._default;
+  return CATEGORY_THEME[category.toLowerCase()] ?? CATEGORY_THEME._default;
+}
