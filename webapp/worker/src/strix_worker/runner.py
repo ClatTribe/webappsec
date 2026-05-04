@@ -636,11 +636,20 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
                 except Exception as e:  # noqa: BLE001
                     logger.warning("failed to upload %s: %s", key, e)
 
-        # Parse vulnerability markdown files into structured findings.
-        vulns_dir = run_dir / "vulnerabilities"
-        if vulns_dir.exists():
-            for vuln_file in sorted(vulns_dir.glob("vuln-*.md")):
-                _ingest_finding(sb, scan_id, vuln_file)
+        # Ingest findings. Prefer the engine's structured vulnerabilities.json
+        # (richer schema — confidence, reasoning_trace, counter_proof, category,
+        # priority_label, etc.) and fall back to per-vuln markdown for older
+        # Strix versions that don't write the JSON. Per Architecture.md §1.1
+        # doctrine: the engine's structured signal is the source of truth;
+        # markdown parsing is the fallback.
+        vulns_json = run_dir / "vulnerabilities.json"
+        if vulns_json.exists():
+            _ingest_findings_from_json(sb, scan_id, vulns_json)
+        else:
+            vulns_dir = run_dir / "vulnerabilities"
+            if vulns_dir.exists():
+                for vuln_file in sorted(vulns_dir.glob("vuln-*.md")):
+                    _ingest_finding(sb, scan_id, vuln_file)
 
 
 def _extract_meta_field(lines: list[str], label: str) -> str | None:
@@ -666,6 +675,161 @@ def _compute_fingerprint(*, cwe: str | None, endpoint: str | None, target: str |
     norm_cwe = (cwe or "").upper().strip()
     payload = f"{norm_cwe}|{norm_loc}|{norm_title}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _ingest_findings_from_json(sb: WorkerSupabase, scan_id: str, vulns_json: Path) -> None:
+    """Read the engine's structured vulnerabilities.json and insert each
+    finding via worker_insert_finding.
+
+    Schema reference: ClatTribe/strix `strix/telemetry/tracer.py` (PR #137 +
+    #142). Top-level shape: { schema_version, run_id, run_name, generated_at,
+    count, findings[] }. Each finding carries the full §15.3 + §10 quality
+    surface — `confidence`, `reasoning_trace`, `counter_proof`,
+    `reproducibility_token`, `category`, `priority_label`,
+    `verification_status`, `compliance_controls`, etc.
+
+    Best-effort: any single finding that fails to parse is logged and
+    skipped; the rest still land. JSON-level corruption falls back to
+    markdown ingestion via the caller.
+    """
+    try:
+        data = json.loads(vulns_json.read_text())
+    except Exception:  # noqa: BLE001
+        logger.exception("vulnerabilities.json corrupt for scan %s; falling back to md", scan_id)
+        # Fall back to markdown — caller will hit this path if the file is
+        # missing entirely; here we explicitly trigger it on parse error.
+        vulns_dir = vulns_json.parent / "vulnerabilities"
+        if vulns_dir.exists():
+            for vuln_file in sorted(vulns_dir.glob("vuln-*.md")):
+                _ingest_finding(sb, scan_id, vuln_file)
+        return
+
+    findings = data.get("findings") if isinstance(data, dict) else None
+    if not isinstance(findings, list):
+        logger.warning("scan %s: vulnerabilities.json has no findings array", scan_id)
+        return
+
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        try:
+            _insert_finding_from_json(sb, scan_id, f)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "scan %s: failed to insert finding %s",
+                scan_id,
+                f.get("id") or f.get("title", "<unnamed>"),
+            )
+
+
+def _insert_finding_from_json(
+    sb: WorkerSupabase, scan_id: str, f: dict[str, Any]
+) -> None:
+    """Map one engine finding dict → worker_insert_finding payload."""
+    title = (f.get("title") or "").strip() or "Untitled finding"
+    severity = (f.get("severity") or "info").lower().strip()
+    if severity not in {"critical", "high", "medium", "low", "info"}:
+        severity = "info"
+
+    cwe = _none_if_blank(f.get("cwe"))
+    cve = _none_if_blank(f.get("cve"))
+    endpoint = _none_if_blank(f.get("endpoint"))
+    target = _none_if_blank(f.get("target"))
+    method = _none_if_blank(f.get("method"))
+    cvss = f.get("cvss")
+    if not isinstance(cvss, (int, float)):
+        cvss = None
+
+    # Prefer the engine's stable fingerprint. Fall back to our wrapper-side
+    # hash for older engines that don't emit one — the same loose hash we've
+    # always used so dedup behaviour stays consistent.
+    fingerprint = _none_if_blank(f.get("fingerprint")) or _compute_fingerprint(
+        cwe=cwe, endpoint=endpoint, target=target, title=title,
+    )
+
+    # Reuse the description markdown for the legacy column (UI's section
+    # parser still consumes this for older findings). Engine's plain
+    # description goes into description_plain.
+    description = f.get("description") or ""
+    description_md = description if isinstance(description, str) else ""
+
+    # `code_locations` lives on the finding too; persist as `affected_files`
+    # to match the wrapper-side schema we already have.
+    affected_files = f.get("code_locations") or None
+
+    payload: dict[str, Any] = {
+        "description_md": description_md,
+        "cvss": cvss,
+        "cwe": cwe,
+        "cve": cve,
+        "target": target,
+        "endpoint": endpoint,
+        "method": method,
+        "fingerprint": fingerprint,
+        "affected_files": affected_files,
+        # New engine-signal columns (migration 024 + 025).
+        "category": f.get("category"),
+        "description_plain": f.get("description_plain"),
+        "recommended_action": f.get("recommended_action"),
+        "priority_label": f.get("priority_label"),
+        "verification_status": f.get("verification_status"),
+        "confidence": f.get("confidence"),
+        "reproducibility_token": f.get("reproducibility_token"),
+        "fingerprint_version": f.get("fingerprint_version"),
+        "is_canonical": f.get("is_canonical"),
+        "reasoning_trace": f.get("reasoning_trace"),
+        "counter_proof": f.get("counter_proof"),
+        "kill_chain": f.get("kill_chain"),
+        "compliance_controls": f.get("compliance_controls"),
+        "data_classification": f.get("data_classification"),
+        "mitre_attack": f.get("mitre_attack"),
+        "owasp_top_10": f.get("owasp_top_10"),
+        "owasp_api_top_10": f.get("owasp_api_top_10"),
+        "features": f.get("features"),
+        "engine_auto_dismissed": f.get("auto_dismissed"),
+        "engine_auto_dismissal_reason": f.get("auto_dismissal_reason"),
+        "severity_pre_auto_dismissal": f.get("severity_pre_auto_dismissal"),
+        "prior_label_attribution": f.get("prior_label_attribution"),
+        # The legacy markdown columns the worker used to extract.
+        "technical_analysis_md": f.get("technical_analysis"),
+        "poc_md": _compose_poc_md(f),
+        "impact_md": f.get("impact"),
+        "remediation_md": f.get("remediation_steps"),
+    }
+
+    sb.insert_finding(
+        scan_id=scan_id,
+        vuln_id=f.get("id") or fingerprint[:12],
+        title=title,
+        severity=severity,
+        payload=payload,
+    )
+
+
+def _none_if_blank(v: Any) -> str | None:
+    """Treat empty/whitespace strings and "n/a"/"none"/"-" as None.
+
+    Strix occasionally writes those literals for unknown fields; the DB
+    model wants a real null."""
+    if not isinstance(v, str):
+        return v if v is not None else None
+    s = v.strip()
+    if not s or s.lower() in {"n/a", "none", "-"}:
+        return None
+    return s
+
+
+def _compose_poc_md(f: dict[str, Any]) -> str | None:
+    """Combine `poc_description` + `poc_script_code` into the legacy
+    `poc_md` column shape, for back-compat with the existing finding
+    markdown parser. Each can be present independently."""
+    desc = f.get("poc_description") or ""
+    code = f.get("poc_script_code") or ""
+    if not (desc.strip() or code.strip()):
+        return None
+    if code.strip():
+        return (desc + ("\n\n" if desc.strip() else "") + "```\n" + code + "\n```").strip()
+    return desc.strip() or None
 
 
 def _ingest_finding(sb: WorkerSupabase, scan_id: str, vuln_file: Path) -> None:

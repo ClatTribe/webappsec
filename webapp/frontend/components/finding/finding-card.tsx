@@ -474,6 +474,49 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               <span className={`h-1.5 w-1.5 rounded-full ${sev.iconBg.replace('/15', '/80')}`} />
               <span className="text-neutral-400">{sev.label}</span>
             </span>
+            {/* Engine signals (migration 024). Verification status + confidence
+                are the headline trust signals from PR #137; render them prominently. */}
+            {finding.verification_status && (
+              <span
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider ring-1 ${
+                  finding.verification_status === 'verified'
+                    ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30'
+                    : finding.verification_status === 'pattern_match'
+                    ? 'bg-amber-500/10 text-amber-200 ring-amber-400/30'
+                    : 'bg-zinc-700/40 text-zinc-300 ring-zinc-600/40'
+                }`}
+                title="Engine verification — verified means the agent ran the exploit and confirmed; pattern_match is signature-only (PR #137)."
+              >
+                {finding.verification_status.replace(/_/g, ' ')}
+              </span>
+            )}
+            {finding.confidence != null && (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title="Engine confidence (PR #137)."
+              >
+                <span className="text-neutral-600">conf</span>
+                <span
+                  className={`font-mono ${
+                    finding.confidence >= 0.8
+                      ? 'text-emerald-300'
+                      : finding.confidence >= 0.5
+                      ? 'text-amber-300'
+                      : 'text-neutral-500'
+                  }`}
+                >
+                  {finding.confidence.toFixed(2)}
+                </span>
+              </span>
+            )}
+            {finding.category && (
+              <span
+                className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-neutral-400"
+                title="Engine category (PR #137)."
+              >
+                {finding.category.replace(/_/g, ' ')}
+              </span>
+            )}
             {finding.cvss != null && (
               <span className="font-mono">
                 <span className="text-neutral-600">CVSS</span>{' '}
@@ -506,6 +549,52 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </span>
             )}
           </div>
+
+          {/* Engine reasoning trace (PR #137). The "why we believe this is
+              exploitable" bullets — the single biggest "is this AI talking to
+              me, or guessing?" tell. Up to 20 × 320 chars per bullet. */}
+          {finding.reasoning_trace && finding.reasoning_trace.length > 0 && (
+            <section className="rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4">
+              <div className="mb-2.5 flex items-center gap-2">
+                <Brain className={`h-3.5 w-3.5 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
+                <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+                  Why we believe this is exploitable
+                </h4>
+              </div>
+              <ul className="space-y-1.5">
+                {finding.reasoning_trace.map((bullet, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[12.5px] leading-relaxed text-neutral-200">
+                    <span className="mt-1.5 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-cyan-400" />
+                    <span>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Counter-proof block (PR #137). The auditor-grade "we considered
+              this might not be a real finding" signal. Increases trust
+              massively when present. */}
+          {finding.counter_proof && (finding.counter_proof.description || finding.counter_proof.evidence) && (
+            <section className="rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Eye className="h-3.5 w-3.5 text-amber-300" strokeWidth={2.25} />
+                <h4 className="text-[11px] font-semibold uppercase tracking-wider text-amber-200">
+                  Possible alternative explanation
+                </h4>
+              </div>
+              {finding.counter_proof.description && (
+                <p className="text-[12.5px] leading-relaxed text-neutral-200">
+                  {finding.counter_proof.description}
+                </p>
+              )}
+              {finding.counter_proof.evidence && (
+                <pre className="mt-2 overflow-x-auto rounded bg-neutral-950/60 p-2 text-[11px] text-neutral-300 ring-1 ring-neutral-800">
+                  {finding.counter_proof.evidence}
+                </pre>
+              )}
+            </section>
+          )}
 
           {/* Cross-scan history. The ledger (finding_occurrences) is the source
               of truth; we show the lifespan as a vertical timeline so the

@@ -215,6 +215,89 @@ export interface Finding {
    * can see why and override.
    */
   auto_dismiss_reason?: AutoDismissReason | null;
+
+  // ============== ENGINE-SIDE SIGNALS (migration 024) ==============
+  // Populated when the worker reads the engine's vulnerabilities.json
+  // (ClatTribe/strix PR #137 + #142). Null on findings ingested via the
+  // legacy markdown path or from older Strix versions. Per the doctrine,
+  // the UI prefers these over wrapper-side derivations when present.
+
+  /** Semantic category from the engine's enum: `info_disclosure`, `dns_security`,
+   *  `email_security`, `sqli`, `xss`, `ssrf`, `secret_leak`, etc. */
+  category?: string | null;
+  /** Plain-language description for non-tech readers (160-ish chars). */
+  description_plain?: string | null;
+  /** One-sentence concrete next action. */
+  recommended_action?: string | null;
+  /** Engine's user-time-aware priority: `fix_now` / `fix_soon` / `monitor`
+   *  / `informational` / `low_priority`. Distinct from our wrapper-side
+   *  `ai_assessment.urgency`. */
+  priority_label?: string | null;
+  /** `verified` / `pattern_match` / `inconclusive` / `could_not_verify`. */
+  verification_status?: string | null;
+  /** 0.0–1.0 engine confidence. */
+  confidence?: number | null;
+  /** Cross-run dedup key (SHA-256 over reasoning_trace + kill_chain + target_state). */
+  reproducibility_token?: string | null;
+  fingerprint_version?: number | null;
+  /** Cross-tool dedup canonical flag (engine PR #98). UI hides non-canonical by default. */
+  is_canonical?: boolean | null;
+  /** "Why this is exploitable" bullets (≤20 × 320 chars). Engine PR #137. */
+  reasoning_trace?: string[] | null;
+  /** Alternative-explanation block — auditor-grade trust signal. Engine PR #137. */
+  counter_proof?: { description?: string; evidence?: string } | null;
+  /** Multi-step kill chain. Each step has step_number, type (one of 7 enum
+   *  values), description, optional tool + evidence. Engine PR #36. */
+  kill_chain?: KillChainPayload | null;
+  /** Mapping of compliance frameworks → control IDs implicated by this finding.
+   *  Engine PR #103. */
+  compliance_controls?: ComplianceControls | null;
+  /** `pii` / `phi` / `pci` / `credentials` / `internal` / null. */
+  data_classification?: string | null;
+  /** MITRE ATT&CK technique IDs. */
+  mitre_attack?: string[] | null;
+  owasp_top_10?: string | null;
+  owasp_api_top_10?: string | null;
+  /** Full features block from RLHF Phase 1 (engine PR #142). */
+  features?: Record<string, unknown> | null;
+  /** Engine-side auto-dismiss (driven by feedback.jsonl prior FP). Distinct
+   *  from wrapper-side `dismissed_by_ai` (KNN-driven). */
+  engine_auto_dismissed?: boolean | null;
+  engine_auto_dismissal_reason?: string | null;
+  severity_pre_auto_dismissal?: string | null;
+  prior_label_attribution?: PriorLabelAttribution | null;
+}
+
+export interface KillChainPayload {
+  step_count?: number;
+  chain?: KillChainStepEngine[];
+}
+
+export interface KillChainStepEngine {
+  step_number: number;
+  type: 'recon' | 'discovery' | 'exploitation' | 'escalation' | 'lateral_movement' | 'impact' | 'validation';
+  description: string;
+  tool?: string;
+  evidence?: string;
+}
+
+export interface ComplianceControls {
+  soc2?: string[];
+  pci_dss?: string[];
+  hipaa?: string[];
+  gdpr?: string[];
+  iso_27001?: string[];
+  nist_800_53?: string[];
+  owasp?: string[];
+}
+
+export interface PriorLabelAttribution {
+  verdict: string;
+  fp_reason?: string;
+  labeler: { id: string; role?: string };
+  labeled_at: string;
+  label_id: string;
+  scan_run_id: string;
 }
 
 export interface AutoDismissReason {
