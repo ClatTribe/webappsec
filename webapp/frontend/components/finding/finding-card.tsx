@@ -23,6 +23,7 @@ import type {
   FindingStatus,
   KillChainResponse,
   KillChainStep,
+  KillChainStepEngine,
   TriageHistory,
   TriagePrediction,
 } from '@/lib/supabase/types';
@@ -33,6 +34,7 @@ import {
   SEVERITY_THEME,
   STATUS_THEME,
   URGENCY_THEME,
+  getCategoryTheme,
 } from '@/lib/finding-theme';
 
 // FindingCard — collapsed-state design follows a single-signal rule:
@@ -153,19 +155,21 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   // FP — confirm?" suggestion banner. Lazy-fetched alongside the history.
   const [prediction, setPrediction] = useState<TriagePrediction | null>(null);
   const [predictionLoaded, setPredictionLoaded] = useState(false);
-  // Heuristic kill-chain timeline — pillar 1 item 2. Lazy-fetched so the
-  // collapsed-state findings list query stays cheap. We label this as
-  // "approximate" in the UI because the underlying RPC uses a time-window
-  // heuristic until the upstream P4 ask (agent_id on every tool event)
-  // makes it deterministic.
+  // Kill-chain timeline. The engine's deterministic version lives directly
+  // on `finding.kill_chain` (PR #42 ingest path); when it's null we fall
+  // back to the heuristic via `kill_chain_for_finding` RPC. The
+  // heuristic-fetch is gated behind absence of engine data so we don't
+  // make a needless round-trip when the engine already populated it.
+  const engineKillChain = finding.kill_chain ?? null;
   const [killChain, setKillChain] = useState<KillChainResponse | null>(null);
-  const [killChainLoaded, setKillChainLoaded] = useState(false);
+  const [killChainLoaded, setKillChainLoaded] = useState(!!engineKillChain);
   useEffect(() => {
     if (!expanded || (triageHistoryLoaded && predictionLoaded && killChainLoaded)) return;
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      // Fire all three RPCs in parallel — they're independent.
+      // Skip the heuristic kill_chain RPC when engine data is already present.
+      const fetchHeuristicKillChain = !killChainLoaded && !engineKillChain;
       const [historyRes, predRes, chainRes] = await Promise.all([
         triageHistoryLoaded
           ? Promise.resolve({ data: triageHistory })
@@ -173,9 +177,9 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
         predictionLoaded
           ? Promise.resolve({ data: prediction })
           : supabase.rpc('predict_triage_for_finding', { p_finding_id: finding.id }),
-        killChainLoaded
-          ? Promise.resolve({ data: killChain })
-          : supabase.rpc('kill_chain_for_finding', { p_finding_id: finding.id }),
+        fetchHeuristicKillChain
+          ? supabase.rpc('kill_chain_for_finding', { p_finding_id: finding.id })
+          : Promise.resolve({ data: null }),
       ]);
       if (cancelled) return;
       if (!triageHistoryLoaded) {
@@ -509,14 +513,19 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 </span>
               </span>
             )}
-            {finding.category && (
-              <span
-                className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-neutral-400"
-                title="Engine category (PR #137)."
-              >
-                {finding.category.replace(/_/g, ' ')}
-              </span>
-            )}
+            {finding.category && (() => {
+              const cat = getCategoryTheme(finding.category);
+              const CatIcon = cat.Icon;
+              return (
+                <span
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium ring-1 ${cat.pill}`}
+                  title={`Engine category: ${finding.category}`}
+                >
+                  <CatIcon className="h-3 w-3" strokeWidth={2.5} />
+                  {cat.label}
+                </span>
+              );
+            })()}
             {finding.cvss != null && (
               <span className="font-mono">
                 <span className="text-neutral-600">CVSS</span>{' '}
@@ -784,9 +793,16 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               construction: same-scan events in the 5-minute window before
               `finding.created`, optionally filtered to the agent that
               filed the report. Hidden when the RPC returns no steps. */}
-          {killChain && killChain.steps.length > 0 && (
+          {/* Engine's deterministic kill chain (PR #36 / migration 024).
+              The 7-value `type` enum tells us exactly what each step
+              accomplished — no heuristic needed. Fall back to the
+              wrapper-side time-window heuristic when the engine didn't
+              attach a chain (single-step pattern matches). */}
+          {engineKillChain && engineKillChain.chain && engineKillChain.chain.length > 0 ? (
+            <EngineKillChainSection chain={engineKillChain} />
+          ) : killChain && killChain.steps.length > 0 ? (
             <KillChainSection chain={killChain} />
-          )}
+          ) : null}
 
           {sections.length === 0 && finding.description_md && (
             <Markdown body={finding.description_md} />
@@ -1025,6 +1041,80 @@ function killChainStepLabel(step: KillChainStep): {
     label: KILL_CHAIN_TOOL_LABELS[toolName] ?? toolName,
     surface,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Engine-deterministic kill chain (engine PR #36; lives on findings.kill_chain
+// JSONB after migration 024 + PR #42 ingest). Renders the structured
+// `chain[]` with per-step type-icon mapping. Distinct from the heuristic
+// `KillChainSection` below (which assembles a fuzzy timeline from scan_events
+// when the engine didn't attach a structured chain).
+// ---------------------------------------------------------------------------
+
+const ENGINE_KILL_CHAIN_TYPE: Record<
+  KillChainStepEngine['type'],
+  { label: string; dot: string; icon: string }
+> = {
+  recon:             { label: 'Recon',             dot: 'bg-cyan-400',    icon: '🔍' },
+  discovery:         { label: 'Discovery',         dot: 'bg-blue-400',    icon: '📋' },
+  exploitation:      { label: 'Exploitation',      dot: 'bg-orange-400',  icon: '💥' },
+  escalation:        { label: 'Escalation',        dot: 'bg-rose-400',    icon: '🔐' },
+  lateral_movement:  { label: 'Lateral movement',  dot: 'bg-rose-400',    icon: '🔀' },
+  impact:            { label: 'Impact',            dot: 'bg-rose-500',    icon: '☠️' },
+  validation:        { label: 'Validation',        dot: 'bg-emerald-400', icon: '✓' },
+};
+
+function EngineKillChainSection({ chain }: { chain: { step_count?: number; chain?: KillChainStepEngine[] } }) {
+  const steps = chain.chain ?? [];
+  return (
+    <section className="rounded-lg border border-violet-500/15 bg-violet-500/[0.03] p-4">
+      <div className="mb-2.5 flex items-center gap-2">
+        <Footprints className="h-3.5 w-3.5 text-violet-300" strokeWidth={2.25} />
+        <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+          How the agent reached this
+        </h4>
+        <span
+          className="text-[10.5px] text-neutral-500"
+          title="Engine-emitted deterministic kill chain (PR #36)."
+        >
+          {steps.length} step{steps.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <ol className="space-y-2.5">
+        {steps.map((step, i) => {
+          const meta = ENGINE_KILL_CHAIN_TYPE[step.type] ?? {
+            label: step.type, dot: 'bg-neutral-500', icon: '·',
+          };
+          return (
+            <li key={`${step.step_number}-${i}`} className="flex items-start gap-3">
+              <span className="mt-0.5 inline-block w-5 flex-shrink-0 text-right font-mono text-[11px] text-neutral-600">
+                {step.step_number}.
+              </span>
+              <span className={`mt-1.5 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${meta.dot}`} />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex flex-wrap items-baseline gap-x-2 text-[12.5px] leading-relaxed">
+                  <span className="text-[10.5px] font-medium uppercase tracking-wider text-violet-200">
+                    {meta.label}
+                  </span>
+                  <span className="text-neutral-200">{step.description}</span>
+                </div>
+                {(step.tool || step.evidence) && (
+                  <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-neutral-500">
+                    {step.tool && <span className="font-mono text-amber-300/80">{step.tool}</span>}
+                    {step.evidence && (
+                      <span className="min-w-0 flex-1 truncate font-mono text-neutral-400">
+                        {step.evidence}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 }
 
 function KillChainSection({ chain }: { chain: KillChainResponse }) {

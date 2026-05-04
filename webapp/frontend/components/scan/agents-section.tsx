@@ -25,6 +25,11 @@ interface AgentSummary {
   task: string;
   status: 'running' | 'completed' | 'failed' | 'unknown';
   toolCalls: Array<{ tool_name: string; surface: string | null; ts: string }>;
+  /** Engine-deterministic role tag from `agent.created.payload.category`
+   *  (engine PR #33). One of `auth-attacker`, `webapp-attacker`,
+   *  `sqli-validator`, `xss-specialist`, `ssrf-scanner`, `webapp-recon`,
+   *  etc. When set, the UI uses this directly and skips the heuristic. */
+  engineCategory: string | null;
 }
 
 const TERMINAL_DONE = new Set(['completed', 'finished']);
@@ -37,7 +42,7 @@ function shapeAsObject(x: unknown): Record<string, unknown> {
 function deriveAgents(events: ScanEvent[]): AgentSummary[] {
   const map = new Map<string, AgentSummary>();
 
-  const ensure = (id: string, name?: string, task?: string): AgentSummary => {
+  const ensure = (id: string, name?: string, task?: string, engineCategory?: string): AgentSummary => {
     let a = map.get(id);
     if (!a) {
       a = {
@@ -46,11 +51,13 @@ function deriveAgents(events: ScanEvent[]): AgentSummary[] {
         task: task ?? '',
         status: 'unknown',
         toolCalls: [],
+        engineCategory: engineCategory ?? null,
       };
       map.set(id, a);
     } else {
       if (name && name.trim() && a.name === a.id) a.name = name;
       if (task && !a.task) a.task = task;
+      if (engineCategory && !a.engineCategory) a.engineCategory = engineCategory;
     }
     return a;
   };
@@ -66,10 +73,18 @@ function deriveAgents(events: ScanEvent[]): AgentSummary[] {
         (actor.agent_id as string | undefined) ??
         (payload.agent_id as string | undefined);
       if (!id) continue;
+      // Engine PR #33: agent.created.payload.category — deterministic role
+      // tag like `auth-attacker`, `ssrf-scanner`. Wrapper-side heuristic
+      // (`inferAgentCategory` below) is the fallback when this is null.
+      const engineCategory =
+        (innerPayload.category as string | undefined) ??
+        (payload.category as string | undefined) ??
+        (actor.agent_category as string | undefined);
       const a = ensure(
         id,
         actor.agent_name as string | undefined,
         innerPayload.task as string | undefined,
+        engineCategory,
       );
       if (a.status === 'unknown') a.status = 'running';
     } else if (ev.event_type === 'agent.status.updated') {
@@ -194,6 +209,32 @@ const SSRF_HOST_HINTS = [
   '.local', '.lan',
 ];
 const AUTH_PATH_HINTS = ['/login', '/signin', '/signup', '/register', '/auth/', '/oauth/', '/sso/', '/saml/', '/.well-known/'];
+
+// Map the engine's hyphenated role tags (PR #33) to our six-bucket
+// AgentCategory. The engine emits a longer enum than ours; values we don't
+// have a bucket for return null, and the chip renders the raw string.
+const ENGINE_AGENT_CATEGORY_MAP: Record<string, AgentCategory> = {
+  'webapp-recon': 'recon',
+  'recon': 'recon',
+  'subdomain-recon': 'recon',
+  'dns-recon': 'recon',
+  'auth-attacker': 'auth',
+  'auth': 'auth',
+  'sqli-validator': 'injection',
+  'injection': 'injection',
+  'xss-specialist': 'injection',
+  'cmd-injection': 'injection',
+  'ssrf-scanner': 'ssrf',
+  'ssrf': 'ssrf',
+  'webapp-attacker': 'web_app',
+  'webapp': 'web_app',
+  'code-audit': 'code_audit',
+  'static-analysis': 'code_audit',
+};
+
+function mapEngineAgentCategory(raw: string): AgentCategory | null {
+  return ENGINE_AGENT_CATEGORY_MAP[raw.toLowerCase()] ?? null;
+}
 
 function inferAgentCategory(agent: AgentSummary): AgentCategory | null {
   // Skip agents with too few signals — categorising 1–2 calls is mostly
@@ -326,8 +367,25 @@ export default function AgentsSection({
             const isOpen = expanded.has(agent.id);
             const pill = STATUS_PILL[agent.status];
             const PillIcon = pill.Icon;
-            const category = inferAgentCategory(agent);
+            // Engine signal first (PR #33 deterministic role tag), heuristic
+            // as fallback. Engine emits hyphenated lowercase strings like
+            // `auth-attacker`; we map a few common ones to the same
+            // CATEGORY_META that the heuristic uses, then fall back to
+            // displaying the raw engine string when we don't have a mapping.
+            const engineCategoryRaw = agent.engineCategory;
+            const engineCategoryMapped = engineCategoryRaw
+              ? mapEngineAgentCategory(engineCategoryRaw)
+              : null;
+            const category = engineCategoryMapped ?? inferAgentCategory(agent);
+            const isFromEngine = engineCategoryRaw !== null;
             const categoryMeta = category ? CATEGORY_META[category] : null;
+            // For engine strings we don't have a mapping for, render the raw
+            // string with a generic chip styling so the user still sees the
+            // role (e.g. `xss-specialist` even though we don't have a custom icon).
+            const fallbackEngineLabel =
+              !categoryMeta && engineCategoryRaw
+                ? engineCategoryRaw.replace(/-/g, ' ')
+                : null;
             const CategoryIcon = categoryMeta?.Icon;
             return (
               <div
@@ -359,10 +417,22 @@ export default function AgentsSection({
                       {categoryMeta && CategoryIcon && (
                         <span
                           className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider ring-1 ${categoryMeta.cls}`}
-                          title="Inferred from this agent's tool-call pattern. Heuristic — not a strict label."
+                          title={
+                            isFromEngine
+                              ? `Engine-emitted role tag: ${engineCategoryRaw}`
+                              : "Inferred from this agent's tool-call pattern. Heuristic — not a strict label."
+                          }
                         >
                           <CategoryIcon className="h-3 w-3" strokeWidth={2.5} />
                           {categoryMeta.label}
+                        </span>
+                      )}
+                      {!categoryMeta && fallbackEngineLabel && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md bg-neutral-800/80 px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-300 ring-1 ring-neutral-700/60"
+                          title={`Engine role tag: ${engineCategoryRaw}`}
+                        >
+                          {fallbackEngineLabel}
                         </span>
                       )}
                       <span
