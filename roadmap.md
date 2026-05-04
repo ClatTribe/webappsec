@@ -551,4 +551,112 @@ Reverse-chronological log.
 
 ---
 
+## 19. ClatTribe/strix integration backlog (wrapper-wishlist gap-closure)
+
+The fork at [`ClatTribe/strix`](https://github.com/ClatTribe/strix) ships a substantially richer engine than upstream. [`wrapper-wishlist.md`](wrapper-wishlist.md) (16 sections, written *by* the engine team *for* this wrapper) catalogues every integration gap. [`usage.md`](usage.md) is the operating manual. **Most of the engine's structured signals are not yet consumed here** — we re-derive them with wrapper-side heuristics. Per the doctrine in [`Architecture.md` §1.1](Architecture.md#11-design-principles), the engine's deterministic signal should be the primary input; wrapper heuristics should be fallbacks.
+
+The catalog below is grouped by tier. Tier 0 is ops; tier 1 is "read what the engine writes"; tier 2 is "close the FP feedback loop"; tier 3+ is feature surface area.
+
+### 19.0 Tier 0 — ops (gates everything)
+
+| | Item | Why | Effort |
+|---|---|---|---|
+| ⬜ | **Rebuild sandbox image from the fork.** [`wrapper-wishlist.md` §6](wrapper-wishlist.md#6-required-rebuild-the-sandbox-image). Fork registers 8 new recon tools (`subdomain_enum`, `discover_cloud_assets`, `reverse_ip_discovery`, `code_search_for_domain`, `mx_fingerprint`, `subdomain_takeover_check`, `saas_leak_discovery`, `domain_recon_pipeline`, `spawn_webapp_subteam`) with `sandbox_execution=True`. Without the rebuild, the agent inside the container sees "tool not found" for everything new. | Without this, every Tier 1+ item is silently degraded — no findings can land that depend on the new tools. | XS (ops) |
+
+### 19.1 Tier 1 — Read what the engine already writes
+
+This tier is the **integration contract closure**. ~12 dev-days for the whole tier per the wishlist's own §7 estimate. Each item below is independently shippable.
+
+| | Item | Engine signal | Where in webappsec |
+|---|---|---|---|
+| ⬜ | **Read `vulnerabilities.json` directly** instead of parsing per-vuln markdown. Unlocks `confidence`, `reasoning_trace`, `counter_proof`, `reproducibility_token`, `category`, `priority_label`, `verification_status`, `description_plain`, `recommended_action`, `compliance_controls`, `data_classification`, `mitre_attack`, `owasp_top_10`, `owasp_api_top_10`, `is_canonical`, `features` — **the entire §15.3 + §10 quality surface in one ingest-side change**. Highest leverage single PR in the entire backlog. | [`wrapper-wishlist.md` §15.3](wrapper-wishlist.md#153-finding-quality-signals-engine-137); [engine PR #137](https://github.com/ClatTribe/strix/pull/137); [`usage.md` §2.3](usage.md#23-reading-vulnerabilitiesjson-the-finding-stream). | [`runner.py`](webapp/worker/src/strix_worker/runner.py) `_ingest_finding`; new schema columns; preserved markdown parser as fallback for older engines. | M |
+| ⬜ | **Read `run_summary.json`** at scan finalize. Replace our wrapper-side LLM scan-summary call with the engine-authored one (richer + cheaper). Engine writes `summary_text`, `findings_summary.by_severity`, `findings_summary.by_category`, `top_findings[]`, `checks` totals, `duration_seconds`. Wrapper LLM call stays as fallback. | [§2.1](wrapper-wishlist.md#21-run_summaryjson-31); [engine PR #31](https://github.com/ClatTribe/strix/pull/31). | [`summary.py`](webapp/worker/src/strix_worker/summary.py) ingest path; `scans.summary` column persists the engine doc directly. | S |
+| ⬜ | **Consume `target.started` / `target.completed` events** for per-target progress chips on the scan page. Closes the "blank dashboard until first finding" gap with `run.test_plan` (below). | [§3.1](wrapper-wishlist.md#31-targetstarted--targetcompleted-32); [engine PR #32](https://github.com/ClatTribe/strix/pull/32). | New chip-row component on `scans/[id]/page.tsx` reading from `scan_events`. | S |
+| ⬜ | **Consume `run.test_plan` event** to render a checklist of planned categories before findings exist. Tick off as `check.completed` events arrive. | [§3.2](wrapper-wishlist.md#32-runtest_plan-35); [engine PR #35](https://github.com/ClatTribe/strix/pull/35). | New TestPlan component on the scan page. | S |
+| ⬜ | **Consume `agent.created.payload.category`** instead of running our heuristic. PR #39 ships the heuristic (`auth-attacker` / `webapp-recon` / etc.); the engine's deterministic field has the same enum and should be preferred. Heuristic stays as fallback. | [§3.4](wrapper-wishlist.md#34-agentcreatedpayloadcategory-33); [engine PR #33](https://github.com/ClatTribe/strix/pull/33). | [`agents-section.tsx`](webapp/frontend/components/scan/agents-section.tsx) `inferAgentCategory` becomes fallback only. | XS |
+| ⬜ | **Consume `finding.kill_chain` events** instead of running our 5-minute time-window heuristic (PR #39). Engine emits ordered `chain[]` with explicit `step_number` / `type` (recon / discovery / exploitation / escalation / lateral_movement / impact / validation) / description / tool / evidence. | [§3.5](wrapper-wishlist.md#35-findingkill_chain-36); [engine PR #36](https://github.com/ClatTribe/strix/pull/36). | New `findings.kill_chain` JSONB column populated from the event; `KillChainSection` reads it directly when present, falls back to RPC. | S |
+| ⬜ | **Wire new finding categories**: `email_security`, `dns_security`, `secret_leak`, `vulnerable_dependency`, `authentication_bypass` (plus expanded `info_disclosure`, `subdomain_takeover`). Without this, new findings render as raw CWE / "Other". | [§4](wrapper-wishlist.md#4-new-finding-categories-to-map). | New tokens in [`finding-theme.ts`](webapp/frontend/lib/finding-theme.ts) (icon + label + colour per category). | S |
+| ⬜ | **Add API-key fields to org settings**: `STRIX_GITHUB_TOKEN`, `STRIX_BING_KEY`, `STRIX_SECURITYTRAILS_KEY`, `STRIX_VIRUSTOTAL_KEY`, `STRIX_VIEWDNS_KEY`. Worker already forwards `STRIX_*` env into the sandbox; needs UI + Vault encryption. Each unlocks coverage: code-search recon, SaaS-leak discovery, passive DNS history. | [§5](wrapper-wishlist.md#5-new-api-keys-to-surface-in-org-settings). | New section in [`settings-client.tsx`](webapp/frontend/app/(app)/settings/settings-client.tsx). | M |
+| ⬜ | **`--dns-only` UI toggle** on new-scan form for `domain` targets. Surface "Passive recon mode" badge from `surface_map.json.dns_only`. | [§1.3](wrapper-wishlist.md#13-new-cli-flag---dns-only-30); [engine PR #30](https://github.com/ClatTribe/strix/pull/30). | New-scan form + scan-page badge. | XS |
+| ⬜ | **`--preflight` failure UX.** Distinguish preflight-fail exit (DNS doesn't resolve / no port answers) from real scan failure. Surface the diagnostic panel on the scan page. | [§1.1](wrapper-wishlist.md#11---preflight-defaults-on-29); [engine PR #29](https://github.com/ClatTribe/strix/pull/29). | Worker exit-code interpretation; scan page `error_message` rendering. | XS |
+
+### 19.2 Tier 2 — Close the FP feedback loop (RLHF Phase 1)
+
+After Tier 1, the engine and wrapper become a *closed loop*. **Until this lands, every triage decision the user makes is invisible to the engine** — the next scan re-emits the same FPs.
+
+| | Item | Engine signal | Where in webappsec |
+|---|---|---|---|
+| ⬜ | **Write `feedback.jsonl`** when users triage findings via the FindingCard. One JSONL line per triage action with `{verdict, fp_reason, finding_fingerprint, labeler, labeled_at, scan_run_id, label_id}`. Persist at `~/.strix/feedback.jsonl` (cumulative cross-run) **and** `<run_dir>/feedback.jsonl` (per-scan); engine reads both. Pass `--feedback-from $PATH` on next scan launch. | [§15.1](wrapper-wishlist.md#151-closed-fp-feedback-loop-engine-142); [engine PR #142](https://github.com/ClatTribe/strix/pull/142); [`usage.md` §4](usage.md#4-wrapper-side-writeback--closing-the-fp-loop). | New writer module; integration in `setStatus` flow on FindingCard; per-org file in worker volume mount. | M |
+| ⬜ | **Render `finding.auto_dismissed` events** with `prior_label_attribution` ("alice@example.com marked an identical finding `framework_default_blocked` on 2026-04-15"). Slate banner + "Force-show / Re-promote" button that writes `verdict=tp` back to feedback.jsonl. Distinct from our wrapper-side `dismissed_by_ai` (which is KNN-driven); engine's auto-dismiss is fingerprint-precedent-driven. | [§15.1](wrapper-wishlist.md#151-closed-fp-feedback-loop-engine-142); [engine PR #142](https://github.com/ClatTribe/strix/pull/142). | New status value `dismissed_by_engine` (or extend existing `dismissed_by_ai`) + banner in FindingCard. | M |
+| ⬜ | **`STRIX_FP_AUTO_DISMISS` policy switcher in org settings.** `conservative` / `aggressive` / `off`. Today the engine defaults to `conservative` whether or not we expose it. | [§15.1](wrapper-wishlist.md#151-closed-fp-feedback-loop-engine-142); [`usage.md` §4.4](usage.md#44-auto-dismiss-policy-gate). | Settings page section. | XS |
+| ⬜ | **Reasoning trail viewer powered by `trajectory.jsonl`** per finding. Per-finding "How did the engine arrive at this?" panel showing the agent's tool calls, dismissed alternatives (with reasons), iteration count, time-to-emit. | [§15.1](wrapper-wishlist.md#151-closed-fp-feedback-loop-engine-142); [engine PR #142](https://github.com/ClatTribe/strix/pull/142). | Worker reads `trajectory.jsonl`; new column `findings.trajectory` JSONB; UI lazy-render on card expand. | M |
+
+### 19.3 Tier 3 — Provenance + hypothesis live view
+
+| | Item | Engine signal | Where |
+|---|---|---|---|
+| ⬜ | **Render `actor.provenance` badges on every tool call.** Coloured pip from the 6-value enum (`trusted_source` / `intel_feed` / `target` / `operator_input` / `framework` / `mixed`). Biggest single trust signal in a security tool — turns the live activity feed into a trust-boundary map. | [§15.5](wrapper-wishlist.md#155-tool-output-provenance--trust-taint-engine-139); [engine PR #139](https://github.com/ClatTribe/strix/pull/139). | `behind-the-scenes.tsx` event row decoration. | S |
+| ⬜ | **Active-hypothesis live pane.** Per scan, render the rolling list of open hypotheses with status (`open` / `confirmed` / `dismissed`), surface, category, originating agent. Polls `active_hypotheses.jsonl` or consumes `hypothesis.opened/confirmed/dismissed` events. The "watching a senior pen-tester work" view. | [§15.4](wrapper-wishlist.md#154-active-hypothesis--agent-self-audit-engine-138--140); [engine PRs #138](https://github.com/ClatTribe/strix/pull/138) + [#140](https://github.com/ClatTribe/strix/pull/140). | New `HypothesisPane` on scan page. | M |
+| ⬜ | **Per-phase coverage receipt.** After each phase ends, the `agent.self_audit` event lists `categories_covered`. Render as a coverage receipt: "✅ Phase 1 (recon) — covered: subdomain_enum, dns_hygiene…". Phase-skip auditor warning when a canonical phase is silently skipped. | [§15.4](wrapper-wishlist.md#154-active-hypothesis--agent-self-audit-engine-138--140); [engine PR #140](https://github.com/ClatTribe/strix/pull/140). | Per-phase progress card on scan page; appended to scan summary. | S |
+| ⬜ | **Indirect-prompt-injection alert** when a downstream tool consumes output from an upstream `target`-provenance tool. Pairs with future engine #84 sanitisation. | [§15.5](wrapper-wishlist.md#155-tool-output-provenance--trust-taint-engine-139); [engine PR #139](https://github.com/ClatTribe/strix/pull/139). | Live-activity pane alert. | M |
+
+### 19.4 Tier 4 — Compliance / GRC / B2B surface (engine §14)
+
+Largest commercial surface area. Engine has shipped extensive compliance artifacts; wrapper has rendered none of them.
+
+| | Item | Engine signal | Where |
+|---|---|---|---|
+| ⬜ | **Compliance evidence pack via `--compliance-pack <tmp>`.** Engine writes 8-file auditor bundle; wrapper zips and serves as `<customer>-<scan-date>-<run_id>.zip`. **Single biggest B2B-sale unlock.** | [§14.4](wrapper-wishlist.md#144-compliance-evidence-pack-engine-129); [engine PR #129](https://github.com/ClatTribe/strix/pull/129). | New scan-page action; download pipeline. | M |
+| ⬜ | **Vendor-risk score gauge** on every target. `vendor_risk` lands in `run_meta.json` regardless of `--vendor-mode` (always shown). Big numeric gauge (0-100) with colour-coded band; hover reveals top 3 deduction categories. | [§14.8](wrapper-wishlist.md#148-vendor-risk-score-engine-133); [engine PR #133](https://github.com/ClatTribe/strix/pull/133). | Per-target dashboard hero widget. | S |
+| ⬜ | **SBOM viewer + diff.** Render `sbom.cdx.json` as a sortable table; diff across runs to surface "package added / version changed / vulnerable component appeared". CycloneDX 1.5 export download. | [§14.6](wrapper-wishlist.md#146-sbom-engine-131); [engine PR #131](https://github.com/ClatTribe/strix/pull/131). | New SBOM tab. | M |
+| ⬜ | **MFA-posture badge** per target with hover-breakdown of the 4-point score (login_tokens / challenge_keys / webauthn_header / mfa_setup_paths). Auditor-attestation widget. | [§14.7](wrapper-wishlist.md#147-mfa-attestation-engine-132); [engine PR #132](https://github.com/ClatTribe/strix/pull/132). | Per-target dashboard badge. | S |
+| ⬜ | **Compliance overlay panel** with toggle (PCI / SOC2 / HIPAA / ISO 27001 / NIST 800-53). Findings grouped by control. Pulls from `compliance_controls` field on each finding (already in `vulnerabilities.json` once Tier 1.3 lands). | [§14.4](wrapper-wishlist.md#144-compliance-evidence-pack-engine-129) + [§10](wrapper-wishlist.md#10-zero-fp-rendering--surface-the-engines-deterministic-signals). | Top-level dashboard tab; per-finding section. | M |
+| ⬜ | **Audit-trail verification UI.** Operator pastes/uploads `events.jsonl` + `run.signature.json` + signing key; wrapper verifies chain integrity + signature against the chain terminal hash. Surfaces tampering with line-level diff. | [§14.2](wrapper-wishlist.md#142-cryptographically-signed-audit-trail-engine-127); [engine PR #127](https://github.com/ClatTribe/strix/pull/127). | New verification page. | M |
+| ⬜ | **Legal-document compliance card** per target (privacy / cookie / terms / DPA / imprint / accessibility presence). | [§14.1](wrapper-wishlist.md#141-legal-document-presence-engine-126); [engine PR #126](https://github.com/ClatTribe/strix/pull/126). | Per-target compliance dashboard. | S |
+| ⬜ | **Monitoring-posture gauge.** 6-point logging/monitoring score per target. CSP-with-report-uri auto-generator when `csp_reporting` is missing. | [§14.3](wrapper-wishlist.md#143-logging--monitoring-posture-engine-128); [engine PR #128](https://github.com/ClatTribe/strix/pull/128). | Per-target widget. | M |
+| ⬜ | **GRC SaaS one-click upload.** Operator picks Vanta / Drata / Hyperproof / Secureframe / ServiceNow; wrapper calls strix with `--export-format <platform>`, POSTs to platform's import endpoint. | [§14.5](wrapper-wishlist.md#145-grc-saas-exports-engine-130); [engine PR #130](https://github.com/ClatTribe/strix/pull/130). | Wrapper integration layer per platform. | M |
+
+### 19.5 Tier 5 — CLI flags + ergonomics
+
+Small UI affordances for engine flags that already exist.
+
+| | Item | Engine signal | Effort |
+|---|---|---|---|
+| ⬜ | **Branch picker on repository scan.** UI dropdown listing branches; `--branch <ref>` plumbed through. | [§13.3](wrapper-wishlist.md#133-cli--operator-ergonomics-engine-117-121-123-124); [engine PR #117](https://github.com/ClatTribe/strix/pull/117). | XS |
+| ⬜ | **CIDR target preview.** When operator types CIDR, preview host count BEFORE submission ("/24 = 256 hosts"). | [§13.3](wrapper-wishlist.md#133-cli--operator-ergonomics-engine-117-121-123-124); [engine PR #124](https://github.com/ClatTribe/strix/pull/124). | XS |
+| ⬜ | **`--quiet` / CI mode preset** with copy-pasteable GitHub Actions / GitLab CI snippet generator. | [§13.3](wrapper-wishlist.md#133-cli--operator-ergonomics-engine-117-121-123-124); [engine PR #121](https://github.com/ClatTribe/strix/pull/121). | S |
+| ⬜ | **"Recon nightly, scan daily" workflow template.** `--surface-map-only` cron + targeted scans against discovered surface daily. | [§13.3](wrapper-wishlist.md#133-cli--operator-ergonomics-engine-117-121-123-124); [engine PR #123](https://github.com/ClatTribe/strix/pull/123). | M |
+| ⬜ | **Cancel button → SIGTERM.** Trust the engine's `run.cancelled` event + 143 exit. Status card flips to "cancelled" with no half-written state. | [§13.1](wrapper-wishlist.md#131-resilience--cost-gating-engine-112-113-114); [engine PR #114](https://github.com/ClatTribe/strix/pull/114). | S |
+| ⬜ | **Live "upstream rate-limited" banner** on `llm.retry_attempted` events. Auto-dismiss on next `llm.request.completed`. | [§13.1](wrapper-wishlist.md#131-resilience--cost-gating-engine-112-113-114); [engine PR #112](https://github.com/ClatTribe/strix/pull/112). | S |
+| ⬜ | **Cost-cap configurator** with per-target/per-org budget. `--max-cost` / `--max-input-tokens` propagation; `run.terminated{reason: "budget_exceeded"}` rendering. | [§13.1](wrapper-wishlist.md#131-resilience--cost-gating-engine-112-113-114); [engine PR #113](https://github.com/ClatTribe/strix/pull/113). | M |
+| ⬜ | **HAR / Burp upload UI.** Drag-drop `.har` / `.xml`, upload into the engine container, trigger `ingest_har_file` / `ingest_burp_file`. Coverage-uplift summary post-ingest. **Most pen-tests start with a Burp recording** — this is the on-ramp. | [§15.2](wrapper-wishlist.md#152-har--burp-project-ingestion-engine-141); [engine PR #141](https://github.com/ClatTribe/strix/pull/141). | M |
+
+### 19.6 Tier 6 — Big product features (mostly from `overall.md` analysis)
+
+Deferred until Tiers 0–5 are stable. These are "next product cycle", not "wrapper-engine integration".
+
+| | Item | Wishlist ref | Effort |
+|---|---|---|---|
+| ⬜ | **Pre-scan profile selector.** "External recon" / "Web pentest" / "API audit" / "Compliance scan" / "Deep scan". Maps to scan_mode + tool subsets. | [§9.1](wrapper-wishlist.md#91-configuration-ux) | M |
+| ⬜ | **Daily-scan workflow** with `kev_diff_check` (#75) findings surfaced as the daily highlight. | [§9.1](wrapper-wishlist.md#91-configuration-ux) | M |
+| ⬜ | **OODA loop visualisation** of `phase.entered` / `phase.completed` events. | [§9.2](wrapper-wishlist.md#92-live-scan-ux-during-the-run) | M |
+| ⬜ | **Tool-call ATT&CK chain visualisation** from `actor.mitre_techniques` (engine #66). | [§9.2](wrapper-wishlist.md#92-live-scan-ux-during-the-run) | M |
+| ⬜ | **Cross-scan diff** (new / fixed / regressions) — wrapper as vuln-tracking system, not just scan runner. | [§9.3](wrapper-wishlist.md#93-report-ux-post-scan) | M |
+| ⬜ | **Fix-verify targeted rescan.** "I fixed CVE-X; rescan only that endpoint." Uses `--seed-url` + `--scope-mode diff`. | [§9.3](wrapper-wishlist.md#93-report-ux-post-scan) | S |
+| ⬜ | **Plain-language Q&A on the scan.** RAG over `events.jsonl` + `vulnerabilities.json`. | [§9.4](wrapper-wishlist.md#94-wrapper-side-ai-features-built-on-top-of-engine-output) | L |
+| ⬜ | **Customer threat-model overlay.** User pins endpoints as "auth path" / "billing path"; wrapper boosts engine's reachability score. | [§11](wrapper-wishlist.md#11-wrapper-side-complements-to-engine-zero-fp-detectors) | M |
+| ⬜ | **Auto-PR / Jira / Linear integrations.** GitHub PR from a finding when engine has a suggested patch (engine §15 auto-remediation). | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | M |
+| ⬜ | **SIEM push integration.** Beyond Sigma rule export — push findings as native events to Splunk HEC / Elastic / Sentinel. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | M |
+| ⬜ | **Bug-bounty submission template export.** HackerOne / Bugcrowd / Intigriti / YesWeHack-shape per finding. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | M |
+| ⬜ | **Multi-user collaboration.** Comment on findings, assign engineer, mark "in review", @-mention. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | L |
+| ⬜ | **RBAC / SSO / audit logging.** SAML / OIDC SSO. Audit log for sensitive actions. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | L |
+| ⬜ | **Customer-data redaction in shared reports.** PII / hostname / token-shaped redaction on share. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | M |
+| ⬜ | **Public attestation page.** Customer-facing "last scan: X; 0 critical; SBOM available" page. Vendor-trust signal in B2B sales. | [§9.6](wrapper-wishlist.md#96-gaps-overallmd-did-not-surface-real-customer-asks) | M |
+
+---
+
+*Catalog source: [`wrapper-wishlist.md`](wrapper-wishlist.md) (engine team's wrapper-facing wishlist) + [`usage.md`](usage.md) (the operating manual). Tiers 0 + 1 + 2 are the **minimum-viable contract**: they close the wrapper-engine integration loop. Everything in Tier 3+ is incremental polish and product expansion.*
+
+---
+
 *Want to tackle one of these? Open a draft PR with a one-paragraph description of your approach. [`Architecture.md`](Architecture.md) is the canonical reference for the isolation model and design choices to preserve.*
