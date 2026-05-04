@@ -11,6 +11,9 @@ const Body = z.object({
   diff_base: z.string().optional(),
   instruction_text: z.string().nullable().optional(),
   integration_ids: z.array(z.string().uuid()).default([]),
+  // Engine PR #30 — passive recon mode for domain targets. Worker
+  // forwards as STRIX_DNS_ONLY=1 in the sandbox env.
+  dns_only: z.boolean().default(false),
 });
 
 // POST /api/scans — queue a new scan.
@@ -90,6 +93,7 @@ export async function POST(req: Request) {
     p_target_id: body.target_id ?? null,
     p_targets: targetsPayload,
     p_integration_ids: body.integration_ids,
+    p_dns_only: body.dns_only,
   });
   if (rpcErr || !scanId) {
     return NextResponse.json(
