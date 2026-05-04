@@ -411,6 +411,66 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             </section>
           )}
 
+          {/* Engine-side auto-dismiss (engine PR #142). Distinct from
+              wrapper-side `dismissed_by_ai` (which is KNN-driven over our
+              triage_signals). The engine reads our `feedback.jsonl` and
+              auto-dismisses when a prior FP label exists for the exact
+              same fingerprint. The wrapper renders the labeler attribution
+              from `prior_label_attribution` so the user can see *who* on
+              their team made the call, and the "Force-show / Re-promote"
+              button writes a verdict=tp label into the next scan's
+              feedback.jsonl. */}
+          {finding.engine_auto_dismissed && finding.prior_label_attribution && (
+            <section className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-neutral-950/60 ring-1 ring-white/5">
+                  <Footprints className="h-3.5 w-3.5 text-zinc-300" strokeWidth={2.25} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">
+                      Engine auto-dismissed
+                    </span>
+                    {finding.engine_auto_dismissal_reason && (
+                      <span
+                        className="rounded bg-zinc-700/60 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 ring-1 ring-zinc-600/40"
+                        title="The engine's reason for auto-dismissing — fed by the org's feedback.jsonl history."
+                      >
+                        {finding.engine_auto_dismissal_reason}
+                      </span>
+                    )}
+                    {finding.severity_pre_auto_dismissal && (
+                      <span className="text-[10.5px] text-neutral-500">
+                        was {finding.severity_pre_auto_dismissal}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-[13px] leading-relaxed text-neutral-200">
+                    {finding.prior_label_attribution.labeler.id} marked an identical
+                    finding as{' '}
+                    <code className="rounded bg-neutral-900/60 px-1 font-mono text-[12px] text-neutral-300 ring-1 ring-neutral-800">
+                      {finding.prior_label_attribution.fp_reason ?? finding.prior_label_attribution.verdict}
+                    </code>
+                    {' '}on{' '}
+                    {new Date(finding.prior_label_attribution.labeled_at).toLocaleDateString()}
+                    . The engine carried that decision forward to this scan.
+                  </p>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setStatus('triaged_real')}
+                      disabled={updating}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 px-3 py-1.5 text-xs font-medium text-amber-200 ring-1 ring-amber-400/30 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.25} />
+                      Force-show — this one's different
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* "Likely false positive" suggestion: the model is fairly sure but
               not auto-dismiss-sure (0.70–0.95 band). Surface to the user;
               either button writes a triage_signal — that's the active-
