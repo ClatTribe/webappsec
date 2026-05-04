@@ -163,8 +163,22 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         with materialize_credentials(sb, scan_id, integrations) as creds:
             llm_provider, llm_api_key = _resolve_llm(cfg, sb, scan)
 
-            env = _build_env(cfg, scan, creds.env, llm_provider, llm_api_key)
-            cmd = _build_cmd(cfg, scan, targets)
+            workdir = _make_run_workdir(scan_id)
+
+            # FP feedback loop (§19.2 Tier 2). Write the org's accumulated
+            # triage labels to <workdir>/feedback.jsonl so Strix can read
+            # them via --feedback-from. Best-effort: if the RPC fails the
+            # scan continues without the file (engine treats absence as
+            # "no labels"). The org's auto-dismiss policy (default
+            # `conservative`) flows in via STRIX_FP_AUTO_DISMISS env.
+            feedback_path = _write_feedback_jsonl(sb, scan_id, org_id, workdir)
+            fp_policy = _resolve_fp_policy(sb, org_id)
+
+            env = _build_env(
+                cfg, scan, creds.env, llm_provider, llm_api_key,
+                feedback_path=feedback_path, fp_policy=fp_policy,
+            )
+            cmd = _build_cmd(cfg, scan, targets, feedback_path=feedback_path)
 
             logger.info("running: %s", " ".join(shlex.quote(c) for c in cmd))
             sb.emit_event(
@@ -173,7 +187,6 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 {"cmd": cmd, "env_keys": sorted(env.keys())},
             )
 
-            workdir = _make_run_workdir(scan_id)
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 env={**os.environ, **env},
@@ -336,6 +349,71 @@ def _exit_code_is_signal(exit_code: int | None) -> bool:
     return exit_code is not None and exit_code < 0
 
 
+def _write_feedback_jsonl(
+    sb: WorkerSupabase, scan_id: str, org_id: str, workdir: str
+) -> str | None:
+    """Write the org's accumulated triage labels to <workdir>/feedback.jsonl.
+
+    The engine reads this on scan start (via --feedback-from) and uses it
+    to auto-dismiss prior-FP fingerprints. See usage.md §4 for the schema.
+
+    Best-effort: any failure logs and returns None; the engine treats
+    absence as "no labels" and proceeds normally. The wrapper does NOT
+    fail a scan because feedback writeback failed.
+
+    Returns the absolute path to the file when written, or None on failure.
+    """
+    try:
+        result = sb.client.rpc(
+            "worker_feedback_jsonl_for_org", {"p_org_id": org_id}
+        ).execute()
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: feedback RPC failed", scan_id)
+        return None
+
+    rows = result.data or []
+    if not rows:
+        # No labels yet — engine handles this fine via "no file present".
+        return None
+
+    path = Path(workdir) / "feedback.jsonl"
+    try:
+        with path.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                # Each row is { "record": {...} }; the engine expects one
+                # JSON object per line.
+                rec = row.get("record") if isinstance(row, dict) else None
+                if rec is None:
+                    continue
+                fh.write(json.dumps(rec, separators=(",", ":")))
+                fh.write("\n")
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to write feedback.jsonl", scan_id)
+        return None
+
+    logger.info("scan %s: wrote %d feedback labels to %s", scan_id, len(rows), path)
+    return str(path)
+
+
+def _resolve_fp_policy(sb: WorkerSupabase, org_id: str) -> str:
+    """Read organizations.fp_auto_dismiss_policy. Defaults to 'conservative'
+    on any read failure — matches the engine's own default."""
+    try:
+        result = (
+            sb.client.table("organizations")
+            .select("fp_auto_dismiss_policy")
+            .eq("id", org_id)
+            .single()
+            .execute()
+        )
+        policy = (result.data or {}).get("fp_auto_dismiss_policy")
+        if policy in ("conservative", "aggressive", "off"):
+            return policy
+    except Exception:  # noqa: BLE001
+        logger.exception("org %s: failed to read fp_auto_dismiss_policy", org_id)
+    return "conservative"
+
+
 async def _run_inline_triage(
     sb: WorkerSupabase,
     scan_id: str,
@@ -440,6 +518,9 @@ def _build_env(
     cred_env: dict[str, str],
     llm_provider: str,
     llm_api_key: str,
+    *,
+    feedback_path: str | None = None,
+    fp_policy: str | None = None,
 ) -> dict[str, str]:
     env = {
         "STRIX_LLM": llm_provider,
@@ -457,15 +538,34 @@ def _build_env(
     # without --dns-only keep working unchanged.
     if scan.get("dns_only"):
         env["STRIX_DNS_ONLY"] = "1"
+    # FP feedback loop (engine PR #142). The wrapper writes the org's
+    # accumulated labels to feedback.jsonl; engine reads via --feedback-from
+    # AND/OR STRIX_FEEDBACK_FROM. We forward both for belt-and-braces.
+    if feedback_path:
+        env["STRIX_FEEDBACK_FROM"] = feedback_path
+    if fp_policy:
+        env["STRIX_FP_AUTO_DISMISS"] = fp_policy
     env.update(cred_env)
     return env
 
 
-def _build_cmd(cfg: WorkerConfig, scan: dict[str, Any], targets: list[dict[str, Any]]) -> list[str]:
+def _build_cmd(
+    cfg: WorkerConfig,
+    scan: dict[str, Any],
+    targets: list[dict[str, Any]],
+    *,
+    feedback_path: str | None = None,
+) -> list[str]:
     cmd = [cfg.strix_bin, "-n", "-m", scan["scan_mode"]]
 
     if scan.get("scope_mode") and scan["scope_mode"] != "auto":
         cmd += ["--scope-mode", scan["scope_mode"]]
+
+    # Engine PR #142 — feedback.jsonl path. CLI flag takes precedence over
+    # STRIX_FEEDBACK_FROM env. We forward both because either alone has
+    # bitten us in the past.
+    if feedback_path:
+        cmd += ["--feedback-from", feedback_path]
     if scan.get("diff_base"):
         cmd += ["--diff-base", scan["diff_base"]]
 

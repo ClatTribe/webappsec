@@ -85,6 +85,17 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
           isAdmin={orgRole === 'owner' || orgRole === 'admin'}
         />
       )}
+
+      {/* Engine FP auto-dismiss policy (Tier 2 closure). The engine reads
+          this org's feedback.jsonl and auto-dismisses prior-FP fingerprints;
+          the policy decides how aggressively. Per-org setting on
+          organizations.fp_auto_dismiss_policy; admin-gated. */}
+      {org && (orgRole === 'owner' || orgRole === 'admin') && (
+        <FpAutoDismissSection
+          orgId={org.id}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }
@@ -761,6 +772,121 @@ function TriageControlsSection({ isAdmin }: { isAdmin: boolean }) {
             </button>
           </div>
         </div>
+      )}
+    </Section>
+  );
+}
+
+// ============== ENGINE FP AUTO-DISMISS POLICY ==============
+// Forwarded to Strix as STRIX_FP_AUTO_DISMISS. The engine reads the
+// org's feedback.jsonl (authored by our worker on scan start) and uses
+// this policy to decide whether to auto-dismiss findings whose
+// fingerprint has prior FP labels. Distinct from our wrapper-side KNN
+// auto-dismiss (which sets dismissed_by_ai); this drives the engine's
+// auto-dismiss path which sets findings.engine_auto_dismissed.
+
+type FpPolicy = 'conservative' | 'aggressive' | 'off';
+
+const FP_POLICIES: { value: FpPolicy; label: string; help: string }[] = [
+  {
+    value: 'conservative',
+    label: 'Conservative (default)',
+    help: 'Auto-dismiss only when ≥1 prior FP label and zero TPs for the same fingerprint. Mixed history → surface anyway.',
+  },
+  {
+    value: 'aggressive',
+    label: 'Aggressive',
+    help: 'Auto-dismiss when the latest verdict is FP, regardless of prior TPs. Power-user mode.',
+  },
+  {
+    value: 'off',
+    label: 'Off',
+    help: 'Never auto-dismiss based on labels. Visibility-only — your team always sees every finding.',
+  },
+];
+
+function FpAutoDismissSection({ orgId, onSaved }: { orgId: string; onSaved: () => void }) {
+  const [policy, setPolicy] = useState<FpPolicy | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from('organizations')
+      .select('fp_auto_dismiss_policy')
+      .eq('id', orgId)
+      .single()
+      .then(({ data }) => {
+        const p = (data as { fp_auto_dismiss_policy?: FpPolicy } | null)?.fp_auto_dismiss_policy;
+        setPolicy(p ?? 'conservative');
+      });
+  }, [orgId]);
+
+  const save = async (newPolicy: FpPolicy) => {
+    setBusy(true);
+    setFeedback(null);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('organizations')
+      .update({ fp_auto_dismiss_policy: newPolicy })
+      .eq('id', orgId);
+    setBusy(false);
+    if (error) {
+      setFeedback({ kind: 'error', text: error.message });
+      return;
+    }
+    setPolicy(newPolicy);
+    setFeedback({ kind: 'success', text: 'Policy saved.' });
+    onSaved();
+  };
+
+  return (
+    <Section
+      title="Engine FP auto-dismiss"
+      Icon={Brain}
+      hint="The Strix engine reads your team's accumulated triage decisions (feedback.jsonl) and can auto-dismiss findings whose fingerprint has prior FP labels. This policy controls how aggressively it does that. Distinct from the wrapper's own KNN auto-dismiss (which uses cosine similarity over the same labels)."
+    >
+      {policy === null ? (
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading…
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {FP_POLICIES.map((p) => (
+              <label
+                key={p.value}
+                className={`flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 transition-colors ${
+                  policy === p.value
+                    ? 'border-cyan-500/40 bg-cyan-500/[0.04]'
+                    : 'border-neutral-800 bg-neutral-900/30 hover:border-neutral-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="fp_policy"
+                  checked={policy === p.value}
+                  onChange={() => save(p.value)}
+                  disabled={busy}
+                  className="mt-0.5 accent-cyan-500"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium text-neutral-200">{p.label}</span>
+                  <span className="block text-[11.5px] leading-relaxed text-neutral-500">
+                    {p.help}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {feedback && (
+            <div className="pt-2">
+              <FeedbackPill feedback={feedback} />
+            </div>
+          )}
+        </>
       )}
     </Section>
   );
