@@ -18,6 +18,7 @@ function NewScanInner() {
   const [instruction, setInstruction] = useState('');
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [integrationIds, setIntegrationIds] = useState<string[]>([]);
+  const [dnsOnly, setDnsOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +59,9 @@ function NewScanInner() {
         scan_mode: scanMode,
         instruction_text: instruction.trim() || null,
         integration_ids: integrationIds,
+        // Engine PR #30 — passive recon mode (only valid for domain targets).
+        // Forwarded to the worker as STRIX_DNS_ONLY=1 / --dns-only flag.
+        dns_only: dnsOnly && selected.type === 'domain',
       }),
     });
     if (!res.ok) {
@@ -165,6 +169,32 @@ function NewScanInner() {
             ))}
           </div>
         </section>
+
+        {/* Passive recon mode (--dns-only) — only relevant for domain targets.
+            Engine PR #30; forwarded as STRIX_DNS_ONLY=1 by the worker. */}
+        {selected?.type === 'domain' && (
+          <section>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+              Passive recon mode
+            </div>
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-neutral-800 bg-neutral-900/30 px-3 py-2.5 transition-colors hover:border-neutral-700">
+              <input
+                type="checkbox"
+                checked={dnsOnly}
+                onChange={(e) => setDnsOnly(e.target.checked)}
+                className="mt-0.5 accent-cyan-500"
+              />
+              <span className="text-sm leading-relaxed">
+                <span className="font-medium text-neutral-200">Surface-map only — no active probing.</span>
+                <span className="ml-1 text-[11.5px] text-neutral-500">
+                  DNSSEC / CAA / MX / SPF / subdomain enumeration etc., but
+                  no HTTP/TCP probes against the target's hosts. Useful for
+                  pre-authorisation surface mapping or compliance-driven sweeps.
+                </span>
+              </span>
+            </label>
+          </section>
+        )}
 
         {integrations.length > 0 && (
           <section>

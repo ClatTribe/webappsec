@@ -105,6 +105,14 @@ export interface Scan {
    *  successfully generates one (or for scans completed before this
    *  feature shipped). */
   summary?: ScanSummary | null;
+  /** Engine PR #30 — passive recon mode toggle. When true, the worker
+   *  forwards STRIX_DNS_ONLY=1 into the sandbox env. The scan page
+   *  renders a "passive" badge on the run header. */
+  dns_only?: boolean;
+  /** Engine PR #29 — set by the worker when Strix's preflight bailed
+   *  (target didn't resolve / no port answered). Distinct from a scan
+   *  crash; UI renders an amber "Target unreachable" banner. */
+  preflight_failed?: boolean;
 }
 
 export interface ScanSummary {

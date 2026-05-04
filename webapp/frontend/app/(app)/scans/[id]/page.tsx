@@ -8,6 +8,10 @@ import {
   DollarSign,
   Sparkles,
   History,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  ClipboardCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -15,6 +19,114 @@ import { createClient } from '@/lib/supabase/server';
 import ScanLiveView from '@/components/scan/scan-live-view';
 import { AI_BRAND } from '@/lib/finding-theme';
 import type { ScanRecurrenceSummary, ScanSummary } from '@/lib/supabase/types';
+
+// ---------------------------------------------------------------------------
+// Engine event parsers (§19.1 Tier 1 slice 2). Read the structured events
+// the worker has tailed into scan_events into the shapes the UI components
+// expect. Engine event refs:
+//   target.started / target.completed — engine PR #32
+//   run.test_plan — engine PR #35
+// ---------------------------------------------------------------------------
+
+interface TargetState {
+  target_id: string;
+  value: string;
+  type?: string;
+  status: 'started' | 'completed';
+  findings_total?: number;
+}
+
+interface PlannedCategory {
+  name: string;
+  description?: string;
+}
+
+interface TestPlanForUi {
+  scan_mode: string | null;
+  dns_only: boolean;
+  per_target: Array<{
+    target_id?: string;
+    value?: string;
+    type?: string;
+    planned_categories: PlannedCategory[];
+    skipped_categories?: PlannedCategory[];
+  }>;
+  summary_text?: string;
+}
+
+type EventRow = { event_type: string; payload: unknown; created_at: string };
+
+function asObj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function parseTargetEvents(events: EventRow[]): TargetState[] {
+  // Engine emits target.started → target.completed per target; we collapse
+  // to one entry per target_id, with status=completed when both fired.
+  const map = new Map<string, TargetState>();
+  for (const ev of events) {
+    if (ev.event_type !== 'target.started' && ev.event_type !== 'target.completed') continue;
+    const p = asObj(ev.payload);
+    const inner = asObj(p.payload);
+    const tid = (inner.target_id as string | undefined)
+      ?? (p.target_id as string | undefined);
+    if (!tid) continue;
+    const existing = map.get(tid);
+    const next: TargetState = {
+      target_id: tid,
+      value: (inner.value as string | undefined) ?? (p.value as string | undefined) ?? existing?.value ?? '',
+      type: (inner.type as string | undefined) ?? (p.type as string | undefined) ?? existing?.type,
+      status: ev.event_type === 'target.completed' ? 'completed' : 'started',
+      findings_total: existing?.findings_total,
+    };
+    if (ev.event_type === 'target.completed') {
+      const findings = asObj(inner.findings ?? p.findings);
+      const total = findings.total;
+      if (typeof total === 'number') next.findings_total = total;
+    }
+    // Don't downgrade completed → started.
+    if (existing?.status === 'completed' && next.status === 'started') continue;
+    map.set(tid, next);
+  }
+  return [...map.values()];
+}
+
+function parseTestPlan(events: EventRow[]): TestPlanForUi | null {
+  const planEv = events.find((e) => e.event_type === 'run.test_plan');
+  if (!planEv) return null;
+  const p = asObj(planEv.payload);
+  const inner = asObj(p.payload);
+  const targetsRaw = (inner.targets ?? p.targets) as unknown;
+  if (!Array.isArray(targetsRaw)) return null;
+  const per_target = targetsRaw.map((t) => {
+    const ot = asObj(t);
+    const planned = Array.isArray(ot.planned_categories)
+      ? (ot.planned_categories as unknown[]).map((c) => {
+          const oc = asObj(c);
+          return { name: String(oc.name ?? ''), description: oc.description as string | undefined };
+        }).filter((c) => c.name)
+      : [];
+    const skipped = Array.isArray(ot.skipped_categories)
+      ? (ot.skipped_categories as unknown[]).map((c) => {
+          const oc = asObj(c);
+          return { name: String(oc.name ?? ''), description: oc.description as string | undefined };
+        }).filter((c) => c.name)
+      : [];
+    return {
+      target_id: ot.target_id as string | undefined,
+      value: ot.value as string | undefined,
+      type: ot.type as string | undefined,
+      planned_categories: planned,
+      skipped_categories: skipped,
+    };
+  });
+  return {
+    scan_mode: (inner.scan_mode as string | undefined) ?? (p.scan_mode as string | undefined) ?? null,
+    dns_only: Boolean(inner.dns_only ?? p.dns_only),
+    per_target,
+    summary_text: (inner.summary_text as string | undefined) ?? (p.summary_text as string | undefined),
+  };
+}
 
 function formatTokens(n: number | null | undefined): string {
   if (n == null) return '—';
@@ -48,6 +160,21 @@ export default async function ScanDetailPage({ params }: Props) {
   const recurrence = recurrenceData as ScanRecurrenceSummary | null;
   const summary = (scan.summary ?? null) as ScanSummary | null;
 
+  // Engine event consumption (§19.1 Tier 1 slice 2). The worker tails
+  // events.jsonl into scan_events; here we pull the structured events we
+  // surface in the UI.
+  //
+  //   target.started / target.completed (engine PR #32) — per-target progress
+  //   run.test_plan (engine PR #35) — what categories will be tested
+  const { data: scanEventsData } = await supabase
+    .from('scan_events')
+    .select('event_type, payload, created_at')
+    .eq('scan_id', params.id)
+    .in('event_type', ['target.started', 'target.completed', 'run.test_plan'])
+    .order('created_at', { ascending: true });
+  const targetEvents = parseTargetEvents(scanEventsData ?? []);
+  const testPlan = parseTestPlan(scanEventsData ?? []);
+
   return (
     <div className="space-y-6">
       <nav className="flex items-center gap-1.5 text-xs text-neutral-500">
@@ -69,6 +196,14 @@ export default async function ScanDetailPage({ params }: Props) {
               {scan.scope_mode}
             </span>
           )}
+          {scan.dns_only && (
+            <span
+              className="rounded-md bg-cyan-500/10 px-2 py-0.5 font-medium text-cyan-200 ring-1 ring-cyan-500/30"
+              title="Passive recon mode (--dns-only) — no active probing of target hosts"
+            >
+              passive
+            </span>
+          )}
           {scan.llm_provider && (
             <span className="font-mono">{scan.llm_provider}</span>
           )}
@@ -77,6 +212,24 @@ export default async function ScanDetailPage({ params }: Props) {
           )}
         </div>
       </header>
+
+      {/* Preflight failure banner (engine PR #29). Distinct from a scan
+          crash — the target wasn't reachable from the worker. */}
+      {scan.preflight_failed && (
+        <section className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-4">
+          <div className="flex items-start gap-3">
+            <Target className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-300" strokeWidth={2.25} />
+            <div className="space-y-1">
+              <h2 className="text-sm font-medium text-amber-100">
+                Target unreachable — preflight check failed
+              </h2>
+              <p className="text-[12.5px] leading-relaxed text-amber-200/80">
+                {scan.error_message ?? 'The target did not resolve or no port answered within the preflight timeout. Verify the target is reachable from the worker (DNS, network, firewall) and re-run the scan.'}
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile
@@ -117,16 +270,103 @@ export default async function ScanDetailPage({ params }: Props) {
           Targets
         </div>
         <ul className="mt-3 space-y-1.5">
-          {targets?.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 text-sm">
-              <span className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[10.5px] text-neutral-400 ring-1 ring-neutral-800">
-                {t.type}
-              </span>
-              <code className="font-mono text-neutral-200">{t.value}</code>
-            </li>
-          ))}
+          {targets?.map((t) => {
+            // Engine target.started/completed events (PR #32) give us per-target
+            // status. Match by value since scan_targets.id is a wrapper UUID,
+            // distinct from the engine's stable target_id.
+            const engineEntry = targetEvents.find(
+              (te) => te.value === t.value || te.value === String(t.value),
+            );
+            return (
+              <li key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[10.5px] text-neutral-400 ring-1 ring-neutral-800">
+                  {t.type}
+                </span>
+                <code className="font-mono text-neutral-200">{t.value}</code>
+                {engineEntry && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ring-1 ${
+                      engineEntry.status === 'completed'
+                        ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30'
+                        : 'bg-blue-500/15 text-blue-200 ring-blue-400/30'
+                    }`}
+                    title={
+                      engineEntry.status === 'completed'
+                        ? `Target completed${engineEntry.findings_total != null ? ` — ${engineEntry.findings_total} finding(s)` : ''}`
+                        : 'Target in progress'
+                    }
+                  >
+                    {engineEntry.status === 'completed' ? (
+                      <CheckCircle2 className="h-3 w-3" strokeWidth={2.5} />
+                    ) : (
+                      <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2.5} />
+                    )}
+                    {engineEntry.status === 'completed'
+                      ? `Done${engineEntry.findings_total != null ? ` · ${engineEntry.findings_total}` : ''}`
+                      : 'Running'}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </section>
+
+      {/* Test plan (engine PR #35). Renders the planned-categories list as
+          a checklist before findings exist — closes the "blank dashboard
+          until first finding" UX gap. */}
+      {testPlan && testPlan.per_target.length > 0 && (
+        <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-4">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+            <ClipboardCheck className="h-3.5 w-3.5" strokeWidth={2} />
+            Test plan
+            {testPlan.scan_mode && (
+              <span className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 ring-1 ring-neutral-800">
+                {testPlan.scan_mode}
+              </span>
+            )}
+            {testPlan.dns_only && (
+              <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-200 ring-1 ring-cyan-500/30">
+                Passive recon mode
+              </span>
+            )}
+          </div>
+          {testPlan.summary_text && (
+            <p className="mt-2 text-[12.5px] leading-relaxed text-neutral-300">
+              {testPlan.summary_text}
+            </p>
+          )}
+          <div className="mt-3 space-y-3">
+            {testPlan.per_target.map((pt, i) => (
+              <div key={pt.target_id ?? i} className="space-y-1.5">
+                {pt.value && (
+                  <div className="flex items-center gap-2 text-[11.5px] text-neutral-400">
+                    {pt.type && (
+                      <span className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 ring-1 ring-neutral-800">
+                        {pt.type}
+                      </span>
+                    )}
+                    <code className="font-mono">{pt.value}</code>
+                  </div>
+                )}
+                <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {pt.planned_categories.map((c) => (
+                    <li key={c.name} className="flex items-start gap-1.5 text-[11.5px] text-neutral-400">
+                      <Circle className="mt-0.5 h-2.5 w-2.5 flex-shrink-0 text-neutral-600" strokeWidth={2.5} />
+                      <span>
+                        <span className="text-neutral-200">{c.name.replace(/_/g, ' ')}</span>
+                        {c.description && (
+                          <span className="ml-1 text-neutral-500">— {c.description}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {scan.instruction_text && (
         <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/20 p-4">

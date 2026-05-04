@@ -209,6 +209,15 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         # honour the requested status.
         cancelled = _was_cancel_requested(sb, scan_id) or _exit_code_is_signal(exit_code)
 
+        # Engine PR #29 — preflight defaults ON. Targets that don't resolve
+        # exit 1 in ~5s with a diagnostic panel on stderr. Detecting this
+        # *reliably* needs stderr captured to disk + a marker check; the
+        # workdir-absence heuristic mis-fires on any exit-1 failure with
+        # an empty events.jsonl. The schema column (`scans.preflight_failed`)
+        # and the UI banner are ready; the worker leaves `preflight_failed`
+        # false until we add stderr capture (separate follow-up).
+        preflight_failed = False
+
         if cancelled:
             final_status = "cancelled"
             error_message = error_message or "scan cancelled"
@@ -441,6 +450,13 @@ def _build_env(
         # Run logs directory; we'll harvest after exit.
         "PYTHONUNBUFFERED": "1",
     }
+    # Engine PR #30 — passive recon mode (domain targets only). The
+    # wrapper opts in via the new-scan form's "Surface-map only" toggle;
+    # surface as STRIX_DNS_ONLY=1 (engine accepts both env and --dns-only
+    # flag). When false we omit the var entirely so older Strix versions
+    # without --dns-only keep working unchanged.
+    if scan.get("dns_only"):
+        env["STRIX_DNS_ONLY"] = "1"
     env.update(cred_env)
     return env
 
