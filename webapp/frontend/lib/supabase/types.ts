@@ -274,6 +274,43 @@ export interface Finding {
   engine_auto_dismissal_reason?: string | null;
   severity_pre_auto_dismissal?: string | null;
   prior_label_attribution?: PriorLabelAttribution | null;
+  /** Per-finding reasoning trail from <run_dir>/trajectory.jsonl (engine
+   *  PR #142). Joined by finding_id at ingest. The wrapper persists the
+   *  whole record verbatim; the UI lazy-renders the "How did the engine
+   *  arrive at this?" panel from these fields. */
+  trajectory?: TrajectoryRecord | null;
+}
+
+export interface TrajectoryRecord {
+  finding_id?: string;
+  /** Loop count the agent took before emitting this finding. */
+  iterations_to_emit?: number;
+  /** Wall-clock seconds from agent start to finding emit. */
+  time_to_emit_seconds?: number;
+  /** Number of distinct tools/surfaces the agent explored. */
+  exploration_breadth?: number;
+  /** Collapsed event timeline — each entry is a tool call snapshot. */
+  events_compact?: TrajectoryEventCompact[];
+  /** Hypotheses the agent considered and rejected, with reasons. */
+  dismissed_alternatives?: Array<{ hypothesis?: string; reason?: string; evidence?: string }>;
+  schema_version?: number;
+  [k: string]: unknown;
+}
+
+export interface TrajectoryEventCompact {
+  tool?: string;
+  target?: string;
+  provenance?:
+    | 'trusted_source'
+    | 'intel_feed'
+    | 'target'
+    | 'operator_input'
+    | 'framework'
+    | 'mixed';
+  status?: 'started' | 'completed' | 'failed';
+  /** Optional brief result note — engine-truncated. */
+  note?: string;
+  [k: string]: unknown;
 }
 
 export interface KillChainPayload {

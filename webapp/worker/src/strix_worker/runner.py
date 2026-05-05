@@ -112,6 +112,63 @@ class StrixStats:
 # often. Sweep tolerance lives in the listener as a multiple of this.
 HEARTBEAT_INTERVAL_SEC = 60
 
+
+# Engine PR #30 — preflight diagnostic markers. The engine writes a Rich
+# diagnostic panel to stderr when preflight fails (DNS, HTTP reachability,
+# etc.) before exiting with code 1. We pattern-match on the panel's stable
+# text — `preflight` appears in both the title and per-target reasons. ANSI
+# is stripped before the check (the panel is colour-coded via Rich).
+#
+# Conservative match: we require the literal substring "preflight" AND
+# either "fail" or "did not" or "could not". A scan that genuinely
+# discusses preflight in normal output (e.g. "preflight passed") won't
+# trip this.
+_PREFLIGHT_RE = re.compile(
+    r"preflight[^\n]{0,120}?(fail|could not|did not|unreachable|unable to)",
+    re.IGNORECASE,
+)
+
+
+class StderrTailBuffer:
+    """Bounded ring buffer for the tail of stderr.
+
+    The engine's preflight diagnostic panel is at most a few KB; a
+    16 KiB tail captures it comfortably without holding the entire
+    stderr in memory for long scans (where stderr can be megabytes
+    of agent reasoning). Older bytes drop off the front as new ones
+    arrive — by exit time the buffer holds only the final segment,
+    which is exactly where the diagnostic landed.
+    """
+
+    _MAX_BYTES = 16 * 1024
+
+    def __init__(self) -> None:
+        self._chunks: list[str] = []
+        self._size: int = 0
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        self._chunks.append(text)
+        self._size += len(text)
+        # Trim from the front while we're over budget. We keep one chunk
+        # past the limit so we can still see partial markers that span
+        # the boundary; close enough for grep purposes.
+        while self._size > self._MAX_BYTES and len(self._chunks) > 1:
+            dropped = self._chunks.pop(0)
+            self._size -= len(dropped)
+
+    def tail(self) -> str:
+        return "\n".join(self._chunks)
+
+
+def _looks_like_preflight_failure(stderr_tail: str) -> bool:
+    """Pattern-match the engine's preflight diagnostic panel."""
+    if not stderr_tail:
+        return False
+    plain = _ANSI_RE.sub("", stderr_tail)
+    return bool(_PREFLIGHT_RE.search(plain))
+
 # A registry of currently-running subprocesses, keyed by scan_id. The
 # listener's scan_cancel handler reaches in here to send SIGTERM. We use a
 # module-level dict instead of plumbing it through arguments so the cancel
@@ -206,10 +263,16 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
 
             tailer_stop = asyncio.Event()
             heartbeat_stop = asyncio.Event()
+            # Tail of stderr — needed post-exit to detect engine PR #30
+            # preflight failures (the diagnostic panel writes to stderr
+            # right before exit-1).
+            stderr_buf = StderrTailBuffer()
             stdout_task = asyncio.create_task(
                 _stream_logs(sb, scan_id, proc.stdout, "stdout", stats)
             )
-            stderr_task = asyncio.create_task(_stream_logs(sb, scan_id, proc.stderr, "stderr"))
+            stderr_task = asyncio.create_task(
+                _stream_logs(sb, scan_id, proc.stderr, "stderr", stderr_buf=stderr_buf)
+            )
             events_task = asyncio.create_task(
                 _stream_events_jsonl(sb, scan_id, workdir, tailer_stop)
             )
@@ -230,14 +293,28 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         # honour the requested status.
         cancelled = _was_cancel_requested(sb, scan_id) or _exit_code_is_signal(exit_code)
 
-        # Engine PR #29 — preflight defaults ON. Targets that don't resolve
-        # exit 1 in ~5s with a diagnostic panel on stderr. Detecting this
-        # *reliably* needs stderr captured to disk + a marker check; the
-        # workdir-absence heuristic mis-fires on any exit-1 failure with
-        # an empty events.jsonl. The schema column (`scans.preflight_failed`)
-        # and the UI banner are ready; the worker leaves `preflight_failed`
-        # false until we add stderr capture (separate follow-up).
-        preflight_failed = False
+        # Engine PR #30 — preflight defaults ON. Targets that fail
+        # preflight exit 1 in ~5s with a diagnostic panel on stderr.
+        # We pattern-match the panel out of the captured stderr tail
+        # and flip scans.preflight_failed so the UI can render the
+        # amber "preflight failed" banner. We only check on a real
+        # failure exit (not on cancellation, not on success) so a
+        # successful scan that happened to mention "preflight" in
+        # passing can never trip this.
+        if (
+            not cancelled
+            and exit_code is not None
+            and exit_code not in (0, 2)
+            and _looks_like_preflight_failure(stderr_buf.tail())
+        ):
+            try:
+                sb.set_preflight_failed(scan_id)
+            except Exception:  # noqa: BLE001
+                # The flag is cosmetic; the failure surfaces via
+                # exit_code + error_message regardless.
+                logger.exception(
+                    "scan %s: failed to set preflight_failed flag", scan_id
+                )
 
         if cancelled:
             final_status = "cancelled"
@@ -624,6 +701,7 @@ async def _stream_logs(
     stream: asyncio.StreamReader | None,
     label: str,
     stats: StrixStats | None = None,
+    stderr_buf: StderrTailBuffer | None = None,
 ) -> None:
     """Stream stdout/stderr lines into scan_events as 'log' events.
 
@@ -633,6 +711,10 @@ async def _stream_logs(
     The optional `stats` accumulator parses Strix's stats panel out of stdout
     (token counts, cost, agent count). events.jsonl never carries these — the
     only place the totals reach the worker is the rendered panel.
+
+    The optional `stderr_buf` accumulates the tail of the stream for post-exit
+    pattern-matching (engine PR #30 preflight diagnostic). Caller wires this
+    only on the stderr task so stdout text doesn't dilute the buffer.
     """
     if stream is None:
         return
@@ -649,6 +731,8 @@ async def _stream_logs(
                 sb.emit_event(scan_id, "log", {"stream": label, "line": text})
                 if stats is not None:
                     stats.feed(text)
+                if stderr_buf is not None:
+                    stderr_buf.feed(text)
         except Exception as e:  # noqa: BLE001
             logger.warning("failed to emit log line: %s", e)
 
@@ -782,6 +866,14 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
                 except Exception as e:  # noqa: BLE001
                     logger.warning("failed to upload %s: %s", key, e)
 
+        # Per-finding reasoning trail (engine PR #142 / §15.1 Tier 2). The
+        # engine writes one trajectory record per finding to
+        # `<run_dir>/trajectory.jsonl`. We load the whole file once, key by
+        # finding_id, and attach the matching record to each finding's
+        # payload during ingestion. Absence is fine (older engines, scans
+        # without findings) — the column just stays null.
+        trajectories = _load_trajectories(run_dir)
+
         # Ingest findings. Prefer the engine's structured vulnerabilities.json
         # (richer schema — confidence, reasoning_trace, counter_proof, category,
         # priority_label, etc.) and fall back to per-vuln markdown for older
@@ -790,7 +882,7 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         # markdown parsing is the fallback.
         vulns_json = run_dir / "vulnerabilities.json"
         if vulns_json.exists():
-            _ingest_findings_from_json(sb, scan_id, vulns_json)
+            _ingest_findings_from_json(sb, scan_id, vulns_json, trajectories)
         else:
             vulns_dir = run_dir / "vulnerabilities"
             if vulns_dir.exists():
@@ -823,7 +915,49 @@ def _compute_fingerprint(*, cwe: str | None, endpoint: str | None, target: str |
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
-def _ingest_findings_from_json(sb: WorkerSupabase, scan_id: str, vulns_json: Path) -> None:
+def _load_trajectories(run_dir: Path) -> dict[str, dict[str, Any]]:
+    """Parse <run_dir>/trajectory.jsonl into a {finding_id: record} map.
+
+    Engine PR #142 writes one record per finding at run end. The record
+    is keyed by `finding_id` (matching the corresponding entry in
+    vulnerabilities.json); we use that as the join key.
+
+    Best-effort: a missing file returns {}; a malformed line is skipped
+    with a debug log; any other exception is caught upstream so a bad
+    trajectory file never blocks finding ingestion.
+    """
+    path = run_dir / "trajectory.jsonl"
+    if not path.exists():
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug("trajectory.jsonl: malformed line %r", line[:200])
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                fid = rec.get("finding_id")
+                if isinstance(fid, str) and fid:
+                    out[fid] = rec
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to read trajectory.jsonl at %s", path)
+        return out
+    return out
+
+
+def _ingest_findings_from_json(
+    sb: WorkerSupabase,
+    scan_id: str,
+    vulns_json: Path,
+    trajectories: dict[str, dict[str, Any]] | None = None,
+) -> None:
     """Read the engine's structured vulnerabilities.json and insert each
     finding via worker_insert_finding.
 
@@ -859,7 +993,7 @@ def _ingest_findings_from_json(sb: WorkerSupabase, scan_id: str, vulns_json: Pat
         if not isinstance(f, dict):
             continue
         try:
-            _insert_finding_from_json(sb, scan_id, f)
+            _insert_finding_from_json(sb, scan_id, f, trajectories or {})
         except Exception:  # noqa: BLE001
             logger.exception(
                 "scan %s: failed to insert finding %s",
@@ -869,7 +1003,10 @@ def _ingest_findings_from_json(sb: WorkerSupabase, scan_id: str, vulns_json: Pat
 
 
 def _insert_finding_from_json(
-    sb: WorkerSupabase, scan_id: str, f: dict[str, Any]
+    sb: WorkerSupabase,
+    scan_id: str,
+    f: dict[str, Any],
+    trajectories: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Map one engine finding dict → worker_insert_finding payload."""
     title = (f.get("title") or "").strip() or "Untitled finding"
@@ -941,6 +1078,10 @@ def _insert_finding_from_json(
         "poc_md": _compose_poc_md(f),
         "impact_md": f.get("impact"),
         "remediation_md": f.get("remediation_steps"),
+        # Per-finding trajectory record (migration 029). Joined by
+        # finding id from <run_dir>/trajectory.jsonl. Absence is fine —
+        # the column stays null and the UI hides the panel.
+        "trajectory": (trajectories or {}).get(f.get("id") or "") if isinstance(f.get("id"), str) else None,
     }
 
     sb.insert_finding(

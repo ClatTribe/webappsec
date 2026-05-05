@@ -1393,3 +1393,104 @@ async def test_run_scan_bails_when_claim_loses_race(fake_scan, cfg_factory):
     assert sb.finish_calls == []
     assert sb.events == []
     assert sb.uploads == []
+
+
+# ---------------------------------------------------------------------------
+# Migration 029 — preflight detection + trajectory.jsonl ingestion
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import (  # noqa: E402
+    StderrTailBuffer,
+    _looks_like_preflight_failure,
+    _load_trajectories,
+)
+
+
+def test_stderr_buffer_keeps_only_tail_under_limit():
+    """The buffer caps memory by dropping older chunks; tail() reflects the
+    most recent bytes — exactly where the engine's preflight panel lands."""
+    buf = StderrTailBuffer()
+    # Push way past the 16 KiB cap; only the tail should remain.
+    for i in range(2000):
+        buf.feed(f"line {i}: " + "x" * 64)
+    tail = buf.tail()
+    assert "line 1999" in tail  # most recent kept
+    assert "line 0:" not in tail  # earliest dropped
+
+
+def test_preflight_detector_matches_engine_panel_text():
+    """The conservative pattern should fire on engine PR #30's typical
+    diagnostic shape and stay quiet on benign 'preflight passed' text."""
+    fail_panels = [
+        "Preflight check failed for target https://example.invalid",
+        "PREFLIGHT: could not resolve example.invalid",
+        "preflight did not complete: connection refused",
+        "[bold]Preflight[/bold]: target is unreachable",
+        "Preflight unable to reach target",
+    ]
+    for panel in fail_panels:
+        assert _looks_like_preflight_failure(panel), f"missed: {panel!r}"
+
+
+def test_preflight_detector_ignores_benign_mentions():
+    """A scan that mentions 'preflight passed' or just runs successfully
+    should not trip the detector. Pattern requires a failure verb."""
+    benign = [
+        "Preflight passed in 4.2s",
+        "All preflight checks completed successfully",
+        "Running tests…",
+        "",
+    ]
+    for line in benign:
+        assert not _looks_like_preflight_failure(line), f"false positive: {line!r}"
+
+
+def test_preflight_detector_strips_ansi_before_matching():
+    """Engine renders the panel through Rich; ANSI codes must be stripped
+    before pattern-match or the detector misses every coloured panel."""
+    coloured = "\x1b[31mPreflight failed\x1b[0m for https://example.invalid"
+    assert _looks_like_preflight_failure(coloured)
+
+
+def test_load_trajectories_keys_by_finding_id(tmp_path):
+    """Each line of trajectory.jsonl maps to one finding via its
+    finding_id field; the loader returns a {finding_id: record} map."""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "trajectory.jsonl").write_text(
+        "\n".join([
+            json.dumps({
+                "finding_id": "vuln-001",
+                "iterations_to_emit": 12,
+                "time_to_emit_seconds": 4.1,
+                "events_compact": [{"tool": "send_request"}],
+                "dismissed_alternatives": [],
+                "exploration_breadth": 3,
+                "schema_version": 1,
+            }),
+            json.dumps({
+                "finding_id": "vuln-002",
+                "iterations_to_emit": 47,  # outlier — engine struggled
+                "time_to_emit_seconds": 92.0,
+                "dismissed_alternatives": [
+                    {"hypothesis": "redirect was open", "reason": "host whitelisted"},
+                ],
+            }),
+            "",  # blank line — must be ignored
+            "{not-json",  # malformed — must be skipped, not crash
+        ]) + "\n"
+    )
+
+    out = _load_trajectories(run_dir)
+    assert set(out.keys()) == {"vuln-001", "vuln-002"}
+    assert out["vuln-001"]["iterations_to_emit"] == 12
+    assert out["vuln-002"]["iterations_to_emit"] == 47
+    assert out["vuln-002"]["dismissed_alternatives"][0]["reason"] == "host whitelisted"
+
+
+def test_load_trajectories_returns_empty_when_file_missing(tmp_path):
+    """Older engine versions don't write trajectory.jsonl; loader must
+    not crash, just return an empty map. The trajectory column stays null."""
+    run_dir = tmp_path / "run-empty"
+    run_dir.mkdir()
+    assert _load_trajectories(run_dir) == {}

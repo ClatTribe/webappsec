@@ -24,6 +24,8 @@ import type {
   KillChainResponse,
   KillChainStep,
   KillChainStepEngine,
+  TrajectoryEventCompact,
+  TrajectoryRecord,
   TriageHistory,
   TriagePrediction,
 } from '@/lib/supabase/types';
@@ -864,6 +866,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             <KillChainSection chain={killChain} />
           ) : null}
 
+          {/* Per-finding reasoning trail (engine PR #142). Lazy by virtue of
+              the parent card's expand state — we only render when the user
+              opens the card. Hidden when the engine didn't write a trajectory
+              for this finding (older engine versions, or runs that pre-date
+              migration 029). */}
+          {finding.trajectory && <TrajectorySection trajectory={finding.trajectory} />}
+
           {sections.length === 0 && finding.description_md && (
             <Markdown body={finding.description_md} />
           )}
@@ -1236,4 +1245,196 @@ function Markdown({ body }: { body: string }) {
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
     </div>
   );
+}
+
+// ============== TrajectorySection (engine PR #142, migration 029) ==============
+//
+// Renders the per-finding reasoning trail the engine emitted. Three sub-blocks:
+//
+//   1. Header pill row — iterations, time-to-emit, exploration breadth.
+//      Outliers (≥30 iterations, ≥60s) get an amber tint; the operator
+//      can interpret this as "the engine struggled here" without reading
+//      the full trail.
+//   2. Tool-call timeline — collapsed events with provenance badges so
+//      target-controlled output is visually distinct from framework calls.
+//   3. Dismissed alternatives — what the agent considered and rejected,
+//      with reasons. Helps the labeler spot bad-reason dismissals
+//      (engine ruled something out for the wrong reason → false negative).
+//
+// Hidden when the engine didn't write a trajectory (column is null).
+
+const PROVENANCE_THEME: Record<
+  NonNullable<TrajectoryEventCompact['provenance']>,
+  { badge: string; label: string }
+> = {
+  trusted_source: { badge: 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30', label: 'trusted' },
+  intel_feed:     { badge: 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30', label: 'intel' },
+  target:         { badge: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',           label: 'target' },
+  operator_input: { badge: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',         label: 'operator' },
+  framework:      { badge: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',   label: 'framework' },
+  mixed:          { badge: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',         label: 'mixed' },
+};
+
+function TrajectorySection({ trajectory }: { trajectory: TrajectoryRecord }) {
+  const iterations = numericOrNull(trajectory.iterations_to_emit);
+  const seconds = numericOrNull(trajectory.time_to_emit_seconds);
+  const breadth = numericOrNull(trajectory.exploration_breadth);
+  const events = Array.isArray(trajectory.events_compact) ? trajectory.events_compact : [];
+  const dismissed = Array.isArray(trajectory.dismissed_alternatives)
+    ? trajectory.dismissed_alternatives
+    : [];
+
+  const heavyIterations = iterations !== null && iterations >= 30;
+  const slowEmit = seconds !== null && seconds >= 60;
+
+  // Defensive: if every metric is missing AND there are no events / dismissals,
+  // there's nothing to show. Don't render an empty box.
+  if (
+    iterations === null
+    && seconds === null
+    && breadth === null
+    && events.length === 0
+    && dismissed.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-lg border border-cyan-500/15 bg-cyan-500/[0.03] p-4">
+      <div className="mb-2.5 flex items-center gap-2">
+        <Brain className="h-3.5 w-3.5 text-cyan-300" strokeWidth={2.25} />
+        <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${AI_BRAND.gradientText}`}>
+          How did the engine arrive at this?
+        </h4>
+        {(heavyIterations || slowEmit) && (
+          <span
+            className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-200 ring-1 ring-amber-400/30"
+            title="High iteration count or slow emit suggests the engine struggled — possibly worth a refinement or a hand-review."
+          >
+            engine struggled
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pb-3 text-[11px] text-neutral-400">
+        {iterations !== null && (
+          <span title="Agent loop iterations before emitting this finding.">
+            <span className="text-neutral-500">iterations</span>{' '}
+            <span className={`font-mono ${heavyIterations ? 'text-amber-300' : 'text-neutral-200'}`}>
+              {iterations}
+            </span>
+          </span>
+        )}
+        {seconds !== null && (
+          <span title="Wall-clock seconds from agent start to emit.">
+            <span className="text-neutral-500">time-to-emit</span>{' '}
+            <span className={`font-mono ${slowEmit ? 'text-amber-300' : 'text-neutral-200'}`}>
+              {formatTrajectoryDuration(seconds)}
+            </span>
+          </span>
+        )}
+        {breadth !== null && (
+          <span title="Distinct tools / surfaces explored before emit.">
+            <span className="text-neutral-500">exploration</span>{' '}
+            <span className="font-mono text-neutral-200">{breadth}</span>
+          </span>
+        )}
+      </div>
+
+      {events.length > 0 && (
+        <div className="space-y-1.5 pb-3">
+          <div className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+            Reasoning trail
+          </div>
+          <ol className="space-y-1.5">
+            {events.slice(0, 25).map((ev, i) => {
+              const prov = ev.provenance ? PROVENANCE_THEME[ev.provenance] : null;
+              return (
+                <li key={i} className="flex items-start gap-2 text-[12px] leading-relaxed">
+                  <span className="mt-0.5 w-5 flex-shrink-0 text-right font-mono text-[10.5px] text-neutral-600">
+                    {i + 1}
+                  </span>
+                  <span className="mt-1.5 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-cyan-400/70" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      {ev.tool && (
+                        <span className="font-mono text-amber-300/90">{ev.tool}</span>
+                      )}
+                      {prov && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${prov.badge}`}
+                          title={`Provenance: ${ev.provenance}`}
+                        >
+                          {prov.label}
+                        </span>
+                      )}
+                      {ev.target && (
+                        <span className="min-w-0 truncate text-neutral-400">{ev.target}</span>
+                      )}
+                    </div>
+                    {ev.note && (
+                      <div className="mt-0.5 text-[11.5px] text-neutral-500">{ev.note}</div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          {events.length > 25 && (
+            <div className="pt-1 text-[10.5px] text-neutral-500">
+              … and {events.length - 25} more — full trail in the run artifacts.
+            </div>
+          )}
+        </div>
+      )}
+
+      {dismissed.length > 0 && (
+        <div className="space-y-1.5 border-t border-neutral-800/60 pt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+              What we ruled out
+            </span>
+            <span
+              className="text-[10.5px] text-neutral-600"
+              title="Hypotheses the agent considered and rejected, with the reason. Sanity-check these — a bad-reason dismissal is a false negative."
+            >
+              {dismissed.length}
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {dismissed.slice(0, 10).map((alt, i) => (
+              <li key={i} className="rounded-md border border-neutral-800/60 bg-neutral-950/40 p-2">
+                {alt.hypothesis && (
+                  <div className="text-[12px] text-neutral-200">{alt.hypothesis}</div>
+                )}
+                {alt.reason && (
+                  <div className="mt-0.5 text-[11px] leading-relaxed text-neutral-500">
+                    <span className="text-neutral-600">reason:</span> {alt.reason}
+                  </div>
+                )}
+                {alt.evidence && (
+                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-neutral-600">
+                    {alt.evidence}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function numericOrNull(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return null;
+}
+
+function formatTrajectoryDuration(seconds: number): string {
+  if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}m ${secs}s`;
 }
