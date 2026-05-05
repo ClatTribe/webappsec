@@ -952,6 +952,18 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                   Reopen
                 </TriageButton>
               )}
+              {/* Fix-verify rescan (Tier A / wishlist §9.3 row 2). One
+                  click spawns a focused quick-mode scan to confirm
+                  whether the issue still reproduces. The new scan's
+                  page surfaces a "Verifying finding: ..." badge so the
+                  loop is visible without leaving the dashboard.
+                  Hidden when the finding is already 'fixed' (no point)
+                  or 'false_positive' (verifying a non-issue is wasted
+                  budget). */}
+              {finding.status !== 'fixed'
+                && finding.status !== 'false_positive' && (
+                <VerifyFixButton findingId={finding.id} disabled={updating} />
+              )}
             </div>
             {finding.triaged_at && finding.status !== 'open' && (
               <div className="pt-1.5 text-[10.5px] text-neutral-500">
@@ -981,6 +993,10 @@ const TONE_BUTTON: Record<string, { active: string; idle: string }> = {
   blue: {
     active: 'bg-blue-500/20 text-blue-200 ring-1 ring-blue-400/40',
     idle: 'bg-neutral-900 text-neutral-300 ring-1 ring-neutral-800 hover:bg-blue-500/10 hover:text-blue-200 hover:ring-blue-400/30',
+  },
+  cyan: {
+    active: 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-400/40',
+    idle: 'bg-neutral-900 text-neutral-300 ring-1 ring-neutral-800 hover:bg-cyan-500/10 hover:text-cyan-200 hover:ring-cyan-400/30',
   },
 };
 
@@ -1241,6 +1257,56 @@ function KillChainSection({ chain }: { chain: KillChainResponse }) {
         })}
       </ol>
     </section>
+  );
+}
+
+function VerifyFixButton({ findingId, disabled }: { findingId: string; disabled?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onClick = async () => {
+    if (busy || disabled) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/findings/${findingId}/verify-rescan`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body?.error ?? `failed (${res.status})`);
+        setBusy(false);
+        return;
+      }
+      const { scan_id } = (await res.json()) as { scan_id: string };
+      // Hard-navigate so the user lands on the new scan's live view —
+      // we don't want a soft-navigation that might keep the prior
+      // dashboard event subscriptions live.
+      window.location.href = `/scans/${scan_id}`;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'request failed');
+      setBusy(false);
+    }
+  };
+
+  const tone = TONE_BUTTON.cyan ?? TONE_BUTTON.blue;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy || disabled}
+        title="Spawn a focused quick-mode rescan to confirm whether the issue still reproduces"
+        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone.idle}`}
+      >
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
+        ) : (
+          <RefreshCw className="h-3.5 w-3.5" strokeWidth={2.25} />
+        )}
+        Verify fix
+      </button>
+      {error && <span className="ml-1 text-[10.5px] text-rose-300">{error}</span>}
+    </>
   );
 }
 

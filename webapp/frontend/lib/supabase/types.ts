@@ -144,6 +144,23 @@ export interface Scan {
    *  `<org>/<scan>/sbom.cdx.json` (migration 032). UI keys the
    *  "View SBOM" / "Download CycloneDX" CTAs off this column. */
   sbom_uploaded?: boolean;
+  /** Engine PR #141 — HAR / Burp project imports persisted by the
+   *  API route on scan creation (migration 035). Browser uploads to
+   *  user-uploads bucket; worker downloads at scan-start. */
+  imports?: ScanImport[] | null;
+  /** Tier A — fix-verify targeted rescan (migration 036). When this
+   *  scan was launched from a finding's "Verify fix" button, this
+   *  column points back at the finding the scan is verifying. The
+   *  scan page renders a "Verifying finding: <title>" badge on the
+   *  header when set. */
+  verifying_finding_id?: string | null;
+}
+
+export interface ScanImport {
+  kind: 'har' | 'burp';
+  storage_path: string;
+  filename: string;
+  size_bytes: number;
 }
 
 // ---------------- CycloneDX 1.5 (subset the viewer renders) ----------------
