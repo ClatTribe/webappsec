@@ -11,6 +11,7 @@ import AgentsSection from '@/components/scan/agents-section';
 import PhaseProgress from '@/components/scan/phase-progress';
 import HypothesisPane from '@/components/scan/hypothesis-pane';
 import ComplianceOverlay from '@/components/scan/compliance-overlay';
+import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
 
 interface Props {
   scanId: string;
@@ -224,6 +225,13 @@ export default function ScanLiveView({
 
   return (
     <div className="space-y-6">
+      {/* Live "upstream rate-limited" banner (engine PR #112). Sits at the
+          top of the live-view tree so a stuck retry is visible without
+          scrolling — operators were wondering "is it stuck?" while strix
+          slept through 45-second backoffs. Renders nothing when no retry
+          is in flight. */}
+      <UpstreamRetryBanner events={events} />
+
       {/* Hero status card */}
       <section
         className={`relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-gradient-to-b from-neutral-900/50 via-neutral-950/30 to-neutral-950/0 p-6 ring-1 ${theme.ring}`}
