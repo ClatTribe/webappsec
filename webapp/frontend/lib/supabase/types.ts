@@ -190,6 +190,7 @@ export interface RunMeta {
   vendor_risk?: VendorRisk;
   mfa_attestation?: MfaAttestation;
   compliance_posture?: CompliancePosture;
+  monitoring_posture?: MonitoringPosture;
   /** Engines may add additional top-level signals over time. The
    *  open shape is forward-compatible — a new key the wrapper doesn't
    *  know about is preserved on the row and ignored by the UI. */
@@ -225,6 +226,27 @@ export interface CompliancePosture {
   cadence_status?: 'In compliance' | 'Overdue' | string;
   audit_log_retention_days?: number;
   days_since_last_scan?: number;
+  [k: string]: unknown;
+}
+
+export interface MonitoringPosture {
+  /** 0-6 score (engine PR #128 convention). */
+  score?: number;
+  max?: number;
+  /** Engine emits a structured breakdown across the 6 axes —
+   *  redaction (3 axes) + reporting (2 axes) + rate-limit (1 axis).
+   *  Keys may evolve; we render whatever booleans are present. */
+  breakdown?: {
+    pii_redaction?: boolean;
+    secrets_redaction?: boolean;
+    auth_redaction?: boolean;
+    csp_reporting?: boolean;
+    error_reporting?: boolean;
+    rate_limit_observed?: boolean;
+    [k: string]: unknown;
+  };
+  /** Free-form recommendation text from the engine. */
+  recommendation?: string;
   [k: string]: unknown;
 }
 
