@@ -72,6 +72,19 @@ class WorkerSupabase:
         rows = result.data or []
         return [r["scan_id"] for r in rows if isinstance(r, dict) and r.get("scan_id")]
 
+    def set_preflight_failed(self, scan_id: str) -> None:
+        """Flag this scan as preflight-failed (migration 029).
+
+        Called after pattern-matching engine PR #30 preflight markers
+        in stderr. UI renders an amber "preflight failed" banner using
+        this column. Best-effort: any failure is logged and the scan
+        finishes without the flag — the failure surfaces via exit_code
+        and error_message regardless.
+        """
+        self.client.rpc(
+            "worker_set_preflight_failed", {"p_scan_id": scan_id}
+        ).execute()
+
     def finish_scan(
         self,
         scan_id: str,
