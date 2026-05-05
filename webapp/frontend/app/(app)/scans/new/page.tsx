@@ -51,6 +51,7 @@ function NewScanInner() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [integrationIds, setIntegrationIds] = useState<string[]>([]);
   const [dnsOnly, setDnsOnly] = useState(false);
+  const [branch, setBranch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +95,14 @@ function NewScanInner() {
         // Engine PR #30 — passive recon mode (only valid for domain targets).
         // Forwarded to the worker as STRIX_DNS_ONLY=1 / --dns-only flag.
         dns_only: dnsOnly && selected.type === 'domain',
+        // Engine PR #117 — branch picker (only valid for repository
+        // targets). Forwarded as `--branch <ref>`. Send only when the
+        // user actually typed something — null lets the engine fall
+        // back to the repo's default branch.
+        branch:
+          selected.type === 'repository' && branch.trim().length > 0
+            ? branch.trim()
+            : undefined,
       }),
     });
     if (!res.ok) {
@@ -219,6 +228,32 @@ function NewScanInner() {
             ))}
           </div>
         </section>
+
+        {/* Branch picker (engine PR #117 / migration 033) — only relevant
+            for repository targets. Free-text input; the engine accepts
+            branch / tag / SHA refs. Empty value = the engine uses the
+            repository's default branch. A full GitHub-API-sourced
+            dropdown is on the wishlist but out of scope here — requires
+            a connected GitHub integration to enumerate refs. */}
+        {selected?.type === 'repository' && (
+          <section>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+              Branch <span className="text-neutral-500">(optional)</span>
+            </div>
+            <input
+              type="text"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              maxLength={255}
+              placeholder="main"
+              className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+            />
+            <p className="mt-1 text-[11px] text-neutral-500">
+              Branch, tag, or commit SHA. Leave empty to scan the repository&apos;s
+              default branch.
+            </p>
+          </section>
+        )}
 
         {/* Passive recon mode (--dns-only) — only relevant for domain targets.
             Engine PR #30; forwarded as STRIX_DNS_ONLY=1 by the worker. */}

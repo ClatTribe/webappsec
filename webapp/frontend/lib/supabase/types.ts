@@ -109,6 +109,10 @@ export interface Scan {
    *  forwards STRIX_DNS_ONLY=1 into the sandbox env. The scan page
    *  renders a "passive" badge on the run header. */
   dns_only?: boolean;
+  /** Engine PR #117 — repository branch / tag / SHA picker. Worker
+   *  forwards as `--branch <ref>` when set; null means use the repo's
+   *  default branch. Only meaningful for repository-typed targets. */
+  branch?: string | null;
   /** Engine PR #29 — set by the worker when Strix's preflight bailed
    *  (target didn't resolve / no port answered). Distinct from a scan
    *  crash; UI renders an amber "Target unreachable" banner. */

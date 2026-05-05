@@ -698,6 +698,15 @@ def _build_cmd(
         cmd += ["--feedback-from", feedback_path]
     if scan.get("diff_base"):
         cmd += ["--diff-base", scan["diff_base"]]
+    # Engine PR #117 / migration 033 — repository branch picker. The
+    # form lets the operator type a ref (branch / tag / SHA) for
+    # repository-typed targets; we forward as `--branch <ref>` so the
+    # engine checks out the right tree before scanning. Trim defensively
+    # in case a stray space made it through the API.
+    if scan.get("branch"):
+        branch = str(scan["branch"]).strip()
+        if branch:
+            cmd += ["--branch", branch]
 
     # Engine PR #129 — auditor-grade evidence bundle. The engine writes
     # an 8-file pack to `<path>/<run_id>/` containing manifest, control
