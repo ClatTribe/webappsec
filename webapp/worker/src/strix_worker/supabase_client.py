@@ -72,6 +72,18 @@ class WorkerSupabase:
         rows = result.data or []
         return [r["scan_id"] for r in rows if isinstance(r, dict) and r.get("scan_id")]
 
+    def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
+        """Persist the engine's run_meta.json verbatim (migration 031).
+
+        The blob carries vendor_risk, mfa_attestation, compliance_posture,
+        and other structured engine signals the scan-page hero renders.
+        Worker calls once per scan; UI reads typed paths into the JSONB.
+        """
+        self.client.rpc(
+            "worker_set_run_meta",
+            {"p_scan_id": scan_id, "p_run_meta": run_meta},
+        ).execute()
+
     def set_compliance_pack_uploaded(self, scan_id: str) -> None:
         """Flag this scan's compliance pack as uploaded (migration 030).
 

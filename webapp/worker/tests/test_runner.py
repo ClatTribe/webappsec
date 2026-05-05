@@ -372,6 +372,11 @@ class FakeSupabase:
         # mirrors the production fail-open path when no keys are set.
         return {}
 
+    def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
+        # Tests can read this back via `sb.run_meta` to assert the
+        # worker forwarded the right blob to Postgres.
+        self.run_meta = run_meta
+
     def set_compliance_pack_uploaded(self, scan_id: str) -> None:
         # Tests don't drive the compliance-pack upload path; the worker
         # only calls this after at least one file lands in storage, and
@@ -1533,6 +1538,84 @@ def test_pack_content_type_uses_known_extensions():
     assert _content_type_for(Path("events.jsonl")) == "application/x-ndjson"
     assert _content_type_for(Path("SHA256SUMS")) == "text/plain; charset=utf-8"
     assert _content_type_for(Path("foo.bin")) == "text/plain; charset=utf-8"
+
+
+# ---------------------------------------------------------------------------
+# Migration 031 — run_meta.json persistence (engine PR #133 + #132 + #103)
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import _persist_run_meta  # noqa: E402
+
+
+def test_persist_run_meta_writes_full_blob(tmp_path, fake_scan):
+    """Worker stores the whole run_meta blob verbatim on the scan row.
+    The UI reads typed paths into the JSONB so adding a new top-level
+    signal is a UI change, not a schema change."""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    blob = {
+        "vendor_risk": {
+            "score": 72,
+            "band": "medium_risk",
+            "deductions_by_category": {"tls": -10, "headers": -8, "dns": -10},
+            "recommendation": "Address TLS hygiene first",
+        },
+        "mfa_attestation": {
+            "score": 3,
+            "max": 4,
+            "breakdown": {
+                "login_tokens": True,
+                "challenge_keys": True,
+                "webauthn_header": False,
+                "mfa_setup_paths": True,
+            },
+        },
+        "compliance_posture": {"cadence_status": "In compliance"},
+    }
+    (run_dir / "run_meta.json").write_text(json.dumps(blob))
+
+    sb = FakeSupabase(fake_scan)
+    _persist_run_meta(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "run_meta", None) == blob
+
+
+def test_persist_run_meta_swallows_missing_file(tmp_path, fake_scan):
+    """Older engine versions or scans that crashed pre-meta-write —
+    skip silently rather than fail the finalisation."""
+    run_dir = tmp_path / "run-empty"
+    run_dir.mkdir()
+
+    sb = FakeSupabase(fake_scan)
+    _persist_run_meta(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "run_meta", None) is None
+
+
+def test_persist_run_meta_swallows_parse_error(tmp_path, fake_scan):
+    """A malformed run_meta.json must not block the rest of finalisation
+    — vendor_risk/MFA simply won't render."""
+    run_dir = tmp_path / "run-bad"
+    run_dir.mkdir()
+    (run_dir / "run_meta.json").write_text("{not-json")
+
+    sb = FakeSupabase(fake_scan)
+    _persist_run_meta(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "run_meta", None) is None
+
+
+def test_persist_run_meta_rejects_non_object(tmp_path, fake_scan):
+    """A JSON array at the top level (very unlikely engine drift) is
+    treated as missing rather than blindly persisted."""
+    run_dir = tmp_path / "run-arr"
+    run_dir.mkdir()
+    (run_dir / "run_meta.json").write_text('["array, not object"]')
+
+    sb = FakeSupabase(fake_scan)
+    _persist_run_meta(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "run_meta", None) is None
 
 
 @pytest.mark.asyncio

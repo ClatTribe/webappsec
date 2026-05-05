@@ -120,6 +120,57 @@ export interface Scan {
    *  compliance pack" button off this column to avoid dangling links
    *  when the engine didn't emit a pack. */
   compliance_pack_uploaded?: boolean;
+  /** Engine `run_meta.json` persisted verbatim by the worker
+   *  (migration 031). UI reads typed paths into the JSONB:
+   *    - `vendor_risk` (engine PR #133) — 0-100 score + deductions
+   *    - `mfa_attestation` (engine PR #132) — 4-point posture score
+   *    - `compliance_posture` (engine PR #103) — cadence status
+   *  Adding a new top-level signal is a UI change, not a schema
+   *  change. Null when the engine didn't write a run_meta or the
+   *  worker couldn't parse it. */
+  run_meta?: RunMeta | null;
+}
+
+export interface RunMeta {
+  vendor_risk?: VendorRisk;
+  mfa_attestation?: MfaAttestation;
+  compliance_posture?: CompliancePosture;
+  /** Engines may add additional top-level signals over time. The
+   *  open shape is forward-compatible — a new key the wrapper doesn't
+   *  know about is preserved on the row and ignored by the UI. */
+  [k: string]: unknown;
+}
+
+export interface VendorRisk {
+  /** 0-100, higher = safer (engine convention). */
+  score?: number;
+  band?: 'low_risk' | 'medium_risk' | 'high_risk' | string;
+  /** Map of category → deduction (negative number). */
+  deductions_by_category?: Record<string, number>;
+  recommendation?: string;
+  [k: string]: unknown;
+}
+
+export interface MfaAttestation {
+  /** 0-4 (engine PR #132 convention). */
+  score?: number;
+  max?: number;
+  breakdown?: {
+    login_tokens?: boolean;
+    challenge_keys?: boolean;
+    webauthn_header?: boolean;
+    mfa_setup_paths?: boolean;
+    [k: string]: unknown;
+  };
+  attestation_text?: string;
+  [k: string]: unknown;
+}
+
+export interface CompliancePosture {
+  cadence_status?: 'In compliance' | 'Overdue' | string;
+  audit_log_retention_days?: number;
+  days_since_last_scan?: number;
+  [k: string]: unknown;
 }
 
 export interface ScanSummary {
