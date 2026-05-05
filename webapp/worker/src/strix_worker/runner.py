@@ -337,6 +337,16 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             # Strix's exit code convention: 0 = completed with no findings,
             # 2 = completed with findings. Anything else is a real failure.
             final_status = "completed"
+        elif exit_code == 3:
+            # Engine PR #113 — EXIT_BUDGET_EXCEEDED. The scan ran
+            # cleanly until --max-cost or --max-input-tokens self-exit
+            # tripped. We treat it as a failure so the dashboard
+            # surfaces it distinctly from a clean completion, but the
+            # error_message disambiguates "ran out of budget" from
+            # "engine crashed" so the UI can render an appropriate
+            # call-to-action ("raise budget" vs. "investigate logs").
+            final_status = "failed"
+            error_message = "scan stopped: budget exceeded"
         else:
             final_status = "failed"
             error_message = f"strix exited with code {exit_code}"
@@ -707,6 +717,19 @@ def _build_cmd(
         branch = str(scan["branch"]).strip()
         if branch:
             cmd += ["--branch", branch]
+    # Engine PR #113 / migration 034 — cost-cap self-exit gates. The
+    # engine watches LLM cost + token usage and exits with code 3
+    # (EXIT_BUDGET_EXCEEDED) plus a `run.terminated{reason: budget_
+    # exceeded}` event when either threshold trips. The form / RPC
+    # both reject non-positive values, but we re-validate here so a
+    # rogue API caller can't inject a 0 (which the engine would treat
+    # as "no usage allowed" and trip immediately).
+    max_cost = scan.get("max_cost")
+    if isinstance(max_cost, (int, float)) and max_cost > 0:
+        cmd += ["--max-cost", str(max_cost)]
+    max_input_tokens = scan.get("max_input_tokens")
+    if isinstance(max_input_tokens, int) and max_input_tokens > 0:
+        cmd += ["--max-input-tokens", str(max_input_tokens)]
 
     # Engine PR #129 — auditor-grade evidence bundle. The engine writes
     # an 8-file pack to `<path>/<run_id>/` containing manifest, control
