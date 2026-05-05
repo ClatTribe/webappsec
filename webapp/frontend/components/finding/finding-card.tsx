@@ -255,7 +255,12 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-xl border border-neutral-800/70 bg-neutral-900/30 transition-all hover:border-neutral-700/80 hover:bg-neutral-900/50 ${
+      // `finding-<id>` anchor is the deep-link target for the
+      // hypothesis-pane "see finding" arrow + any future Slack/email
+      // notification "jump to finding" link. Native browser fragment
+      // navigation handles scroll-into-view automatically.
+      id={`finding-${finding.id}`}
+      className={`group relative scroll-mt-20 overflow-hidden rounded-xl border border-neutral-800/70 bg-neutral-900/30 transition-all hover:border-neutral-700/80 hover:bg-neutral-900/50 ${
         muted ? 'opacity-60' : ''
       }`}
     >

@@ -9,6 +9,7 @@ import FindingCard from '@/components/finding/finding-card';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
 import PhaseProgress from '@/components/scan/phase-progress';
+import HypothesisPane from '@/components/scan/hypothesis-pane';
 
 interface Props {
   scanId: string;
@@ -330,6 +331,14 @@ export default function ScanLiveView({
           empty. Hidden until the engine emits a `phase.entered` event
           (older versions / pre-recon phase). */}
       <PhaseProgress events={events} />
+
+      {/* Active-hypothesis live pane (engine PR #138 / wishlist §15.4).
+          Cross-specialist hypotheses with status (open / confirmed /
+          dismissed). Operator sees what the engine is investigating
+          right now — the live-scan equivalent of looking over a senior
+          pen-tester's shoulder. Confirmed rows deep-link to the
+          finding card via #finding-<id>. */}
+      <HypothesisPane events={events} />
 
       {/* AI investigators — explains what an "agent" is and lists each one. */}
       <AgentsSection events={events} expectedCount={agentsCount ?? 0} />
