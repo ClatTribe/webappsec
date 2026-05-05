@@ -174,9 +174,17 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             feedback_path = _write_feedback_jsonl(sb, scan_id, org_id, workdir)
             fp_policy = _resolve_fp_policy(sb, org_id)
 
+            # Threat-intel & recon API keys (§19.1 Tier 1 item 10, migration
+            # 028). Each decrypted STRIX_* key gets forwarded into the
+            # sandbox env unchanged. Tools fail-open per-tool when a key
+            # is absent, so a missing key = silent feature degradation,
+            # never a scan failure.
+            org_strix_keys = sb.decrypt_org_secrets(scan_id)
+
             env = _build_env(
                 cfg, scan, creds.env, llm_provider, llm_api_key,
                 feedback_path=feedback_path, fp_policy=fp_policy,
+                org_strix_keys=org_strix_keys,
             )
             cmd = _build_cmd(cfg, scan, targets, feedback_path=feedback_path)
 
@@ -512,6 +520,19 @@ def _resolve_llm(
     return provider, api_key
 
 
+# Closed enum of recon/threat-intel keys the engine reads from the
+# sandbox env. Mirrors migration 028's CHECK constraint and the
+# settings UI's STRIX_KEYS list. Adding a new key requires a
+# coordinated change in all three places.
+_ALLOWED_ORG_STRIX_KEYS = frozenset({
+    "STRIX_GITHUB_TOKEN",
+    "STRIX_BING_KEY",
+    "STRIX_SECURITYTRAILS_KEY",
+    "STRIX_VIRUSTOTAL_KEY",
+    "STRIX_VIEWDNS_KEY",
+})
+
+
 def _build_env(
     cfg: WorkerConfig,
     scan: dict[str, Any],
@@ -521,6 +542,7 @@ def _build_env(
     *,
     feedback_path: str | None = None,
     fp_policy: str | None = None,
+    org_strix_keys: dict[str, str] | None = None,
 ) -> dict[str, str]:
     env = {
         "STRIX_LLM": llm_provider,
@@ -545,6 +567,14 @@ def _build_env(
         env["STRIX_FEEDBACK_FROM"] = feedback_path
     if fp_policy:
         env["STRIX_FP_AUTO_DISMISS"] = fp_policy
+    # §19.1 Tier 1 item 10 — per-org threat-intel & recon API keys.
+    # The decrypt RPC already filters to the migration's CHECK enum,
+    # but we re-check here so a future RPC drift can't smuggle an
+    # arbitrary env var into the sandbox. Empty values are dropped.
+    if org_strix_keys:
+        for key, value in org_strix_keys.items():
+            if key in _ALLOWED_ORG_STRIX_KEYS and isinstance(value, str) and value:
+                env[key] = value
     env.update(cred_env)
     return env
 

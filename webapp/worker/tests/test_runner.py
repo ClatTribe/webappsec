@@ -367,6 +367,11 @@ class FakeSupabase:
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         return None
 
+    def decrypt_org_secrets(self, scan_id: str) -> dict[str, str]:
+        # Tests don't exercise per-org STRIX_* keys; an empty dict
+        # mirrors the production fail-open path when no keys are set.
+        return {}
+
     def upload_artifact(
         self, bucket: str, path: str, contents: bytes, content_type: str = "text/plain"
     ) -> None:
