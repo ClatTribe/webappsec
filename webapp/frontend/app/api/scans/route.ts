@@ -14,6 +14,10 @@ const Body = z.object({
   // Engine PR #30 — passive recon mode for domain targets. Worker
   // forwards as STRIX_DNS_ONLY=1 in the sandbox env.
   dns_only: z.boolean().default(false),
+  // Engine PR #117 — branch picker for repository targets. Free-form
+  // ref string (branch / tag / SHA); engine forwards as `--branch`.
+  // Strip server-side defensively — a stray space breaks shell escape.
+  branch: z.string().trim().max(255).optional(),
 });
 
 // POST /api/scans — queue a new scan.
@@ -94,6 +98,7 @@ export async function POST(req: Request) {
     p_targets: targetsPayload,
     p_integration_ids: body.integration_ids,
     p_dns_only: body.dns_only,
+    p_branch: body.branch && body.branch.length > 0 ? body.branch : null,
   });
   if (rpcErr || !scanId) {
     return NextResponse.json(

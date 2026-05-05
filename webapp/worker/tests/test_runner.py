@@ -1426,6 +1426,43 @@ async def test_run_scan_bails_when_claim_loses_race(fake_scan, cfg_factory):
 
 
 # ---------------------------------------------------------------------------
+# Migration 033 — branch picker plumbing (engine PR #117)
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import _build_cmd  # noqa: E402
+
+
+def test_build_cmd_appends_branch_when_set(cfg_factory):
+    """A repository scan with `branch` set must produce `--branch <ref>`
+    in the engine command. Tags / SHAs round-trip the same way."""
+    cfg = cfg_factory("")  # script body irrelevant here
+    scan = {
+        "scan_mode": "quick",
+        "scope_mode": "auto",
+        "branch": "feature/refactor",
+    }
+    targets = [{"value": "https://github.com/example/repo"}]
+
+    cmd = _build_cmd(cfg, scan, targets)
+
+    assert "--branch" in cmd
+    assert cmd[cmd.index("--branch") + 1] == "feature/refactor"
+
+
+def test_build_cmd_omits_branch_when_blank_or_missing(cfg_factory):
+    """Empty / whitespace-only / missing `branch` must NOT add --branch.
+    Stripping happens in the SQL RPC and the API zod schema, but the
+    worker re-strips defensively in case a stray space slips through."""
+    cfg = cfg_factory("")
+    targets = [{"value": "https://github.com/example/repo"}]
+
+    for branch_value in [None, "", "   "]:
+        scan = {"scan_mode": "quick", "scope_mode": "auto", "branch": branch_value}
+        cmd = _build_cmd(cfg, scan, targets)
+        assert "--branch" not in cmd, f"branch={branch_value!r} leaked through"
+
+
+# ---------------------------------------------------------------------------
 # Migration 029 — preflight detection + trajectory.jsonl ingestion
 # ---------------------------------------------------------------------------
 
