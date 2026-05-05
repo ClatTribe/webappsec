@@ -129,6 +129,61 @@ export interface Scan {
    *  change. Null when the engine didn't write a run_meta or the
    *  worker couldn't parse it. */
   run_meta?: RunMeta | null;
+  /** Engine PR #131 — CycloneDX SBOM uploaded to scan-artifacts at
+   *  `<org>/<scan>/sbom.cdx.json` (migration 032). UI keys the
+   *  "View SBOM" / "Download CycloneDX" CTAs off this column. */
+  sbom_uploaded?: boolean;
+}
+
+// ---------------- CycloneDX 1.5 (subset the viewer renders) ----------------
+//
+// We only declare the fields the SBOM viewer actually reads. The
+// `[k:string]:unknown` escape hatch on each interface preserves the
+// rest of the spec for unknown-key forward-compat — auditors can
+// always pull the raw file via `?format=cyclonedx`.
+
+export interface CycloneDxBom {
+  bomFormat?: string;
+  specVersion?: string;
+  serialNumber?: string;
+  version?: number;
+  metadata?: CycloneDxMetadata;
+  components?: CycloneDxComponent[];
+  vulnerabilities?: CycloneDxVulnerability[];
+  [k: string]: unknown;
+}
+
+export interface CycloneDxMetadata {
+  timestamp?: string;
+  tools?: Array<{ vendor?: string; name?: string; version?: string }> | { components?: unknown[] };
+  component?: CycloneDxComponent;
+  [k: string]: unknown;
+}
+
+export interface CycloneDxComponent {
+  'bom-ref'?: string;
+  type?: 'application' | 'framework' | 'library' | 'container' | 'platform' | 'operating-system' | 'device' | 'firmware' | 'file' | string;
+  name?: string;
+  version?: string;
+  description?: string;
+  purl?: string;
+  group?: string;
+  scope?: 'required' | 'optional' | 'excluded' | string;
+  licenses?: Array<{ license?: { id?: string; name?: string } }>;
+  /** Engine #131 extension — what surface signal flagged the component. */
+  detected_via?: string;
+  /** Engine confidence on the detection (0.0–1.0). */
+  confidence?: number;
+  [k: string]: unknown;
+}
+
+export interface CycloneDxVulnerability {
+  'bom-ref'?: string;
+  id?: string;
+  source?: { name?: string; url?: string };
+  ratings?: Array<{ severity?: string; method?: string; score?: number }>;
+  affects?: Array<{ ref?: string }>;
+  [k: string]: unknown;
 }
 
 export interface RunMeta {

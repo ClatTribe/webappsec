@@ -13,6 +13,7 @@ import {
   Loader2,
   ClipboardCheck,
   Download,
+  Package,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -192,22 +193,37 @@ export default async function ScanDetailPage({ params }: Props) {
       <header className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-3xl font-semibold tracking-tight text-neutral-50">{scan.run_name}</h1>
-          {/* Auditor-grade evidence pack download (engine PR #129 /
-              wishlist §14.4 row 1 / migration 030). Single biggest B2B
-              unlock — the operator hands this zip to compliance teams.
-              Hidden until the worker has flipped the flag, so a scan
-              that pre-dates #129 (or had an upload error) doesn't
-              dangle a broken download link. */}
-          {scan.compliance_pack_uploaded && (
-            <a
-              href={`/api/scans/${scan.id}/compliance-pack`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:border-violet-500/50 hover:bg-violet-500/20"
-              title="Auditor-grade evidence bundle — manifest, control attestations, coverage report, findings, signed events excerpt, SHA256 sums"
-            >
-              <Download className="h-3.5 w-3.5" strokeWidth={2.25} />
-              Download compliance pack
-            </a>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* CycloneDX SBOM viewer (engine PR #131 / wishlist §14.6 /
+                migration 032). Surfaces only when the worker has uploaded
+                a parseable SBOM. */}
+            {scan.sbom_uploaded && (
+              <Link
+                href={`/scans/${scan.id}/sbom`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20"
+                title="CycloneDX 1.5 SBOM — every component the engine fingerprinted on this target"
+              >
+                <Package className="h-3.5 w-3.5" strokeWidth={2.25} />
+                View SBOM
+              </Link>
+            )}
+            {/* Auditor-grade evidence pack download (engine PR #129 /
+                wishlist §14.4 row 1 / migration 030). Single biggest B2B
+                unlock — the operator hands this zip to compliance teams.
+                Hidden until the worker has flipped the flag, so a scan
+                that pre-dates #129 (or had an upload error) doesn't
+                dangle a broken download link. */}
+            {scan.compliance_pack_uploaded && (
+              <a
+                href={`/api/scans/${scan.id}/compliance-pack`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:border-violet-500/50 hover:bg-violet-500/20"
+                title="Auditor-grade evidence bundle — manifest, control attestations, coverage report, findings, signed events excerpt, SHA256 sums"
+              >
+                <Download className="h-3.5 w-3.5" strokeWidth={2.25} />
+                Download compliance pack
+              </a>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-neutral-400">
           <span className="rounded-md bg-neutral-900 px-2 py-0.5 font-medium ring-1 ring-neutral-800">
