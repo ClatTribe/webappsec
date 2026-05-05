@@ -52,6 +52,8 @@ function NewScanInner() {
   const [integrationIds, setIntegrationIds] = useState<string[]>([]);
   const [dnsOnly, setDnsOnly] = useState(false);
   const [branch, setBranch] = useState('');
+  const [maxCost, setMaxCost] = useState<string>('');
+  const [maxInputTokens, setMaxInputTokens] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +105,15 @@ function NewScanInner() {
           selected.type === 'repository' && branch.trim().length > 0
             ? branch.trim()
             : undefined,
+        // Engine PR #113 — cost-cap self-exit gates. Forwarded as
+        // `--max-cost <usd>` and `--max-input-tokens <n>`. Both
+        // optional; the engine's `run.terminated{reason: budget_
+        // exceeded}` event + exit-3 land on the dashboard with a
+        // distinct "stopped: budget exceeded" message.
+        max_cost: maxCost.trim() ? Number(maxCost) : undefined,
+        max_input_tokens: maxInputTokens.trim()
+          ? Math.floor(Number(maxInputTokens))
+          : undefined,
       }),
     });
     if (!res.ok) {
@@ -324,6 +335,53 @@ function NewScanInner() {
             </div>
           </section>
         )}
+
+        {/* Cost cap (engine PR #113 / migration 034). Both fields
+            optional; either or both may be set. The engine's
+            `--max-cost` self-exits when LLM cost crosses the
+            threshold; `--max-input-tokens` self-exits on token usage.
+            We don't enforce per-org plan ceilings here — those are a
+            future billing-tier follow-up. */}
+        <section>
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+            Budget cap <span className="text-neutral-500">(optional)</span>
+          </div>
+          <p className="mb-2 text-[11px] text-neutral-500">
+            Stop the scan automatically if it crosses one of these limits.
+            Either / both leave blank for no cap. The dashboard surfaces
+            "stopped: budget exceeded" if a cap trips.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10.5px] font-medium uppercase tracking-wider text-neutral-400">
+                Max cost (USD)
+              </span>
+              <input
+                type="number"
+                value={maxCost}
+                onChange={(e) => setMaxCost(e.target.value)}
+                step="0.10"
+                min="0"
+                placeholder="e.g. 5.00"
+                className="rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-1.5 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10.5px] font-medium uppercase tracking-wider text-neutral-400">
+                Max input tokens
+              </span>
+              <input
+                type="number"
+                value={maxInputTokens}
+                onChange={(e) => setMaxInputTokens(e.target.value)}
+                step="1"
+                min="0"
+                placeholder="e.g. 500000"
+                className="rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-1.5 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </label>
+          </div>
+        </section>
 
         <section>
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">

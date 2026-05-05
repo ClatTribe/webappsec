@@ -428,17 +428,32 @@ function FailureCause({
 }) {
   const lastErr = extractLastErrorLine(events);
   const isCancelled = status === 'cancelled';
-  const headline = isCancelled ? 'Scan cancelled' : 'Scan failed';
-  const accent = isCancelled
-    ? 'border-neutral-700 bg-neutral-900/40'
-    : 'border-red-500/30 bg-red-500/5';
+  // Engine PR #113 budget-exceeded path. Distinct accent (amber, not
+  // red) so the operator immediately sees "this was a planned stop,
+  // not a crash". Messaging downstream switches the call-to-action
+  // from "investigate logs" to "raise budget and rerun".
+  const isBudget = exitCode === 3 || errorMessage === 'scan stopped: budget exceeded';
+  const headline = isBudget
+    ? 'Scan stopped: budget exceeded'
+    : isCancelled
+      ? 'Scan cancelled'
+      : 'Scan failed';
+  const accent = isBudget
+    ? 'border-amber-500/30 bg-amber-500/[0.06]'
+    : isCancelled
+      ? 'border-neutral-700 bg-neutral-900/40'
+      : 'border-red-500/30 bg-red-500/5';
 
   return (
     <section className={`rounded-2xl border p-5 ${accent}`}>
       <div className="flex items-start gap-3">
         <ShieldX
           className={`mt-0.5 h-5 w-5 flex-shrink-0 ${
-            isCancelled ? 'text-neutral-400' : 'text-red-300'
+            isBudget
+              ? 'text-amber-300'
+              : isCancelled
+                ? 'text-neutral-400'
+                : 'text-red-300'
           }`}
           strokeWidth={2}
         />
@@ -446,22 +461,34 @@ function FailureCause({
           <div>
             <h2
               className={`text-sm font-semibold ${
-                isCancelled ? 'text-neutral-200' : 'text-red-100'
+                isBudget
+                  ? 'text-amber-100'
+                  : isCancelled
+                    ? 'text-neutral-200'
+                    : 'text-red-100'
               }`}
             >
               {headline}
             </h2>
             <p className="mt-1 text-xs text-neutral-400">
-              {errorMessage ?? 'No structured error message was recorded.'}
+              {isBudget
+                ? 'A configured cost / token cap was reached. The engine self-exited with cleanup intact — partial findings are still recorded above.'
+                : errorMessage ?? 'No structured error message was recorded.'}
               {exitCode != null && exitCode !== 0 && (
                 <span className="ml-2 font-mono text-neutral-500">
                   (exit code {exitCode})
                 </span>
               )}
             </p>
+            {isBudget && (
+              <p className="mt-2 text-[11.5px] text-amber-200/80">
+                Raise the budget on the new-scan form and run again to continue
+                where this scan stopped.
+              </p>
+            )}
           </div>
 
-          {lastErr && !isCancelled && (
+          {lastErr && !isCancelled && !isBudget && (
             <div className="rounded-lg border border-neutral-800/80 bg-neutral-950/60 p-3">
               <div className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
                 Last error from the run

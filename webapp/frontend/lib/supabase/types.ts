@@ -113,6 +113,13 @@ export interface Scan {
    *  forwards as `--branch <ref>` when set; null means use the repo's
    *  default branch. Only meaningful for repository-typed targets. */
   branch?: string | null;
+  /** Engine PR #113 — cost-cap self-exit gates. Either may be null
+   *  (no cap). The worker forwards as `--max-cost <usd>` /
+   *  `--max-input-tokens <n>`; the engine self-exits with code 3 and
+   *  emits `run.terminated{reason: "budget_exceeded"}` if either
+   *  trips. */
+  max_cost?: number | null;
+  max_input_tokens?: number | null;
   /** Engine PR #29 — set by the worker when Strix's preflight bailed
    *  (target didn't resolve / no port answered). Distinct from a scan
    *  crash; UI renders an amber "Target unreachable" banner. */

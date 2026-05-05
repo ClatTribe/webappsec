@@ -1462,6 +1462,47 @@ def test_build_cmd_omits_branch_when_blank_or_missing(cfg_factory):
         assert "--branch" not in cmd, f"branch={branch_value!r} leaked through"
 
 
+def test_build_cmd_appends_cost_caps_when_set(cfg_factory):
+    """max_cost / max_input_tokens should land as the engine's
+    `--max-cost <usd>` and `--max-input-tokens <n>` flags. Either or
+    both may be set; null values are omitted."""
+    cfg = cfg_factory("")
+    targets = [{"value": "https://example.com"}]
+
+    scan = {
+        "scan_mode": "standard",
+        "scope_mode": "auto",
+        "max_cost": 5.0,
+        "max_input_tokens": 250_000,
+    }
+    cmd = _build_cmd(cfg, scan, targets)
+    assert "--max-cost" in cmd
+    assert cmd[cmd.index("--max-cost") + 1] == "5.0"
+    assert "--max-input-tokens" in cmd
+    assert cmd[cmd.index("--max-input-tokens") + 1] == "250000"
+
+
+def test_build_cmd_omits_cost_caps_when_zero_or_missing(cfg_factory):
+    """A zero or negative budget value tells the engine 'no cap', not
+    'zero allowed'. We omit the flag entirely so the engine's default
+    no-cap behaviour kicks in."""
+    cfg = cfg_factory("")
+    targets = [{"value": "https://example.com"}]
+
+    for caps in [
+        {"max_cost": 0, "max_input_tokens": 0},
+        {"max_cost": -1.0, "max_input_tokens": -10},
+        {"max_cost": None, "max_input_tokens": None},
+        {},
+    ]:
+        scan = {"scan_mode": "standard", "scope_mode": "auto", **caps}
+        cmd = _build_cmd(cfg, scan, targets)
+        assert "--max-cost" not in cmd, f"max_cost={caps.get('max_cost')!r} leaked through"
+        assert "--max-input-tokens" not in cmd, (
+            f"max_input_tokens={caps.get('max_input_tokens')!r} leaked through"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Migration 029 — preflight detection + trajectory.jsonl ingestion
 # ---------------------------------------------------------------------------

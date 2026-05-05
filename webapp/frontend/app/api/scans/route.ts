@@ -18,6 +18,13 @@ const Body = z.object({
   // ref string (branch / tag / SHA); engine forwards as `--branch`.
   // Strip server-side defensively — a stray space breaks shell escape.
   branch: z.string().trim().max(255).optional(),
+  // Engine PR #113 — cost-cap self-exit gates. Both nullable;
+  // null/missing/zero = "no cap" (the engine's default). Upper bounds
+  // exist to keep a fat-fingered "999999" from confusing the engine,
+  // but we don't enforce a per-org plan cap here — that's a future
+  // billing-tier follow-up.
+  max_cost: z.number().positive().max(10_000).optional(),
+  max_input_tokens: z.number().int().positive().max(1_000_000_000).optional(),
 });
 
 // POST /api/scans — queue a new scan.
@@ -99,6 +106,8 @@ export async function POST(req: Request) {
     p_integration_ids: body.integration_ids,
     p_dns_only: body.dns_only,
     p_branch: body.branch && body.branch.length > 0 ? body.branch : null,
+    p_max_cost: body.max_cost ?? null,
+    p_max_input_tokens: body.max_input_tokens ?? null,
   });
   if (rpcErr || !scanId) {
     return NextResponse.json(
