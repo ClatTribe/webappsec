@@ -179,6 +179,23 @@ class WorkerSupabase:
         ).execute()
         return result.data
 
+    def decrypt_org_slack_webhook(self, scan_id: str) -> str | None:
+        """Returns the org's Slack webhook URL, or None when none is set
+        / the stored secret doesn't match the expected hooks.slack.com
+        prefix (defence-in-depth — the SQL RPC re-validates).
+
+        Wraps `worker_decrypt_org_slack_webhook(p_scan_id)` from
+        migration 037. Best-effort: any RPC error returns None so the
+        notifier silently no-ops rather than failing scan finalisation.
+        """
+        try:
+            result = self.client.rpc(
+                "worker_decrypt_org_slack_webhook", {"p_scan_id": scan_id}
+            ).execute()
+            return result.data
+        except Exception:  # noqa: BLE001
+            return None
+
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         try:
             result = self.client.rpc(

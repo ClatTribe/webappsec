@@ -26,6 +26,12 @@ class WorkerConfig:
     worker_concurrency: int
     log_level: str
 
+    # Tier A — public-facing wrapper origin used to compose deep-links in
+    # outbound Slack notifications (migration 037 / notifier.py). Set via
+    # WRAPPER_ORIGIN env, e.g. "https://strix.example.com". When unset we
+    # still send the notification, just without the "View scan" button.
+    wrapper_origin: str | None
+
     @classmethod
     def from_env(cls) -> "WorkerConfig":
         required = {
@@ -47,4 +53,5 @@ class WorkerConfig:
             strix_bin=os.environ.get("STRIX_BIN", "strix"),
             worker_concurrency=int(os.environ.get("WORKER_CONCURRENCY", "1")),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
+            wrapper_origin=os.environ.get("WRAPPER_ORIGIN") or None,
         )

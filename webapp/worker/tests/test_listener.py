@@ -30,6 +30,7 @@ def _make_cfg(concurrency: int = 1) -> WorkerConfig:
         strix_bin="/bin/true",
         worker_concurrency=concurrency,
         log_level="DEBUG",
+        wrapper_origin=None,
     )
 
 
