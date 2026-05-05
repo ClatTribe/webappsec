@@ -398,6 +398,17 @@ class FakeSupabase:
     ) -> None:
         self.uploads.append({"bucket": bucket, "path": path, "size": len(contents)})
 
+    def download_artifact(self, bucket: str, path: str) -> bytes:
+        # Tests pre-seed `self.staged_downloads` keyed by path. A
+        # missing key raises so the download_imports error path
+        # (logged + dropped) gets exercised.
+        if not hasattr(self, "staged_downloads"):
+            raise FileNotFoundError(f"no fake download seeded for {path}")
+        try:
+            return self.staged_downloads[path]
+        except KeyError as e:
+            raise FileNotFoundError(f"no fake download seeded for {path}") from e
+
 
 # Tiny chainable stub for the supabase-py builder. Only handles the one
 # call-shape `runner._was_cancel_requested` makes:
@@ -1480,6 +1491,163 @@ def test_build_cmd_appends_cost_caps_when_set(cfg_factory):
     assert cmd[cmd.index("--max-cost") + 1] == "5.0"
     assert "--max-input-tokens" in cmd
     assert cmd[cmd.index("--max-input-tokens") + 1] == "250000"
+
+
+# ---------------------------------------------------------------------------
+# Migration 035 — HAR/Burp upload pipeline (engine PR #141)
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import _download_imports, _imports_instruction_hint  # noqa: E402
+
+
+def test_download_imports_writes_files_and_returns_workspace_paths(tmp_path, fake_scan):
+    """Happy path: each storage entry lands at <workdir>/imports/<filename>
+    and the returned list carries the workspace-relative path the agent
+    will see via ingest_har_file / ingest_burp_file."""
+    sb = FakeSupabase(fake_scan)
+    sb.staged_downloads = {
+        f"{ORG_ID}/scan-imports/abc/burp.xml": b"<items></items>",
+        f"{ORG_ID}/scan-imports/def/web.har": b'{"log":{}}',
+    }
+    workdir = str(tmp_path / "wd")
+    Path(workdir).mkdir()
+    metas = [
+        {"kind": "burp", "storage_path": f"{ORG_ID}/scan-imports/abc/burp.xml",
+         "filename": "burp.xml", "size_bytes": 14},
+        {"kind": "har", "storage_path": f"{ORG_ID}/scan-imports/def/web.har",
+         "filename": "web.har", "size_bytes": 11},
+    ]
+
+    staged = _download_imports(sb, SCAN_ID, metas, workdir)
+
+    assert {e["filename"] for e in staged} == {"burp.xml", "web.har"}
+    assert {e["container_path"] for e in staged} == {"imports/burp.xml", "imports/web.har"}
+    # Files actually landed on disk.
+    assert (Path(workdir) / "imports" / "burp.xml").read_bytes() == b"<items></items>"
+    assert (Path(workdir) / "imports" / "web.har").read_bytes() == b'{"log":{}}'
+
+
+def test_download_imports_drops_unknown_kinds(tmp_path, fake_scan):
+    """The CHECK enum is enforced server-side, but the worker re-checks
+    before download — defence in depth against a future API drift that
+    might let an arbitrary kind slip through."""
+    sb = FakeSupabase(fake_scan)
+    sb.staged_downloads = {f"{ORG_ID}/scan-imports/x/foo.bin": b"raw"}
+    workdir = str(tmp_path / "wd")
+    Path(workdir).mkdir()
+    metas = [{
+        "kind": "binary",  # not allowed
+        "storage_path": f"{ORG_ID}/scan-imports/x/foo.bin",
+        "filename": "foo.bin",
+        "size_bytes": 3,
+    }]
+    assert _download_imports(sb, SCAN_ID, metas, workdir) == []
+
+
+def test_download_imports_blocks_path_traversal(tmp_path, fake_scan):
+    """A filename containing path separators must be flattened by
+    Path(...).name and any `..` components rejected outright."""
+    sb = FakeSupabase(fake_scan)
+    sb.staged_downloads = {f"{ORG_ID}/scan-imports/x/safe.har": b"{}"}
+    workdir = str(tmp_path / "wd")
+    Path(workdir).mkdir()
+    # `..` filename is rejected; nested-path filename is flattened.
+    metas = [
+        {"kind": "har", "storage_path": f"{ORG_ID}/scan-imports/x/safe.har",
+         "filename": "..", "size_bytes": 2},
+    ]
+    assert _download_imports(sb, SCAN_ID, metas, workdir) == []
+
+
+def test_download_imports_swallows_individual_failures(tmp_path, fake_scan):
+    """One failed download must not block the rest. Good imports still
+    reach the agent's workspace; the bad one is simply omitted."""
+    sb = FakeSupabase(fake_scan)
+    sb.staged_downloads = {
+        f"{ORG_ID}/scan-imports/g/good.har": b"{}",
+        # `<bad>` storage path NOT in staged_downloads → triggers
+        # FileNotFoundError on download
+    }
+    workdir = str(tmp_path / "wd")
+    Path(workdir).mkdir()
+    metas = [
+        {"kind": "har", "storage_path": f"{ORG_ID}/scan-imports/g/good.har",
+         "filename": "good.har", "size_bytes": 2},
+        {"kind": "burp", "storage_path": f"{ORG_ID}/scan-imports/b/bad.xml",
+         "filename": "bad.xml", "size_bytes": 99},
+    ]
+
+    staged = _download_imports(sb, SCAN_ID, metas, workdir)
+    assert [e["filename"] for e in staged] == ["good.har"]
+    assert (Path(workdir) / "imports" / "good.har").exists()
+    assert not (Path(workdir) / "imports" / "bad.xml").exists()
+
+
+def test_download_imports_returns_empty_for_missing_or_non_list_meta(tmp_path, fake_scan):
+    """`scan.imports` may be None (pre-migration scans), [], or some
+    other type via API drift — all three must produce an empty list,
+    no exception, and no `imports/` directory creation."""
+    sb = FakeSupabase(fake_scan)
+    workdir = str(tmp_path / "wd")
+    Path(workdir).mkdir()
+    for meta in [None, [], "not a list", {"oops": True}]:
+        assert _download_imports(sb, SCAN_ID, meta, workdir) == []
+
+
+def test_imports_instruction_hint_names_engine_tools_explicitly():
+    """The hint must name the engine's ingest tools by their exact
+    function names (`ingest_har_file` / `ingest_burp_file`) so the
+    agent's planner can match without ambiguity."""
+    staged = [
+        {"kind": "har", "container_path": "imports/web.har", "filename": "web.har"},
+        {"kind": "burp", "container_path": "imports/proj.xml", "filename": "proj.xml"},
+    ]
+    hint = _imports_instruction_hint(staged)
+    assert hint is not None
+    assert "ingest_har_file('imports/web.har')" in hint
+    assert "ingest_burp_file('imports/proj.xml')" in hint
+    # The redaction reminder mirrors the upload-form copy.
+    assert "redacted" in hint.lower()
+
+
+def test_imports_instruction_hint_returns_none_when_empty():
+    """Empty / None input → no hint, callers omit the section."""
+    assert _imports_instruction_hint(None) is None
+    assert _imports_instruction_hint([]) is None
+
+
+def test_build_cmd_appends_imports_hint_to_instruction(cfg_factory):
+    """End-to-end through _build_cmd: the staged imports pop into the
+    --instruction text under the user's own instruction."""
+    cfg = cfg_factory("")
+    targets = [{"value": "https://example.com"}]
+    scan = {
+        "scan_mode": "standard",
+        "scope_mode": "auto",
+        "instruction_text": "Focus on auth flaws.",
+    }
+    staged = [{"kind": "har", "container_path": "imports/x.har", "filename": "x.har"}]
+
+    cmd = _build_cmd(cfg, scan, targets, staged_imports=staged)
+
+    assert "--instruction" in cmd
+    instr = cmd[cmd.index("--instruction") + 1]
+    assert "Focus on auth flaws." in instr
+    assert "ingest_har_file('imports/x.har')" in instr
+    assert "Pre-loaded traffic is available" in instr
+
+
+def test_build_cmd_omits_imports_section_when_no_staged(cfg_factory):
+    """No staged imports → the instruction text is just the user's text;
+    no Pre-loaded traffic banner is appended."""
+    cfg = cfg_factory("")
+    targets = [{"value": "https://example.com"}]
+    scan = {"scan_mode": "standard", "scope_mode": "auto",
+            "instruction_text": "Focus on auth flaws."}
+
+    cmd = _build_cmd(cfg, scan, targets, staged_imports=None)
+    instr = cmd[cmd.index("--instruction") + 1]
+    assert instr.strip() == "Focus on auth flaws."
 
 
 def test_build_cmd_omits_cost_caps_when_zero_or_missing(cfg_factory):
