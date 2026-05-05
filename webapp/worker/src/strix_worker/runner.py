@@ -248,6 +248,15 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             compliance_pack_path = str(Path(workdir) / "compliance_pack")
             Path(compliance_pack_path).mkdir(parents=True, exist_ok=True)
 
+            # Tier A — HAR / Burp project imports (engine PR #141 /
+            # migration 035). Pre-stage any uploaded files into
+            # `<workdir>/imports/` so the agent can call
+            # ingest_har_file / ingest_burp_file against them. Any
+            # download failure is logged and the file is dropped from
+            # the instruction text — partial pre-load beats failing the
+            # whole scan.
+            staged_imports = _download_imports(sb, scan_id, scan.get("imports"), workdir)
+
             env = _build_env(
                 cfg, scan, creds.env, llm_provider, llm_api_key,
                 feedback_path=feedback_path, fp_policy=fp_policy,
@@ -257,6 +266,7 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 cfg, scan, targets,
                 feedback_path=feedback_path,
                 compliance_pack_path=compliance_pack_path,
+                staged_imports=staged_imports,
             )
 
             logger.info("running: %s", " ".join(shlex.quote(c) for c in cmd))
@@ -512,6 +522,149 @@ def _write_feedback_jsonl(
     return str(path)
 
 
+# Storage bucket the user uploads HAR/Burp files into. Defined here
+# rather than imported from a shared constants module because the same
+# string lives on the frontend; both sides change together when we ever
+# rename it.
+_USER_UPLOADS_BUCKET = "user-uploads"
+
+# Closed enum mirroring the API zod schema. The SQL RPC's CHECK on the
+# storage_path's org prefix is the security gate; this enum is the
+# defence in depth against a future API drift that might pass through
+# a `kind` the engine doesn't understand.
+_ALLOWED_IMPORT_KINDS = frozenset({"har", "burp"})
+
+
+def _download_imports(
+    sb: WorkerSupabase,
+    scan_id: str,
+    imports_meta: Any,
+    workdir: str,
+) -> list[dict[str, str]]:
+    """Stream each user-uploaded HAR/Burp file into <workdir>/imports/.
+
+    Returns a list of {kind, container_path, filename} for each file
+    that landed successfully. Failed downloads are logged and dropped —
+    the agent will simply not be told about that file, and the rest of
+    the scan continues. We never let an import-side error fail the
+    whole scan.
+
+    `imports_meta` is the JSONB blob persisted on `scans.imports` by
+    the API route via the `create_scan_with_targets` RPC. Each entry
+    has `{ kind, storage_path, filename, size_bytes }`. The SQL RPC
+    already validated each storage_path's org prefix; here we re-validate
+    the kind enum + filename shape (basename only, no `..` traversal).
+    """
+    if not isinstance(imports_meta, list) or len(imports_meta) == 0:
+        return []
+
+    imports_dir = Path(workdir) / "imports"
+    imports_dir.mkdir(parents=True, exist_ok=True)
+
+    staged: list[dict[str, str]] = []
+    for entry in imports_meta:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        storage_path = entry.get("storage_path")
+        filename = entry.get("filename")
+
+        if (
+            kind not in _ALLOWED_IMPORT_KINDS
+            or not isinstance(storage_path, str)
+            or not isinstance(filename, str)
+            or not filename
+        ):
+            logger.warning(
+                "scan %s: skipping malformed import entry %r", scan_id, entry
+            )
+            continue
+
+        # Defence: keep filenames flat. The frontend should already
+        # have stripped any path components, but the worker re-checks
+        # before writing to disk so a forged metadata entry can't
+        # write outside imports/.
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in {".", ".."}:
+            logger.warning(
+                "scan %s: skipping import with unsafe filename %r", scan_id, filename
+            )
+            continue
+        dest = imports_dir / safe_name
+
+        try:
+            content = sb.download_artifact(_USER_UPLOADS_BUCKET, storage_path)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "scan %s: failed to download import %s", scan_id, storage_path
+            )
+            continue
+
+        if not isinstance(content, (bytes, bytearray)) or len(content) == 0:
+            logger.warning(
+                "scan %s: import %s came back empty/unexpected type", scan_id, storage_path
+            )
+            continue
+
+        try:
+            dest.write_bytes(bytes(content))
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "scan %s: failed to write import %s to %s", scan_id, storage_path, dest
+            )
+            continue
+
+        # `container_path` is workspace-relative — engine's
+        # ingest_har_file / ingest_burp_file tools accept paths relative
+        # to the agent's working directory, which is the same workdir
+        # we set as the subprocess `cwd`.
+        staged.append(
+            {
+                "kind": kind,
+                "container_path": f"imports/{safe_name}",
+                "filename": safe_name,
+            }
+        )
+        logger.info(
+            "scan %s: staged %s import %s (%d bytes)",
+            scan_id, kind, safe_name, len(content),
+        )
+
+    return staged
+
+
+def _imports_instruction_hint(
+    staged_imports: list[dict[str, str]] | None,
+) -> str | None:
+    """Compose the natural-language hint telling the agent about
+    pre-loaded traffic. Returns None when nothing was pre-loaded.
+
+    The format is intentionally explicit — naming each tool by its
+    engine name so the agent's planner can match without ambiguity.
+    Sensitive-header redaction copy mirrors the wishlist §15.2 row 4
+    upload-form notice so an auditor reviewing the instruction text
+    sees the same statement.
+    """
+    if not staged_imports:
+        return None
+
+    lines: list[str] = [
+        "Pre-loaded traffic is available in the workspace. "
+        "Ingest each file before exploring on your own:"
+    ]
+    for entry in staged_imports:
+        kind = entry["kind"]
+        path = entry["container_path"]
+        tool = "ingest_har_file" if kind == "har" else "ingest_burp_file"
+        lines.append(f"- Call `{tool}('{path}')` (file: {entry['filename']}).")
+    lines.append(
+        "Sensitive header values (Authorization, Cookie, X-API-Key, etc.) "
+        "are already redacted by the ingest tool — only header NAMES enter "
+        "scan artifacts."
+    )
+    return "\n".join(lines)
+
+
 def _resolve_fp_policy(sb: WorkerSupabase, org_id: str) -> str:
     """Read organizations.fp_auto_dismiss_policy. Defaults to 'conservative'
     on any read failure — matches the engine's own default."""
@@ -695,6 +848,7 @@ def _build_cmd(
     *,
     feedback_path: str | None = None,
     compliance_pack_path: str | None = None,
+    staged_imports: list[dict[str, str]] | None = None,
 ) -> list[str]:
     cmd = [cfg.strix_bin, "-n", "-m", scan["scan_mode"]]
 
@@ -748,6 +902,14 @@ def _build_cmd(
     # from `targets.config` (per-target-type configuration). See
     # `instruction.build_instruction` for the contract.
     instr = build_instruction(scan)
+    # Tier A — HAR / Burp pre-load hint (engine PR #141 / migration 035).
+    # We append a directive listing each staged import so the agent
+    # knows to call ingest_har_file / ingest_burp_file against the
+    # right paths before its own recon. Hint is omitted entirely when
+    # nothing was pre-loaded.
+    imports_hint = _imports_instruction_hint(staged_imports)
+    if imports_hint:
+        instr = f"{instr}\n\n{imports_hint}" if instr else imports_hint
     if instr:
         cmd += ["--instruction", instr]
 

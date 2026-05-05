@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ChevronRight, Plus, Target as TargetIcon, Network } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Integration, ScanMode, Target } from '@/lib/supabase/types';
+import ImportsUploader, { type ImportRef } from '@/components/scan/imports-uploader';
 
 // CIDR host-count preview helper (engine PR #124 / wishlist §13.3 row 2).
 // We render the preview inline on every ip_address target so the operator
@@ -54,6 +55,8 @@ function NewScanInner() {
   const [branch, setBranch] = useState('');
   const [maxCost, setMaxCost] = useState<string>('');
   const [maxInputTokens, setMaxInputTokens] = useState<string>('');
+  const [imports, setImports] = useState<ImportRef[]>([]);
+  const [orgId, setOrgId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +76,15 @@ function NewScanInner() {
       .select('*')
       .eq('status', 'active')
       .then(({ data }) => setIntegrations((data ?? []) as Integration[]));
+    // Pull the user's current org from the JWT app_metadata so the
+    // ImportsUploader can stage files at `<org_id>/scan-imports/...`.
+    // The server-side RPC re-validates the prefix in SQL but we want
+    // the client to know up-front so the uploader can render the
+    // right disabled state if there's no org context yet.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const meta = session?.user.app_metadata as { org_id?: string } | undefined;
+      if (meta?.org_id) setOrgId(meta.org_id);
+    });
   }, [supabase, targetId]);
 
   const selected = targets.find((t) => t.id === targetId);
@@ -114,6 +126,12 @@ function NewScanInner() {
         max_input_tokens: maxInputTokens.trim()
           ? Math.floor(Number(maxInputTokens))
           : undefined,
+        // Engine PR #141 — HAR / Burp project imports. The browser has
+        // already uploaded each file to user-uploads at <org>/scan-
+        // imports/<random>/<filename>; here we just send the metadata
+        // refs. The worker downloads + places them in the per-scan
+        // workdir before spawning strix.
+        imports: imports.length > 0 ? imports : undefined,
       }),
     });
     if (!res.ok) {
@@ -229,6 +247,17 @@ function NewScanInner() {
             </div>
           )}
         </section>
+
+        {/* HAR / Burp project upload (engine PR #141 / wishlist §15.2).
+            Browser uploads to user-uploads bucket directly under the
+            org's prefix; references piped to the worker via scans.imports
+            JSONB (migration 035). The worker downloads the files into
+            the per-scan workdir and adds an instruction line so the
+            agent knows to call ingest_har_file / ingest_burp_file
+            before its own recon. Hidden when there's no org context yet. */}
+        {orgId && (
+          <ImportsUploader orgId={orgId} imports={imports} onChange={setImports} />
+        )}
 
         <section>
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">

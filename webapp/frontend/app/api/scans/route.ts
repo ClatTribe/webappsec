@@ -25,6 +25,25 @@ const Body = z.object({
   // billing-tier follow-up.
   max_cost: z.number().positive().max(10_000).optional(),
   max_input_tokens: z.number().int().positive().max(1_000_000_000).optional(),
+  // Engine PR #141 — HAR / Burp project imports. Browser uploads each
+  // file directly to the user-uploads bucket via the supabase-js
+  // client (RLS gates the org prefix); this body just carries
+  // references. Server-side we re-validate the org prefix in SQL
+  // (defence in depth) before handing the path to the worker. Cap
+  // at 5 imports per scan and 50 MiB per file — the engine's auto-
+  // dedup makes more than that pointless and we don't want a runaway
+  // upload bill.
+  imports: z
+    .array(
+      z.object({
+        kind: z.enum(['har', 'burp']),
+        storage_path: z.string().min(1).max(512),
+        filename: z.string().min(1).max(255),
+        size_bytes: z.number().int().nonnegative().max(50 * 1024 * 1024),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 
 // POST /api/scans — queue a new scan.
@@ -108,6 +127,7 @@ export async function POST(req: Request) {
     p_branch: body.branch && body.branch.length > 0 ? body.branch : null,
     p_max_cost: body.max_cost ?? null,
     p_max_input_tokens: body.max_input_tokens ?? null,
+    p_imports: body.imports && body.imports.length > 0 ? body.imports : null,
   });
   if (rpcErr || !scanId) {
     return NextResponse.json(

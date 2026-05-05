@@ -224,3 +224,17 @@ class WorkerSupabase:
         self.client.storage.from_(bucket).upload(
             path, contents, {"content-type": content_type, "upsert": "true"}
         )
+
+    def download_artifact(self, bucket: str, path: str) -> bytes:
+        """Read a file from storage as bytes.
+
+        Used by `_download_imports` to pull HAR / Burp files the user
+        uploaded to `user-uploads/<org>/scan-imports/...` (engine PR #141 /
+        migration 035). Service-role client bypasses RLS — the SQL RPC
+        already re-validated the storage_path's org prefix before the
+        worker ever sees it, so a forged path can't reach this method.
+        """
+        result = self.client.storage.from_(bucket).download(path)
+        # supabase-py returns bytes for download; surface as-is so callers
+        # can write to disk with `Path.write_bytes`.
+        return result
