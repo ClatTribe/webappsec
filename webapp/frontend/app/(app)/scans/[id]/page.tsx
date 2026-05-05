@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   Download,
   Package,
+  RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -181,6 +182,23 @@ export default async function ScanDetailPage({ params }: Props) {
   const targetEvents = parseTargetEvents(scanEventsData ?? []);
   const testPlan = parseTestPlan(scanEventsData ?? []);
 
+  // Verify-rescan link (Tier A / migration 036). When this scan was
+  // spawned from a finding's "Verify fix" button, fetch the linked
+  // finding's title for the breadcrumb and the header badge. Best-effort
+  // — a missing finding (deleted between launch and view) just hides
+  // the breadcrumb and the badge without erroring.
+  let verifyingFinding: { id: string; title: string } | null = null;
+  if (scan.verifying_finding_id) {
+    const { data: vf } = await supabase
+      .from('findings')
+      .select('id, title')
+      .eq('id', scan.verifying_finding_id)
+      .single();
+    if (vf && typeof vf.title === 'string') {
+      verifyingFinding = { id: vf.id, title: vf.title };
+    }
+  }
+
   return (
     <div className="space-y-6">
       <nav className="flex items-center gap-1.5 text-xs text-neutral-500">
@@ -190,6 +208,32 @@ export default async function ScanDetailPage({ params }: Props) {
         <ChevronRight className="h-3 w-3" />
         <span className="text-neutral-300">{scan.run_name}</span>
       </nav>
+
+      {verifyingFinding && (
+        <section className="rounded-xl border border-cyan-500/30 bg-cyan-500/[0.05] p-3.5">
+          <div className="flex items-start gap-3">
+            <RefreshCw className="mt-0.5 h-4 w-4 flex-shrink-0 text-cyan-300" strokeWidth={2.25} />
+            <div className="min-w-0 space-y-0.5">
+              <div className="text-[12.5px] font-medium text-cyan-100">
+                Verifying a previously reported finding
+              </div>
+              <div className="truncate text-[11.5px] text-cyan-200/80">
+                <Link
+                  href={`/findings/${verifyingFinding.id}`}
+                  className="hover:underline"
+                >
+                  {verifyingFinding.title}
+                </Link>
+              </div>
+              <p className="pt-0.5 text-[11px] leading-relaxed text-cyan-200/60">
+                A clean finish with no recurrence of the original fingerprint
+                means the fix likely landed; the original finding stays at its
+                current triage status until you mark it &ldquo;Fixed&rdquo;.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
