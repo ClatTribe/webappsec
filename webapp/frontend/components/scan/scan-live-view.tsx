@@ -10,6 +10,7 @@ import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
 import PhaseProgress from '@/components/scan/phase-progress';
 import HypothesisPane from '@/components/scan/hypothesis-pane';
+import ComplianceOverlay from '@/components/scan/compliance-overlay';
 
 interface Props {
   scanId: string;
@@ -372,6 +373,13 @@ export default function ScanLiveView({
           sortedFindings.map((f) => <FindingCard key={f.id} finding={f} />)
         )}
       </section>
+
+      {/* Compliance overlay — findings grouped by control framework
+          (engine PR #103 / wishlist §14.4). Collapsed by default;
+          appears beneath the flat findings list so the primary read
+          stays severity-sorted. Hidden when none of the findings
+          carry a `compliance_controls` mapping. */}
+      <ComplianceOverlay findings={findings} />
 
       {/* Behind the scenes — agents, tools, attack surface. Collapsed by default;
           this is here for the curious / for debugging, not the primary read. */}

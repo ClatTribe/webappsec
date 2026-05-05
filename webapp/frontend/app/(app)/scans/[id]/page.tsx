@@ -20,6 +20,7 @@ import { createClient } from '@/lib/supabase/server';
 import ScanLiveView from '@/components/scan/scan-live-view';
 import VendorRiskGauge from '@/components/scan/vendor-risk-gauge';
 import MfaPostureBadge from '@/components/scan/mfa-posture-badge';
+import CompliancePostureCard from '@/components/scan/compliance-posture-card';
 import { AI_BRAND } from '@/lib/finding-theme';
 import type { ScanRecurrenceSummary, ScanSummary } from '@/lib/supabase/types';
 
@@ -258,13 +259,18 @@ export default async function ScanDetailPage({ params }: Props) {
           side-by-side on wide screens, stacked on narrow. Each one
           renders nothing when its source signal is absent so an older
           engine without these PRs gracefully shows neither. */}
-      {(scan.run_meta?.vendor_risk || scan.run_meta?.mfa_attestation) && (
-        <section className="grid gap-3 lg:grid-cols-2">
+      {(scan.run_meta?.vendor_risk
+        || scan.run_meta?.mfa_attestation
+        || scan.run_meta?.compliance_posture) && (
+        <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {scan.run_meta?.vendor_risk && (
             <VendorRiskGauge vendor_risk={scan.run_meta.vendor_risk} />
           )}
           {scan.run_meta?.mfa_attestation && (
             <MfaPostureBadge mfa={scan.run_meta.mfa_attestation} />
+          )}
+          {scan.run_meta?.compliance_posture && (
+            <CompliancePostureCard posture={scan.run_meta.compliance_posture} />
           )}
         </section>
       )}
