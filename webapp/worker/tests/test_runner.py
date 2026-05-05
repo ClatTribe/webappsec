@@ -372,6 +372,11 @@ class FakeSupabase:
         # mirrors the production fail-open path when no keys are set.
         return {}
 
+    def set_sbom_uploaded(self, scan_id: str) -> None:
+        # Tests assert via `sb._sbom_uploaded`. Mirrors the
+        # set_compliance_pack_uploaded fake.
+        self._sbom_uploaded = True
+
     def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
         # Tests can read this back via `sb.run_meta` to assert the
         # worker forwarded the right blob to Postgres.

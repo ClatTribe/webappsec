@@ -993,6 +993,22 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         # Architecture.md §1.1 — the engine writes; the wrapper stores.
         _persist_run_meta(sb, scan_id, run_dir)
 
+        # CycloneDX SBOM (engine PR #131 / §19.4 Tier 4 row 3,
+        # migration 032). The file itself was already uploaded by the
+        # rglob("*") loop above; we only need to flip the boolean so
+        # the UI knows the SBOM CTAs are safe to render. Older engines
+        # without #131 leave the flag false.
+        if (run_dir / "sbom.cdx.json").exists():
+            try:
+                sb.set_sbom_uploaded(scan_id)
+            except Exception:  # noqa: BLE001
+                # Cosmetic flag — file's already in storage; the UI
+                # just won't surface the CTAs. Better than failing
+                # finalisation over a single missing mutation.
+                logger.exception(
+                    "scan %s: failed to flip sbom_uploaded flag", scan_id
+                )
+
         # Per-finding reasoning trail (engine PR #142 / §15.1 Tier 2). The
         # engine writes one trajectory record per finding to
         # `<run_dir>/trajectory.jsonl`. We load the whole file once, key by

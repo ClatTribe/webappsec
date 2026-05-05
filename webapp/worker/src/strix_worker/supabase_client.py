@@ -72,6 +72,15 @@ class WorkerSupabase:
         rows = result.data or []
         return [r["scan_id"] for r in rows if isinstance(r, dict) and r.get("scan_id")]
 
+    def set_sbom_uploaded(self, scan_id: str) -> None:
+        """Flag this scan as having a CycloneDX SBOM in storage
+        (migration 032 / engine PR #131). UI keys the SBOM CTAs off
+        this column so older scans (engines without #131) don't
+        dangle broken view/download links."""
+        self.client.rpc(
+            "worker_set_sbom_uploaded", {"p_scan_id": scan_id}
+        ).execute()
+
     def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
         """Persist the engine's run_meta.json verbatim (migration 031).
 
