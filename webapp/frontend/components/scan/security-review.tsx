@@ -9,14 +9,71 @@ import {
   CheckCircle2,
   Activity,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ScanEvent } from '@/lib/supabase/types';
+
+// Engine PR #139 — 6-value provenance enum on every tool call.
+// `target` and `mixed` carry adversary-controlled output; the rest are
+// trusted-by-default. Surfacing the pip per call turns the live activity
+// feed into a trust-boundary map.
+type ToolProvenance =
+  | 'trusted_source'
+  | 'intel_feed'
+  | 'target'
+  | 'operator_input'
+  | 'framework'
+  | 'mixed';
+
+const PROVENANCE_THEME: Record<ToolProvenance, { label: string; chip: string; dot: string; tooltip: string }> = {
+  trusted_source: {
+    label: 'trusted',
+    chip: 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30',
+    dot: 'bg-emerald-400',
+    tooltip: 'Trusted source — internal/well-known intelligence (CVE catalogue, etc.).',
+  },
+  intel_feed: {
+    label: 'intel',
+    chip: 'bg-emerald-500/10 text-emerald-200 ring-emerald-400/20',
+    dot: 'bg-emerald-300',
+    tooltip: 'Threat-intel feed — third-party but vetted.',
+  },
+  target: {
+    label: 'target',
+    chip: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    dot: 'bg-rose-400',
+    tooltip: 'Output came from the target — adversary-controlled. Treat as untrusted.',
+  },
+  operator_input: {
+    label: 'operator',
+    chip: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    dot: 'bg-amber-400',
+    tooltip: 'Operator-supplied input (HAR upload, scope file, etc.).',
+  },
+  framework: {
+    label: 'framework',
+    chip: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
+    dot: 'bg-neutral-400',
+    tooltip: 'Framework/internal tool — output produced by Strix itself.',
+  },
+  mixed: {
+    label: 'mixed',
+    chip: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    dot: 'bg-amber-400',
+    tooltip: 'Mixed provenance — partially derived from target output. Treat as untrusted.',
+  },
+};
+
+function isToolProvenance(v: unknown): v is ToolProvenance {
+  return typeof v === 'string' && v in PROVENANCE_THEME;
+}
 
 interface AgentToolCall {
   tool_name: string;
   args: Record<string, unknown>;
   ts: string;
+  provenance?: ToolProvenance;
 }
 
 interface AgentSummary {
@@ -117,10 +174,12 @@ function deriveReview(events: ScanEvent[]): DerivedReview {
       const agentId = actor.agent_id as string | undefined;
       if (agentId) {
         const a = ensureAgent(agentId, actor.agent_name as string | undefined);
+        const provenance = isToolProvenance(actor.provenance) ? actor.provenance : undefined;
         a.tool_calls.push({
           tool_name: toolName,
           args,
           ts: ev.created_at,
+          provenance,
         });
       }
     }
@@ -252,22 +311,72 @@ export default function SecurityReview({ events }: { events: ScanEvent[] }) {
                     </div>
                   </button>
                   {isOpen && agent.tool_calls.length > 0 && (
-                    <div className="border-t border-neutral-800/60 bg-neutral-950/40 px-4 py-3">
+                    <div className="border-t border-neutral-800/60 bg-neutral-950/40 px-4 py-3 space-y-2.5">
+                      {/* Indirect-prompt-injection alert (engine PR #139).
+                          Fires when this agent consumed `target`-provenance
+                          (adversary-controlled) output and then called
+                          another tool — the classic "prompt injection
+                          escapes the response" pathway. We surface the
+                          chain inline so the operator sees the boundary
+                          crossing without leaving the agent panel. */}
+                      {(() => {
+                        const inj = detectPromptInjectionChain(agent.tool_calls);
+                        if (!inj) return null;
+                        return (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-2.5">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle
+                                className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-300"
+                                strokeWidth={2.5}
+                              />
+                              <div className="min-w-0 space-y-0.5">
+                                <div className="text-[11.5px] font-medium text-amber-100">
+                                  Possible indirect prompt injection
+                                </div>
+                                <div className="text-[11px] leading-relaxed text-amber-200/80">
+                                  Agent consumed target-controlled output from{' '}
+                                  <span className="font-mono text-amber-100">
+                                    {inj.upstream_tool}
+                                  </span>{' '}
+                                  before calling{' '}
+                                  <span className="font-mono text-amber-100">
+                                    {inj.downstream_tool}
+                                  </span>
+                                  . If the response carried injected instructions,
+                                  the downstream call may have acted on them.
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <ol className="space-y-1.5">
-                        {agent.tool_calls.map((c, i) => (
-                          <li
-                            key={`${c.ts}-${i}`}
-                            className="flex items-center gap-2 font-mono text-[11.5px]"
-                          >
-                            <span className="w-6 flex-shrink-0 text-right text-neutral-600">
-                              {i + 1}.
-                            </span>
-                            <span className="text-amber-300/90">{c.tool_name}</span>
-                            <span className="min-w-0 flex-1 truncate text-neutral-500">
-                              {summariseArgs(c.args)}
-                            </span>
-                          </li>
-                        ))}
+                        {agent.tool_calls.map((c, i) => {
+                          const prov = c.provenance ? PROVENANCE_THEME[c.provenance] : null;
+                          return (
+                            <li
+                              key={`${c.ts}-${i}`}
+                              className="flex items-center gap-2 font-mono text-[11.5px]"
+                            >
+                              <span className="w-6 flex-shrink-0 text-right text-neutral-600">
+                                {i + 1}.
+                              </span>
+                              <span className="text-amber-300/90">{c.tool_name}</span>
+                              {prov && (
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[9.5px] font-medium uppercase tracking-wider ring-1 ${prov.chip}`}
+                                  title={prov.tooltip}
+                                >
+                                  <span className={`h-1 w-1 rounded-full ${prov.dot}`} />
+                                  {prov.label}
+                                </span>
+                              )}
+                              <span className="min-w-0 flex-1 truncate text-neutral-500">
+                                {summariseArgs(c.args)}
+                              </span>
+                            </li>
+                          );
+                        })}
                       </ol>
                     </div>
                   )}
@@ -357,6 +466,47 @@ function SubHeader({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
       {label}
     </div>
   );
+}
+
+// Detect the classic indirect-prompt-injection pathway: an agent makes a
+// `target`-provenance tool call (adversary-controlled output entered the
+// model context) and then makes another tool call before the boundary is
+// closed. We surface the *first* such pair — that's the earliest crossing
+// the operator should audit.
+//
+// Conservative: we only flag when the downstream tool is NOT itself
+// `target` provenance (calling another target endpoint isn't a boundary
+// crossing — it's just continuing the engagement). We also require both
+// calls to belong to the same agent's history (already true by data
+// shape), and we ignore a pure `target → target → target` chain.
+//
+// Helps the operator spot "the engine talked to the target and then ran
+// a code-search tool — did the target's response steer that?" Pairs with
+// engine #139's actor.provenance metadata.
+function detectPromptInjectionChain(
+  calls: AgentToolCall[],
+): { upstream_tool: string; downstream_tool: string } | null {
+  let lastTargetCall: AgentToolCall | null = null;
+  for (const c of calls) {
+    if (c.provenance === 'target') {
+      lastTargetCall = c;
+      continue;
+    }
+    // After the early-continue above, `c.provenance` is narrowed away
+    // from 'target'. We additionally exclude 'mixed' — that value already
+    // implies operator awareness, no need to flag it again.
+    if (
+      lastTargetCall
+      && c.provenance
+      && c.provenance !== 'mixed'
+    ) {
+      return {
+        upstream_tool: lastTargetCall.tool_name,
+        downstream_tool: c.tool_name,
+      };
+    }
+  }
+  return null;
 }
 
 function summariseArgs(args: Record<string, unknown>): string {
