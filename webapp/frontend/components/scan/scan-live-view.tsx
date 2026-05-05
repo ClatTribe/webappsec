@@ -8,6 +8,7 @@ import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
+import PhaseProgress from '@/components/scan/phase-progress';
 
 interface Props {
   scanId: string;
@@ -321,6 +322,14 @@ export default function ScanLiveView({
           events={events}
         />
       )}
+
+      {/* Per-phase coverage receipt (engine PR #140 / wishlist §15.4).
+          Renders the four canonical phases (recon → exploit → validate
+          → report) with the engine's self-audit `categories_covered`
+          per phase; gate-breach banner when `categories_skipped` non-
+          empty. Hidden until the engine emits a `phase.entered` event
+          (older versions / pre-recon phase). */}
+      <PhaseProgress events={events} />
 
       {/* AI investigators — explains what an "agent" is and lists each one. */}
       <AgentsSection events={events} expectedCount={agentsCount ?? 0} />
