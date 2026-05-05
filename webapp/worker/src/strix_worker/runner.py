@@ -407,6 +407,25 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             stats.cost,
             stats.agents_count,
         )
+        # Tier A — Slack notification (migration 037 + notifier.py).
+        # Best-effort: any error inside is swallowed so the wrapper
+        # never fails a scan over a flaky webhook. We pass the
+        # in-scope `org_id` only when we got that far in run_scan;
+        # if `claim_scan` lost the race we never load the org row,
+        # in which case there's nothing to notify on anyway.
+        try:
+            if "org_id" in locals() and locals().get("org_id"):
+                from .notifier import notify_scan_completion  # local import — keeps import-time graph clean
+                notify_scan_completion(
+                    sb,
+                    scan_id=scan_id,
+                    org_id=locals()["org_id"],
+                    final_status=final_status,
+                    error_message=error_message,
+                    wrapper_origin=cfg.wrapper_origin,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: Slack notification dispatch crashed", scan_id)
 
 
 def cancel_running_scan(scan_id: str) -> bool:

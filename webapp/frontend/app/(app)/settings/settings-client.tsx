@@ -14,6 +14,7 @@ import {
   Trash2,
   Brain,
   RotateCcw,
+  Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -28,6 +29,7 @@ interface Props {
     plan: string;
     llm_provider: string | null;
     llm_api_key_secret_id: string | null;
+    slack_webhook_secret_id: string | null;
   } | null;
   orgRole: string | null;
 }
@@ -103,6 +105,18 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
           this UI only sets/clears the secret_id pointer in org_secrets. */}
       {org && (orgRole === 'owner' || orgRole === 'admin') && (
         <ApiKeysSection orgId={org.id} />
+      )}
+
+      {/* Slack notifications (Tier A / migration 037). Vault-encrypted
+          incoming-webhook URL; the worker decrypts at scan-finish and
+          posts a small block-kit message with severity counts + a deep-
+          link back to the scan page. */}
+      {org && (orgRole === 'owner' || orgRole === 'admin') && (
+        <SlackWebhookSection
+          orgId={org.id}
+          initiallySet={Boolean(org.slack_webhook_secret_id)}
+          onSaved={() => router.refresh()}
+        />
       )}
     </div>
   );
@@ -1174,5 +1188,180 @@ function ApiKeyRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ============== SLACK WEBHOOK ==============
+//
+// Tier A — async push notification channel. The worker decrypts the
+// stored webhook URL via worker_decrypt_org_slack_webhook(p_scan_id)
+// (migration 037) at scan-finalise time and POSTs a small block-kit
+// summary message. Empty / unset means the worker doesn't notify
+// anyone — the wrapper never falls back to a "default" webhook.
+
+function SlackWebhookSection({
+  orgId,
+  initiallySet,
+  onSaved,
+}: {
+  orgId: string;
+  initiallySet: boolean;
+  onSaved: () => void;
+}) {
+  const [isSet, setIsSet] = useState(initiallySet);
+  const [editing, setEditing] = useState(false);
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+
+  const save = async () => {
+    if (!url.trim().startsWith('https://hooks.slack.com/services/')) {
+      setFeedback({
+        kind: 'error',
+        text: 'Must be a Slack incoming-webhook URL (starts with https://hooks.slack.com/services/).',
+      });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/slack-webhook`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Save failed' });
+      return;
+    }
+    setUrl('');
+    setIsSet(true);
+    setEditing(false);
+    setFeedback({ kind: 'success', text: 'Webhook saved.' });
+    onSaved();
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/slack-webhook`, { method: 'DELETE' });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Clear failed' });
+      return;
+    }
+    setIsSet(false);
+    setFeedback({ kind: 'success', text: 'Webhook cleared.' });
+    onSaved();
+  };
+
+  return (
+    <Section
+      title="Slack notifications"
+      Icon={Bell}
+      hint={
+        'Get a one-line summary in Slack when a scan finishes — '
+        + 'severity counts, total cost, and a click-through to the '
+        + 'scan page. Webhook URLs are stored vault-encrypted and only '
+        + 'decrypted in the worker at scan-completion time.'
+      }
+    >
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-3">
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-neutral-100">
+                Incoming webhook URL
+              </span>
+              {isSet ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-emerald-200 ring-1 ring-emerald-400/30">
+                  <Check className="h-3 w-3" strokeWidth={2.5} />
+                  Configured
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-md bg-neutral-800/60 px-1.5 py-0.5 text-[10.5px] font-medium text-neutral-400 ring-1 ring-neutral-700/40">
+                  Not configured
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-neutral-500">
+              Create one at <a
+                href="https://api.slack.com/messaging/webhooks"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-300/80 hover:text-cyan-300 hover:underline"
+              >Slack → Incoming Webhooks</a>{' '}
+              and paste the resulting URL.
+            </p>
+          </div>
+          <div className="flex flex-shrink-0 gap-1.5">
+            {!editing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-200 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {isSet ? 'Update' : 'Set'}
+                </button>
+                {isSet && (
+                  <button
+                    type="button"
+                    onClick={clear}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-red-300 ring-1 ring-red-500/30 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3 w-3" strokeWidth={2.5} />
+                    Clear
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(false);
+                  setUrl('');
+                  setFeedback(null);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-300 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+
+        {editing && (
+          <div className="mt-3 flex gap-2">
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://hooks.slack.com/services/T.../B.../..."
+              className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 font-mono text-xs text-neutral-100 transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+            />
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-cyan-400/30 transition-colors hover:bg-cyan-500/25 disabled:opacity-50"
+            >
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              Save
+            </button>
+          </div>
+        )}
+
+        {feedback && (
+          <div className="mt-2">
+            <FeedbackPill feedback={feedback} />
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }

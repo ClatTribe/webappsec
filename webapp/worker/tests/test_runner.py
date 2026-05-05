@@ -367,6 +367,10 @@ class FakeSupabase:
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         return None
 
+    def decrypt_org_slack_webhook(self, scan_id: str) -> str | None:
+        # Tests can override by setting `self.slack_webhook` to a string.
+        return getattr(self, "slack_webhook", None)
+
     def decrypt_org_secrets(self, scan_id: str) -> dict[str, str]:
         # Tests don't exercise per-org STRIX_* keys; an empty dict
         # mirrors the production fail-open path when no keys are set.
@@ -484,6 +488,7 @@ def cfg_factory(tmp_path: Path):
             strix_bin=str(bin_path),
             worker_concurrency=1,
             log_level="DEBUG",
+            wrapper_origin=None,
         )
 
     return _make
