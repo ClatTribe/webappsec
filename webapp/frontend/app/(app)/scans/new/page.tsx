@@ -3,9 +3,41 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronRight, Plus, Target as TargetIcon } from 'lucide-react';
+import { ChevronRight, Plus, Target as TargetIcon, Network } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Integration, ScanMode, Target } from '@/lib/supabase/types';
+
+// CIDR host-count preview helper (engine PR #124 / wishlist §13.3 row 2).
+// We render the preview inline on every ip_address target so the operator
+// sees "/24 = 256 hosts" before launching a scan that could fan out to
+// hundreds of probes. Pure JS — no engine round-trip, no API call.
+//
+// Returns null when the value isn't a recognised CIDR. We accept both
+// IPv4 (/0–/32) and IPv6 (/0–/128); IPv6 host counts are truncated to a
+// scientific-notation string so a /48 doesn't render 2^80 digits.
+function previewCidrHosts(value: string): string | null {
+  const v = value.trim();
+  const slash = v.indexOf('/');
+  if (slash <= 0) return null;
+  const prefix = Number.parseInt(v.slice(slash + 1), 10);
+  if (!Number.isFinite(prefix)) return null;
+  // IPv4 detection — at least one dot in the address part, prefix 0–32.
+  const isIpv4 = /\./.test(v.slice(0, slash)) && prefix >= 0 && prefix <= 32;
+  // IPv6 detection — at least one colon in the address part, prefix 0–128.
+  const isIpv6 = /:/.test(v.slice(0, slash)) && prefix >= 0 && prefix <= 128;
+  if (!isIpv4 && !isIpv6) return null;
+  const bits = isIpv4 ? 32 - prefix : 128 - prefix;
+  if (bits === 0) return '1 host';
+  if (bits <= 32) {
+    const hosts = 2 ** bits;
+    return `${hosts.toLocaleString()} host${hosts === 1 ? '' : 's'}`;
+  }
+  // Beyond a billion hosts the operator shouldn't be reading exact
+  // counts anyway — a magnitude warning is more honest than a giant
+  // localised number. e.g. /48 IPv6 = 2^80 ≈ 1.2e+24.
+  const hosts = 2 ** bits;
+  return `~${hosts.toExponential(1)} hosts`;
+}
 
 function NewScanInner() {
   const router = useRouter();
@@ -132,11 +164,29 @@ function NewScanInner() {
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-medium text-neutral-100">{t.name}</span>
                       <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-neutral-400">
                         {t.type}
                       </span>
+                      {/* CIDR host-count preview (engine PR #124 / wishlist
+                          §13.3). Only shown for ip_address targets whose
+                          value parses as a CIDR — gives the operator a
+                          "before-you-launch" sanity check against runaway
+                          fan-out. */}
+                      {t.type === 'ip_address' && (() => {
+                        const preview = previewCidrHosts(t.value);
+                        if (!preview) return null;
+                        return (
+                          <span
+                            className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-200 ring-1 ring-amber-400/30"
+                            title="Expected probe fan-out for this CIDR. Each host gets a port scan + service probe."
+                          >
+                            <Network className="h-2.5 w-2.5" strokeWidth={2.5} />
+                            {preview}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-neutral-400">
                       {t.value}
