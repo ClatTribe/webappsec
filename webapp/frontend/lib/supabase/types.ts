@@ -113,6 +113,13 @@ export interface Scan {
    *  (target didn't resolve / no port answered). Distinct from a scan
    *  crash; UI renders an amber "Target unreachable" banner. */
   preflight_failed?: boolean;
+  /** Engine PR #129 — auditor-grade evidence pack present in storage.
+   *  Set by the worker after at least one file from the engine's
+   *  `--compliance-pack` bundle landed under
+   *  `<org_id>/<scan_id>/compliance_pack/`. UI keys the "Download
+   *  compliance pack" button off this column to avoid dangling links
+   *  when the engine didn't emit a pack. */
+  compliance_pack_uploaded?: boolean;
 }
 
 export interface ScanSummary {

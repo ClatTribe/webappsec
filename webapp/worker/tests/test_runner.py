@@ -372,6 +372,17 @@ class FakeSupabase:
         # mirrors the production fail-open path when no keys are set.
         return {}
 
+    def set_compliance_pack_uploaded(self, scan_id: str) -> None:
+        # Tests don't drive the compliance-pack upload path; the worker
+        # only calls this after at least one file lands in storage, and
+        # the fake's `upload_artifact` just appends to `self.uploads` so
+        # exercising flow-end-to-end isn't necessary for the runner
+        # state-machine tests. Real coverage lives in dedicated tests.
+        self._compliance_pack_uploaded = True
+
+    def set_preflight_failed(self, scan_id: str) -> None:
+        self._preflight_failed = True
+
     def upload_artifact(
         self, bucket: str, path: str, contents: bytes, content_type: str = "text/plain"
     ) -> None:
@@ -512,9 +523,18 @@ async def test_run_scan_collects_all_reports(fake_scan, cfg_factory):
     cmd_events = [p for et, p in sb.events if et == "scan.command"]
     assert len(cmd_events) == 1
     cmd_payload = cmd_events[0]
-    assert cmd_payload["cmd"][1:5] == ["-n", "-m", "quick", "-t"]
-    assert "https://example.com" in cmd_payload["cmd"]
-    assert "--instruction" in cmd_payload["cmd"]
+    cmd = cmd_payload["cmd"]
+    # Headline flags — assert presence and adjacency rather than absolute
+    # index because the runner appends new flags (--feedback-from,
+    # --compliance-pack, etc.) and pinning index would force every PR
+    # that adds a flag to retouch this test.
+    assert cmd[1] == "-n"
+    assert cmd[2:4] == ["-m", "quick"]
+    assert "-t" in cmd
+    assert "https://example.com" in cmd
+    assert "--instruction" in cmd
+    # Compliance-pack flag is always emitted (engine PR #129 / migration 030).
+    assert "--compliance-pack" in cmd
     assert "STRIX_LLM" in cmd_payload["env_keys"]
     assert "LLM_API_KEY" in cmd_payload["env_keys"]
     assert "sk-fake" not in str(cmd_payload)
@@ -1494,3 +1514,102 @@ def test_load_trajectories_returns_empty_when_file_missing(tmp_path):
     run_dir = tmp_path / "run-empty"
     run_dir.mkdir()
     assert _load_trajectories(run_dir) == {}
+
+
+# ---------------------------------------------------------------------------
+# Migration 030 — compliance pack upload (engine PR #129)
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import _content_type_for, _upload_compliance_pack  # noqa: E402
+
+
+def test_pack_content_type_uses_known_extensions():
+    """Auditor previews only render inline when storage hands back the
+    right content-type. The closed map covers every file shape the
+    engine writes; anything else falls back to text/plain."""
+    assert _content_type_for(Path("manifest.json")) == "application/json"
+    assert _content_type_for(Path("findings.csv")) == "text/csv"
+    assert _content_type_for(Path("control_attestation.md")) == "text/markdown"
+    assert _content_type_for(Path("events.jsonl")) == "application/x-ndjson"
+    assert _content_type_for(Path("SHA256SUMS")) == "text/plain; charset=utf-8"
+    assert _content_type_for(Path("foo.bin")) == "text/plain; charset=utf-8"
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_walks_dir_and_flips_flag(tmp_path, fake_scan):
+    """End-to-end: a non-empty pack dir produces uploads under the
+    compliance_pack/ prefix AND flips the new boolean column."""
+    pack_root = tmp_path / "compliance_pack"
+    (pack_root / "run-abc").mkdir(parents=True)
+    (pack_root / "run-abc" / "manifest.json").write_text("{}")
+    (pack_root / "run-abc" / "findings.csv").write_text("a,b\n1,2\n")
+    (pack_root / "run-abc" / "SHA256SUMS").write_text("hash manifest.json\n")
+
+    sb = FakeSupabase(fake_scan)
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    pack_uploads = [u for u in sb.uploads if "compliance_pack" in u["path"]]
+    assert len(pack_uploads) == 3
+    paths = {u["path"] for u in pack_uploads}
+    assert any(p.endswith("manifest.json") for p in paths)
+    assert any(p.endswith("findings.csv") for p in paths)
+    assert any(p.endswith("SHA256SUMS") for p in paths)
+    for p in paths:
+        assert p.startswith(f"{ORG_ID}/{SCAN_ID}/compliance_pack/")
+    # Flag flipped because at least one file uploaded.
+    assert getattr(sb, "_compliance_pack_uploaded", False) is True
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_skips_when_dir_missing(tmp_path, fake_scan):
+    """No pack dir at all (older engine without #129, or path mismatch).
+    The UI keys the download button off the flag and a dangling button
+    is worse than no button."""
+    pack_root = tmp_path / "does_not_exist"
+
+    sb = FakeSupabase(fake_scan)
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    assert [u for u in sb.uploads if "compliance_pack" in u["path"]] == []
+    assert getattr(sb, "_compliance_pack_uploaded", False) is False
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_skips_empty_dir(tmp_path, fake_scan):
+    """An empty pack dir (engine ran but didn't write anything for some
+    reason) must not flip the flag either."""
+    pack_root = tmp_path / "compliance_pack"
+    pack_root.mkdir()  # exists, but empty
+
+    sb = FakeSupabase(fake_scan)
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    assert [u for u in sb.uploads if "compliance_pack" in u["path"]] == []
+    assert getattr(sb, "_compliance_pack_uploaded", False) is False
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_swallows_per_file_failures(tmp_path, fake_scan):
+    """One bad file in the bundle must not block the rest — partial
+    auditor evidence is more useful than no evidence."""
+    pack_root = tmp_path / "compliance_pack"
+    (pack_root / "run-x").mkdir(parents=True)
+    (pack_root / "run-x" / "good.json").write_text("{}")
+    (pack_root / "run-x" / "bad.csv").write_text("oops")
+
+    sb = FakeSupabase(fake_scan)
+    real_upload = sb.upload_artifact
+
+    def flaky_upload(bucket, path, contents, content_type="text/plain"):
+        if path.endswith("bad.csv"):
+            raise RuntimeError("storage gone fishing")
+        return real_upload(bucket, path, contents, content_type)
+
+    sb.upload_artifact = flaky_upload  # type: ignore[method-assign]
+
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    pack_uploads = [u for u in sb.uploads if "compliance_pack" in u["path"]]
+    assert len(pack_uploads) == 1
+    assert pack_uploads[0]["path"].endswith("good.json")
+    assert getattr(sb, "_compliance_pack_uploaded", False) is True
