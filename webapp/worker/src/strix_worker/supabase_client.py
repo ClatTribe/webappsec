@@ -81,6 +81,20 @@ class WorkerSupabase:
             "worker_set_sbom_uploaded", {"p_scan_id": scan_id}
         ).execute()
 
+    def set_coverage(self, scan_id: str, coverage: dict[str, Any]) -> None:
+        """Persist the engine's coverage.json verbatim (migration 039).
+
+        The blob carries the engine's required-checks list + which
+        ones actually ran; UI renders an amber "coverage incomplete"
+        banner when `status="incomplete"`. Critical for the trust
+        gap — a 0-finding scan is ambiguous between "site is clean"
+        and "agent gave up early"; coverage tells you which.
+        """
+        self.client.rpc(
+            "worker_set_coverage",
+            {"p_scan_id": scan_id, "p_coverage": coverage},
+        ).execute()
+
     def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
         """Persist the engine's run_meta.json verbatim (migration 031).
 

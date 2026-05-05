@@ -24,6 +24,7 @@ import VendorRiskGauge from '@/components/scan/vendor-risk-gauge';
 import MfaPostureBadge from '@/components/scan/mfa-posture-badge';
 import CompliancePostureCard from '@/components/scan/compliance-posture-card';
 import MonitoringPostureBadge from '@/components/scan/monitoring-posture-badge';
+import CoverageBanner from '@/components/scan/coverage-banner';
 import { AI_BRAND } from '@/lib/finding-theme';
 import type { ScanRecurrenceSummary, ScanSummary } from '@/lib/supabase/types';
 
@@ -182,6 +183,15 @@ export default async function ScanDetailPage({ params }: Props) {
   const targetEvents = parseTargetEvents(scanEventsData ?? []);
   const testPlan = parseTestPlan(scanEventsData ?? []);
 
+  // Findings count for the coverage banner's copy variant. A 0-finding
+  // scan with incomplete coverage is the most-misleading state, so the
+  // banner uses a stronger "not a clean bill of health" warning when
+  // findings_count is zero. Cheap head-count query — no payload bytes.
+  const { count: findingsCount } = await supabase
+    .from('findings')
+    .select('id', { count: 'exact', head: true })
+    .eq('scan_id', params.id);
+
   // Verify-rescan link (Tier A / migration 036). When this scan was
   // spawned from a finding's "Verify fix" button, fetch the linked
   // finding's title for the breadcrumb and the header badge. Best-effort
@@ -314,6 +324,20 @@ export default async function ScanDetailPage({ params }: Props) {
         </section>
       )}
 
+      {/* Coverage banner (Tier A trust-gap fix / migration 039). When
+          the engine's coverage.json says `status="incomplete"` or
+          coverage_percent < 50%, render an amber warning ABOVE the
+          vendor-risk / MFA / posture hero strip so an operator can't
+          read "100/100 low risk" without first seeing "but the agent
+          didn't actually run those checks". A clean coverage report
+          implicitly hides the banner — no positive-state noise. */}
+      {scan.coverage && (
+        <CoverageBanner
+          coverage={scan.coverage}
+          findingCount={findingsCount ?? 0}
+        />
+      )}
+
       {/* Compliance / vendor-risk hero widgets (engine PRs #132 + #133,
           migration 031). Both pull from `scan.run_meta` which the worker
           persists from the engine's run_meta.json. The widgets are
@@ -326,7 +350,10 @@ export default async function ScanDetailPage({ params }: Props) {
         || scan.run_meta?.monitoring_posture) && (
         <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {scan.run_meta?.vendor_risk && (
-            <VendorRiskGauge vendor_risk={scan.run_meta.vendor_risk} />
+            <VendorRiskGauge
+              vendor_risk={scan.run_meta.vendor_risk}
+              coverage={scan.coverage ?? null}
+            />
           )}
           {scan.run_meta?.mfa_attestation && (
             <MfaPostureBadge mfa={scan.run_meta.mfa_attestation} />

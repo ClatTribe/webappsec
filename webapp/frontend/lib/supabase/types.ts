@@ -154,6 +154,36 @@ export interface Scan {
    *  scan page renders a "Verifying finding: <title>" badge on the
    *  header when set. */
   verifying_finding_id?: string | null;
+  /** Engine `coverage.json` persisted verbatim by the worker
+   *  (migration 039). Critical UX bridge: a 0-finding scan is
+   *  ambiguous between "site is clean" and "agent gave up early";
+   *  coverage tells you which. The amber banner on the scan page
+   *  keys off `coverage.status === "incomplete"`. */
+  coverage?: ScanCoverage | null;
+}
+
+export interface ScanCoverage {
+  schema_version?: number;
+  run_id?: string;
+  run_name?: string;
+  generated_at?: string;
+  target_types?: string[];
+  scan_mode?: string;
+  /** Engine's required-checks list for the (target_type, scan_mode)
+   *  combination — e.g. ["csrf","idor","open_redirect","sqli","ssrf","xss"]. */
+  required?: string[];
+  /** Engine subset of `required` that finished with a result
+   *  (vulnerable / not_vulnerable / inconclusive). */
+  completed?: string[];
+  /** Engine subset of `required` that produced any signal (covered ⊆ required). */
+  covered?: string[];
+  /** required − covered. The list the UI banner reads from. */
+  gaps?: string[];
+  /** 0-100. UI compares against scan_mode to gate the thin-scan
+   *  detector. */
+  coverage_percent?: number;
+  status?: 'complete' | 'incomplete' | string;
+  [k: string]: unknown;
 }
 
 export interface ScanImport {

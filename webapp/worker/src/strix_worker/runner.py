@@ -1206,6 +1206,13 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         # Architecture.md §1.1 — the engine writes; the wrapper stores.
         _persist_run_meta(sb, scan_id, run_dir)
 
+        # Engine coverage.json — required-checks list + actual-ran
+        # checks + gap list (migration 039). Critical UX bridge: a
+        # 0-finding scan is ambiguous between "site is clean" and
+        # "agent gave up early"; coverage tells you which. The UI's
+        # amber "coverage incomplete" banner keys off this column.
+        _persist_coverage(sb, scan_id, run_dir)
+
         # CycloneDX SBOM (engine PR #131 / §19.4 Tier 4 row 3,
         # migration 032). The file itself was already uploaded by the
         # rglob("*") loop above; we only need to flip the boolean so
@@ -1269,6 +1276,38 @@ def _compute_fingerprint(*, cwe: str | None, endpoint: str | None, target: str |
     norm_cwe = (cwe or "").upper().strip()
     payload = f"{norm_cwe}|{norm_loc}|{norm_title}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _persist_coverage(sb: WorkerSupabase, scan_id: str, run_dir: Path) -> None:
+    """Read <run_dir>/coverage.json and stash on `scans.coverage`
+    (migration 039 / Tier-A trust-gap fix).
+
+    Best-effort: missing file / parse error / non-object top level all
+    log + skip. The amber "coverage incomplete" banner simply doesn't
+    render — but the existing finding-counts UX is unchanged.
+
+    A clean coverage report (`status="complete"` / `coverage_percent`
+    >= 100) lets the wrapper's vendor-risk + summary copy stand
+    unqualified. An incomplete one *replaces* the muted summary with
+    an explicit "agent didn't cover X / Y / Z" banner so customers
+    can't be led to assume thoroughness from a 0-finding scan.
+    """
+    path = run_dir / "coverage.json"
+    if not path.exists():
+        logger.info("scan %s: no coverage.json — skipping persist", scan_id)
+        return
+    try:
+        data = json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to parse coverage.json", scan_id)
+        return
+    if not isinstance(data, dict):
+        logger.warning("scan %s: coverage.json is not a JSON object", scan_id)
+        return
+    try:
+        sb.set_coverage(scan_id, data)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to persist coverage", scan_id)
 
 
 def _persist_run_meta(sb: WorkerSupabase, scan_id: str, run_dir: Path) -> None:
