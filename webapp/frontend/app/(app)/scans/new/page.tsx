@@ -125,11 +125,23 @@ function NewScanInner() {
         <span className="text-neutral-300">New scan</span>
       </nav>
 
-      <header>
-        <h1 className="text-3xl font-semibold tracking-tight">New scan</h1>
-        <p className="mt-1.5 text-sm text-neutral-400">
-          Pick a target to scan. Findings will roll up to that target across runs.
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">New scan</h1>
+          <p className="mt-1.5 text-sm text-neutral-400">
+            Pick a target to scan. Findings will roll up to that target across runs.
+          </p>
+        </div>
+        {/* CI snippet generator (engine PR #121 / wishlist §13.3 row 3).
+            Power users running strix in their own pipeline grab the
+            YAML from here — those scans bypass the wrapper. */}
+        <Link
+          href="/scans/ci-snippet"
+          className="hidden flex-shrink-0 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800/40 sm:inline-block"
+          title="Generate a GitHub Actions / GitLab CI snippet for running strix in your pipeline"
+        >
+          CI / CD snippet →
+        </Link>
       </header>
 
       <form onSubmit={onSubmit} className="space-y-6">
