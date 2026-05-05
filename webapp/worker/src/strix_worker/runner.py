@@ -986,6 +986,13 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
                 except Exception as e:  # noqa: BLE001
                     logger.warning("failed to upload %s: %s", key, e)
 
+        # Engine run_meta.json — vendor_risk, mfa_attestation,
+        # compliance_posture, etc. (migration 031 / §19.4 Tier 4). We
+        # persist the whole file as JSONB so adding a new top-level
+        # signal is a UI change, not a schema change. Per
+        # Architecture.md §1.1 — the engine writes; the wrapper stores.
+        _persist_run_meta(sb, scan_id, run_dir)
+
         # Per-finding reasoning trail (engine PR #142 / §15.1 Tier 2). The
         # engine writes one trajectory record per finding to
         # `<run_dir>/trajectory.jsonl`. We load the whole file once, key by
@@ -1033,6 +1040,41 @@ def _compute_fingerprint(*, cwe: str | None, endpoint: str | None, target: str |
     norm_cwe = (cwe or "").upper().strip()
     payload = f"{norm_cwe}|{norm_loc}|{norm_title}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _persist_run_meta(sb: WorkerSupabase, scan_id: str, run_dir: Path) -> None:
+    """Read <run_dir>/run_meta.json and stash the whole blob on the scan
+    row (migration 031). Best-effort: a missing file or parse error is
+    logged and skipped — the UI hides the corresponding hero widgets
+    rather than render bogus data.
+
+    This is intentionally a single JSONB write rather than per-signal
+    columns. The engine adds top-level keys to run_meta over time
+    (vendor_risk → mfa_attestation → compliance_posture → ...); a
+    typed-column-per-signal model would force a migration on every
+    additive engine change.
+
+    The blob *can* be sizeable in long-target scans, but real-world
+    samples are well under 100 KiB; well within Postgres JSONB sweet
+    spot. If we ever see >1 MiB run_metas we can switch to selective
+    extraction here.
+    """
+    path = run_dir / "run_meta.json"
+    if not path.exists():
+        logger.info("scan %s: no run_meta.json — skipping persist", scan_id)
+        return
+    try:
+        data = json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to parse run_meta.json", scan_id)
+        return
+    if not isinstance(data, dict):
+        logger.warning("scan %s: run_meta.json is not a JSON object", scan_id)
+        return
+    try:
+        sb.set_run_meta(scan_id, data)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to persist run_meta", scan_id)
 
 
 def _load_trajectories(run_dir: Path) -> dict[str, dict[str, Any]]:
