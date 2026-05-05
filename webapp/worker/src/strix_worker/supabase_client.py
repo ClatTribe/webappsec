@@ -143,6 +143,33 @@ class WorkerSupabase:
             # No per-org key configured — fall back to default.
             return None
 
+    def decrypt_org_secrets(self, scan_id: str) -> dict[str, str]:
+        """Decrypt this org's STRIX_* recon API keys (migration 028).
+
+        Returns a dict like {"STRIX_GITHUB_TOKEN": "...", ...} — empty
+        when no keys are configured, partial when some decrypts failed
+        (the RPC's defensive `begin … exception … end` per-row handler).
+        Caller forwards each pair to the sandbox env.
+
+        Per-key failures land in audit_log; the worker proceeds with
+        whatever decrypted successfully — partial coverage is better
+        than failing the whole scan because one secret was rotated.
+        """
+        try:
+            result = self.client.rpc(
+                "worker_decrypt_org_secrets", {"p_scan_id": scan_id}
+            ).execute()
+            data = result.data
+            if isinstance(data, dict):
+                # Filter to only non-empty string values; defensive against
+                # any RPC-side type drift.
+                return {k: v for k, v in data.items() if isinstance(v, str) and v}
+            return {}
+        except Exception:  # noqa: BLE001
+            # No keys configured / vault unreachable — engine fails open
+            # silently per-tool. Don't take the scan down with us.
+            return {}
+
     # --- Storage ---------------------------------------------------------
 
     def upload_artifact(

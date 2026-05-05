@@ -96,6 +96,14 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
           onSaved={() => router.refresh()}
         />
       )}
+
+      {/* Threat-intel & recon API keys (§19.1 Tier 1 item 10).
+          5 STRIX_* env vars unlock engine-side recon tools. Same vault
+          pattern as the LLM key — secret value lives in vault.secrets,
+          this UI only sets/clears the secret_id pointer in org_secrets. */}
+      {org && (orgRole === 'owner' || orgRole === 'admin') && (
+        <ApiKeysSection orgId={org.id} />
+      )}
     </div>
   );
 }
@@ -889,5 +897,282 @@ function FpAutoDismissSection({ orgId, onSaved }: { orgId: string; onSaved: () =
         </>
       )}
     </Section>
+  );
+}
+
+// ============== THREAT-INTEL & RECON API KEYS ==============
+// 5 STRIX_* env vars (wishlist §5). Each unlocks a specific engine recon
+// capability. Stored vault-encrypted; values never leave the worker.
+// Owner/admin-gated server-side via the API route + RLS.
+
+const STRIX_KEYS: Array<{
+  name:
+    | 'STRIX_GITHUB_TOKEN'
+    | 'STRIX_BING_KEY'
+    | 'STRIX_SECURITYTRAILS_KEY'
+    | 'STRIX_VIRUSTOTAL_KEY'
+    | 'STRIX_VIEWDNS_KEY';
+  label: string;
+  unlocks: string;
+  freeTier: string;
+  signupUrl: string;
+}> = [
+  {
+    name: 'STRIX_GITHUB_TOKEN',
+    label: 'GitHub PAT',
+    unlocks: 'Code-search recon (GitHub & GitLab) + secret-leak detection',
+    freeTier: 'Free — any GitHub PAT, no scopes needed',
+    signupUrl: 'https://github.com/settings/tokens?type=beta',
+  },
+  {
+    name: 'STRIX_BING_KEY',
+    label: 'Bing Web Search API',
+    unlocks: 'SaaS leak discovery (Trello / Notion / Pastebin / Confluence)',
+    freeTier: '1k queries/month free',
+    signupUrl: 'https://www.microsoft.com/en-us/bing/apis/bing-web-search-api',
+  },
+  {
+    name: 'STRIX_SECURITYTRAILS_KEY',
+    label: 'SecurityTrails',
+    unlocks: 'Passive DNS history (preferred source)',
+    freeTier: 'Limited free tier',
+    signupUrl: 'https://securitytrails.com/corp/api',
+  },
+  {
+    name: 'STRIX_VIRUSTOTAL_KEY',
+    label: 'VirusTotal',
+    unlocks: 'Passive DNS history (fallback)',
+    freeTier: 'Limited free tier',
+    signupUrl: 'https://www.virustotal.com/gui/my-apikey',
+  },
+  {
+    name: 'STRIX_VIEWDNS_KEY',
+    label: 'ViewDNS',
+    unlocks: 'Reverse-IP secondary',
+    freeTier: 'Free tier exists',
+    signupUrl: 'https://viewdns.info/api',
+  },
+];
+
+interface OrgSecretRow {
+  key: string;
+  set_at: string;
+}
+
+function ApiKeysSection({ orgId }: { orgId: string }) {
+  const [setKeys, setSetKeys] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  const refresh = async () => {
+    const supabase = createClient();
+    const { data } = await supabase.from('org_secrets').select('key, set_at').eq('org_id', orgId);
+    const map: Record<string, string> = {};
+    for (const row of (data as OrgSecretRow[] | null) ?? []) {
+      map[row.key] = row.set_at;
+    }
+    setSetKeys(map);
+    setLoaded(true);
+  };
+
+  useEffect(() => {
+    refresh();
+  }, [orgId]);
+
+  return (
+    <Section
+      title="Threat-intel & recon API keys"
+      Icon={KeyRound}
+      hint={
+        'Strix uses these to enrich domain scans with code-search, SaaS-leak discovery, ' +
+        "passive DNS history, and reverse-IP recon. Each is optional — without a key, the " +
+        'corresponding tool fails open silently. Values are stored vault-encrypted and only ' +
+        'decrypted in the worker at scan time.'
+      }
+    >
+      {!loaded ? (
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading…
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {STRIX_KEYS.map((k) => (
+            <ApiKeyRow
+              key={k.name}
+              meta={k}
+              isSet={!!setKeys[k.name]}
+              setAt={setKeys[k.name]}
+              orgId={orgId}
+              onChanged={refresh}
+            />
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function ApiKeyRow({
+  meta,
+  isSet,
+  setAt,
+  orgId,
+  onChanged,
+}: {
+  meta: (typeof STRIX_KEYS)[number];
+  isSet: boolean;
+  setAt: string | undefined;
+  orgId: string;
+  onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+
+  const save = async () => {
+    if (value.trim().length < 8) {
+      setFeedback({ kind: 'error', text: 'Key looks too short.' });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/secrets`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: meta.name, value: value.trim() }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Save failed' });
+      return;
+    }
+    setValue('');
+    setEditing(false);
+    setFeedback({ kind: 'success', text: 'Saved.' });
+    onChanged();
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/secrets`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: meta.name }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Clear failed' });
+      return;
+    }
+    setFeedback({ kind: 'success', text: 'Cleared.' });
+    onChanged();
+  };
+
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-3">
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-neutral-100">{meta.label}</span>
+            <code className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 ring-1 ring-neutral-800">
+              {meta.name}
+            </code>
+            {isSet ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-emerald-200 ring-1 ring-emerald-400/30">
+                <Check className="h-3 w-3" strokeWidth={2.5} />
+                Set
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-md bg-neutral-800/60 px-1.5 py-0.5 text-[10.5px] font-medium text-neutral-400 ring-1 ring-neutral-700/40">
+                Not set
+              </span>
+            )}
+          </div>
+          <div className="text-[12px] text-neutral-400">{meta.unlocks}</div>
+          <div className="flex items-center gap-3 text-[10.5px] text-neutral-500">
+            <span>{meta.freeTier}</span>
+            <a
+              href={meta.signupUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-cyan-300/80 transition-colors hover:text-cyan-300 hover:underline"
+            >
+              Get a key →
+            </a>
+            {isSet && setAt && (
+              <span>Saved {new Date(setAt).toLocaleDateString()}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-shrink-0 gap-1.5">
+          {!editing ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-200 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {isSet ? 'Update' : 'Set'}
+              </button>
+              {isSet && (
+                <button
+                  type="button"
+                  onClick={clear}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-red-300 ring-1 ring-red-500/30 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3 w-3" strokeWidth={2.5} />
+                  Clear
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setValue('');
+                setFeedback(null);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-300 ring-1 ring-neutral-800 transition-colors hover:bg-neutral-800"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="mt-3 flex gap-2">
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={`Paste ${meta.label}…`}
+            className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 font-mono text-xs text-neutral-100 transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+          />
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-md bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-cyan-400/30 transition-colors hover:bg-cyan-500/25 disabled:opacity-50"
+          >
+            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+            Save
+          </button>
+        </div>
+      )}
+
+      {feedback && (
+        <div className="mt-2">
+          <FeedbackPill feedback={feedback} />
+        </div>
+      )}
+    </div>
   );
 }
