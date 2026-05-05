@@ -238,12 +238,26 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             # never a scan failure.
             org_strix_keys = sb.decrypt_org_secrets(scan_id)
 
+            # §19.4 Tier 4 — compliance evidence pack (engine PR #129).
+            # The engine writes an 8-file auditor bundle to
+            # <workdir>/compliance_pack/<run_id>/. We pre-create the
+            # parent directory so the engine doesn't fail on a missing
+            # mkdir, then point strix at it via --compliance-pack.
+            # After the run finishes we walk the directory and upload
+            # everything to scan-artifacts storage.
+            compliance_pack_path = str(Path(workdir) / "compliance_pack")
+            Path(compliance_pack_path).mkdir(parents=True, exist_ok=True)
+
             env = _build_env(
                 cfg, scan, creds.env, llm_provider, llm_api_key,
                 feedback_path=feedback_path, fp_policy=fp_policy,
                 org_strix_keys=org_strix_keys,
             )
-            cmd = _build_cmd(cfg, scan, targets, feedback_path=feedback_path)
+            cmd = _build_cmd(
+                cfg, scan, targets,
+                feedback_path=feedback_path,
+                compliance_pack_path=compliance_pack_path,
+            )
 
             logger.info("running: %s", " ".join(shlex.quote(c) for c in cmd))
             sb.emit_event(
@@ -329,6 +343,14 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
 
         # Upload run artifacts (events.jsonl, vuln md, final report) from the scan workdir.
         await _upload_run_artifacts(sb, scan_id, org_id)
+
+        # Compliance evidence pack — sibling directory to strix_runs (engine
+        # PR #129). Only upload when at least one file landed; older
+        # engines that don't recognise --compliance-pack leave the dir
+        # empty and we skip silently. Best-effort: failure to upload
+        # never fails the scan — operators still get the rest of the
+        # artifacts and can re-run if they need the pack.
+        await _upload_compliance_pack(sb, scan_id, org_id)
 
         # Inline AI triage. Done *after* findings are written and *before*
         # finish_scan flips the row to completed so the user never sees a
@@ -662,6 +684,7 @@ def _build_cmd(
     targets: list[dict[str, Any]],
     *,
     feedback_path: str | None = None,
+    compliance_pack_path: str | None = None,
 ) -> list[str]:
     cmd = [cfg.strix_bin, "-n", "-m", scan["scan_mode"]]
 
@@ -675,6 +698,16 @@ def _build_cmd(
         cmd += ["--feedback-from", feedback_path]
     if scan.get("diff_base"):
         cmd += ["--diff-base", scan["diff_base"]]
+
+    # Engine PR #129 — auditor-grade evidence bundle. The engine writes
+    # an 8-file pack to `<path>/<run_id>/` containing manifest, control
+    # attestation, coverage attestation, findings.csv, events excerpt +
+    # signature, run_meta.json, and a SHA256SUMS over them all. The
+    # wrapper uploads the directory after the run and serves it as a
+    # zip download. We always pass the flag — the entire wrapper assumes
+    # the ClatTribe/strix fork (which carries #129).
+    if compliance_pack_path:
+        cmd += ["--compliance-pack", compliance_pack_path]
 
     for target in targets:
         cmd += ["-t", target["value"]]
@@ -839,6 +872,93 @@ def _emit_jsonl_line(sb: WorkerSupabase, scan_id: str, raw: str) -> None:
     except Exception as e:  # noqa: BLE001
         # One bad insert shouldn't halt the whole tailer.
         logger.warning("failed to emit %s for scan %s: %s", event_type, scan_id, e)
+
+
+# Mimetype hints for the compliance-pack uploader. Auditors expect text
+# previews to render inline when they hit the per-file signed URL, so we
+# surface a few common shapes by extension. Anything else falls back to
+# the storage-default `text/plain; charset=utf-8`.
+_PACK_CONTENT_TYPES = {
+    ".json":   "application/json",
+    ".csv":    "text/csv",
+    ".md":     "text/markdown",
+    ".jsonl":  "application/x-ndjson",
+    ".txt":    "text/plain; charset=utf-8",
+    ".sha256": "text/plain; charset=utf-8",
+    ".sig":    "application/octet-stream",
+}
+
+
+def _content_type_for(path: Path) -> str:
+    """Return a sensible content-type for a compliance-pack file."""
+    return _PACK_CONTENT_TYPES.get(path.suffix.lower(), "text/plain; charset=utf-8")
+
+
+def _compliance_pack_root(scan_id: str) -> Path:
+    """Where the worker tells strix to write the auditor bundle.
+
+    Sibling to `strix_runs/` under the per-scan workdir so a single
+    rmtree(workdir) cleans both up. Tests override the path directly
+    by passing a different root to `_upload_compliance_pack`.
+    """
+    return Path(f"/tmp/strix-runs/{scan_id}/compliance_pack")
+
+
+async def _upload_compliance_pack(
+    sb: WorkerSupabase,
+    scan_id: str,
+    org_id: str,
+    pack_root: Path | None = None,
+) -> None:
+    """Upload <workdir>/compliance_pack/ to scan-artifacts at
+    `<org_id>/<scan_id>/compliance_pack/...` (engine PR #129).
+
+    The engine writes an 8-file bundle plus a SHA256SUMS into
+    `<compliance_pack_path>/<run_id>/`. We mirror the directory tree
+    verbatim — the wrapper's API route lists the prefix and zips on
+    demand. Only flips `scans.compliance_pack_uploaded` when at least
+    one file landed; an empty directory (older engines without #129)
+    leaves the flag false and the UI hides the download button.
+
+    Per-file failures are logged and the loop continues — partial
+    uploads are still useful for auditors. A whole-step failure is
+    swallowed so a misconfigured storage bucket can't take down the
+    scan finalisation.
+    """
+    pack_root = pack_root or _compliance_pack_root(scan_id)
+    if not pack_root.exists():
+        logger.info("no compliance_pack dir for scan %s; skipping upload", scan_id)
+        return
+
+    uploaded_any = False
+    prefix = f"{org_id}/{scan_id}/compliance_pack"
+    try:
+        for path in pack_root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(pack_root)
+            key = f"{prefix}/{rel}"
+            try:
+                contents = path.read_bytes()
+                sb.upload_artifact(
+                    SCAN_ARTIFACTS_BUCKET, key, contents, _content_type_for(path)
+                )
+                uploaded_any = True
+            except Exception as e:  # noqa: BLE001
+                logger.warning("compliance pack upload of %s failed: %s", key, e)
+    except Exception:  # noqa: BLE001
+        logger.exception("compliance pack walk failed for scan %s", scan_id)
+
+    if uploaded_any:
+        try:
+            sb.set_compliance_pack_uploaded(scan_id)
+        except Exception:  # noqa: BLE001
+            # Cosmetic flag — we already have the files; the UI will just
+            # not surface the download button. Better than failing the
+            # scan finalisation over a single missing mutation.
+            logger.exception(
+                "scan %s: failed to flip compliance_pack_uploaded", scan_id
+            )
 
 
 async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -> None:

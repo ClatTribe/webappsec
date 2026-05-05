@@ -72,6 +72,18 @@ class WorkerSupabase:
         rows = result.data or []
         return [r["scan_id"] for r in rows if isinstance(r, dict) and r.get("scan_id")]
 
+    def set_compliance_pack_uploaded(self, scan_id: str) -> None:
+        """Flag this scan's compliance pack as uploaded (migration 030).
+
+        Called once at least one file from the engine's `--compliance-pack`
+        bundle has landed in storage. The UI keys the "Download" button
+        off this column so an empty pack dir (older engines, scans that
+        ran before #129) doesn't dangle a broken download link.
+        """
+        self.client.rpc(
+            "worker_set_compliance_pack_uploaded", {"p_scan_id": scan_id}
+        ).execute()
+
     def set_preflight_failed(self, scan_id: str) -> None:
         """Flag this scan as preflight-failed (migration 029).
 
