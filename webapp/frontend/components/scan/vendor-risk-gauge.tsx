@@ -1,5 +1,6 @@
 import { TrendingUp, AlertTriangle, ShieldCheck } from 'lucide-react';
-import type { VendorRisk } from '@/lib/supabase/types';
+import type { VendorRisk, ScanCoverage } from '@/lib/supabase/types';
+import { CoverageMutedPill } from '@/components/scan/coverage-banner';
 
 // Engine PR #133 / wishlist §14.8 row 1 — vendor-risk score gauge.
 //
@@ -65,7 +66,16 @@ function bandFromScore(score: number | undefined): string {
   return 'high_risk';
 }
 
-export default function VendorRiskGauge({ vendor_risk }: { vendor_risk: VendorRisk }) {
+export default function VendorRiskGauge({
+  vendor_risk,
+  coverage,
+}: {
+  vendor_risk: VendorRisk;
+  /** Tier-A trust-gap fix — when coverage is incomplete, the gauge
+   *  renders a "coverage caveat" pill so a 100/100 score isn't read
+   *  as authoritative by a customer who skipped the banner above. */
+  coverage?: ScanCoverage | null;
+}) {
   const score =
     typeof vendor_risk.score === 'number' && Number.isFinite(vendor_risk.score)
       ? Math.max(0, Math.min(100, Math.round(vendor_risk.score)))
@@ -106,6 +116,7 @@ export default function VendorRiskGauge({ vendor_risk }: { vendor_risk: VendorRi
             >
               {theme.label}
             </span>
+            {coverage && <CoverageMutedPill coverage={coverage} />}
           </div>
           <div className="flex items-baseline gap-2">
             <span className={`text-4xl font-semibold tabular-nums ${theme.text}`}>{score}</span>

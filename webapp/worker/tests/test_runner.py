@@ -386,6 +386,10 @@ class FakeSupabase:
         # worker forwarded the right blob to Postgres.
         self.run_meta = run_meta
 
+    def set_coverage(self, scan_id: str, coverage: dict[str, Any]) -> None:
+        # Tests assert via `sb.coverage`. Mirrors set_run_meta.
+        self.coverage = coverage
+
     def set_compliance_pack_uploaded(self, scan_id: str) -> None:
         # Tests don't drive the compliance-pack upload path; the worker
         # only calls this after at least one file lands in storage, and
@@ -1859,6 +1863,62 @@ def test_persist_run_meta_swallows_parse_error(tmp_path, fake_scan):
     _persist_run_meta(sb, SCAN_ID, run_dir)
 
     assert getattr(sb, "run_meta", None) is None
+
+
+# ---------------------------------------------------------------------------
+# Migration 039 — coverage.json persistence (Tier A trust-gap fix)
+# ---------------------------------------------------------------------------
+
+from strix_worker.runner import _persist_coverage  # noqa: E402
+
+
+def test_persist_coverage_writes_full_blob(tmp_path, fake_scan):
+    """The engine's coverage.json lands verbatim on the scan row so the
+    UI can render the amber 'coverage incomplete' banner when
+    `status=incomplete`. Critical UX bridge — a 0-finding scan is
+    ambiguous between 'site is clean' and 'agent gave up early'."""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    blob = {
+        "schema_version": 1,
+        "run_id": "getedunext-com_e06a",
+        "required": ["csrf", "idor", "open_redirect", "sqli", "ssrf", "xss"],
+        "completed": [],
+        "covered": [],
+        "gaps": ["csrf", "idor", "open_redirect", "sqli", "ssrf", "xss"],
+        "coverage_percent": 0.0,
+        "status": "incomplete",
+    }
+    (run_dir / "coverage.json").write_text(json.dumps(blob))
+
+    sb = FakeSupabase(fake_scan)
+    _persist_coverage(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "coverage", None) == blob
+
+
+def test_persist_coverage_swallows_missing_file(tmp_path, fake_scan):
+    """Older engines without coverage.json — skip silently rather than
+    fail finalisation."""
+    run_dir = tmp_path / "run-empty"
+    run_dir.mkdir()
+
+    sb = FakeSupabase(fake_scan)
+    _persist_coverage(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "coverage", None) is None
+
+
+def test_persist_coverage_swallows_parse_error(tmp_path, fake_scan):
+    """Malformed coverage.json must not block the rest of finalisation."""
+    run_dir = tmp_path / "run-bad"
+    run_dir.mkdir()
+    (run_dir / "coverage.json").write_text("{not-json")
+
+    sb = FakeSupabase(fake_scan)
+    _persist_coverage(sb, SCAN_ID, run_dir)
+
+    assert getattr(sb, "coverage", None) is None
 
 
 def test_persist_run_meta_rejects_non_object(tmp_path, fake_scan):
