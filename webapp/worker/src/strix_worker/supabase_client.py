@@ -119,6 +119,32 @@ class WorkerSupabase:
             "worker_set_compliance_pack_uploaded", {"p_scan_id": scan_id}
         ).execute()
 
+    def ingest_compliance_evidence(
+        self,
+        scan_id: str,
+        evidence: dict,
+    ) -> int:
+        """Ingest engine compliance_evidence.json into the wrapper's
+        structured per-control table (migration 046).
+
+        `evidence` is the parsed JSON payload from
+        `<compliance_pack>/<run_id>/compliance_evidence.json` — a
+        framework→control_id→{verdict,summary,detail} map.
+
+        Returns the count of controls actually persisted. Skips controls
+        whose verdict isn't in the CHECK set (pass/fail/warn/info/untested)
+        rather than failing the whole ingest.
+
+        Best-effort caller pattern: log + continue on failure. A failed
+        ingest means the chat handler will answer "no evidence yet" until
+        the next scan succeeds, which is correct.
+        """
+        result = self.client.rpc(
+            "worker_ingest_compliance_evidence",
+            {"p_scan_id": scan_id, "p_evidence": evidence},
+        ).execute()
+        return int(result.data or 0)
+
     def set_preflight_failed(self, scan_id: str) -> None:
         """Flag this scan as preflight-failed (migration 029).
 
