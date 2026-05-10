@@ -22,30 +22,53 @@
 6. [The closed FP feedback loop](#6-the-closed-fp-feedback-loop)
 7. [Honest gaps worth a buyer knowing](#7-honest-gaps-worth-a-buyer-knowing)
 8. [Bottom line](#8-bottom-line)
+9. [Alignment with engine team's wrapper-UX roadmap](#9-alignment-with-engine-teams-wrapper-ux-roadmap)
 
 ---
 
 ## 1. What this product is
 
-**An AI security engineer that replaces a junior pen-tester for routine
-work.** Specifically: a multi-tenant SaaS wrapping the
-[ClatTribe/strix](https://github.com/ClatTribe/strix) AI security agent.
-The engine drives discovery + exploitation; the wrapper handles tenant
-isolation, persistence, trust-signal rendering, false-positive feedback,
-auditor handoff, cost control, and async push notifications.
+**An AI security engineer for companies building vibe-coded apps** —
+apps shipped fast by AI assistants (Cursor, v0, Bolt, Replit, Lovable),
+built on heavy npm trees, deployed to edge runtimes, often with LLM
+features baked in. The engine ([ClatTribe/strix](https://github.com/ClatTribe/strix))
+detects, reasons, stays current, composes, and remembers across
+engagements. This wrapper (`webappsec/`) is the **product surface that
+those companies log into** — auth, multi-tenant org, billing, dashboard,
+compliance handoff, async push, GitHub App, auto-fix workflow.
 
-Strix is single-tenant by design and writes structured artifacts to disk
+The split is documented authoritatively in the engine repo:
+
+- [`AISecurityEngineer.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineer.md) — **engine** roadmap (technical capabilities)
+- [`AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md) — **wrapper UX** roadmap (the product features this repo delivers)
+
+> **Primary persona** — Founder/CTO of a vibe-coded SaaS. Building a
+> Next.js app with Cursor + v0. Team of 1-10. **No dedicated security
+> engineer.** Will pay for SOC 2 (it's a customer requirement).
+> Doesn't want to read CVSS vectors. Lives in GitHub PRs, Slack, and
+> Linear.
+>
+> **Secondary** — Growth-stage AppSec engineer (50-500 person
+> companies, replaces Snyk/Aikido).
+>
+> **Tertiary** — Compliance/audit lead (replaces Vanta/Drata for
+> finding-evidence collection).
+
+Strix writes structured artifacts to disk
 ([`vulnerabilities.json`](engine-usage.md#23-reading-vulnerabilitiesjson-the-finding-stream),
 `run_meta.json`, `coverage.json`, `compliance_pack/`, `sbom.cdx.json`,
-`trajectory.jsonl`, etc.). The wrapper consumes those artifacts
-verbatim, never re-deriving what the engine already produces (per
-[Architecture.md §1.1](Architecture.md#11-design-principles)). Adding a
-new engine signal is a UI change, not a schema change.
+`trajectory.jsonl`, plus the newer `finding_chains.json`,
+`compliance_evidence.json`, `event_stream.jsonl`,
+`behavioural_baselines.jsonl`, SARIF). The wrapper consumes those
+artifacts verbatim, never re-deriving what the engine already produces
+(per [Architecture.md §1.1](Architecture.md#11-design-principles)).
+Adding a new engine signal is a UI change, not a schema change.
 
-The product is **what makes it safe to run thousands of scans across
-hundreds of orgs** — vault-encrypted secrets, RLS-isolated storage, per
-SECURITY-DEFINER RPCs, audit-logged sensitive actions, signed
-events.jsonl chain.
+The wrapper is **what makes strix sellable to vibe-coded SaaS
+companies** — vault-encrypted secrets, RLS-isolated storage,
+SECURITY-DEFINER RPCs, audit-logged sensitive actions, GitHub App
+flow, PR-comment renderer, compliance dashboard, customer trust pages,
+auto-fix PR workflow, Slack/Linear/Jira integration.
 
 ---
 
@@ -305,6 +328,156 @@ upstream engine fix is filed.
 
 ---
 
+## 9. Alignment with engine team's wrapper-UX roadmap
+
+The engine team owns
+[`AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md)
+which defines what the **wrapper product surface** should look like for
+the vibe-coded-SaaS-founder persona. Everything in this section is
+sourced from that doc. Status reflects what `webappsec/` ships today
+vs. what the engine team's UX roadmap asks for.
+
+### 9.1 Phase A — Onboarding + GitHub App (foundational, ~12 weeks expected)
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| Sign-up + auth (email magic link or OAuth, multi-tenant org) | A.1 | ✅ shipped (Supabase auth, multi-tenant org, RLS) |
+| **GitHub App** (one-click install, PR webhooks, check-runs) | A.2 | ⬜ **not started** — primary surface gap |
+| First-scan trigger on `installation` webhook | A.3 | ⬜ — current flow is a manual "New scan" form |
+| Production URL capture + recurring scans | A.4 | 🚧 — manual target creation works; scheduled cron ⬜ |
+| **PR-comment renderer** (inline diff comments + Check Runs) | A.5 | ⬜ **not started** — biggest single gap for primary persona |
+| Findings inbox / dashboard skeleton | A.6 | ✅ shipped (per-scan finding list with filters, sort, bulk actions) |
+| Onboarding flow (sign-up → install → first scan in <5 min) | A.7 | ⬜ — current flow is sign-up → manual target → manual scan |
+
+### 9.2 Phase B — Findings inbox + triage UX
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| Severity calibration cards | B.1 | ✅ shipped (PR #42 / #46 — confidence + reasoning_trace + counter_proof on FindingCard) |
+| Bulk triage actions (dismiss N, snooze, assign) | B.2 | 🚧 single-finding triage works; bulk ⬜ |
+| **FP learning loop** with `Recently dismissed` view + auto-suppress prompt | B.3 | ✅ shipped (PR #45 / #47 — full FP feedback loop with engine, force-show button, auto-dismiss banner) |
+| Finding lifecycle (`open → triaged → in-progress → fixed → closed`) | B.4 | ✅ shipped (status enum + auto-fixed-on-non-recurrence via cross-scan dedup) |
+| Per-finding evidence trail (decision_log walk + chain rendering + PoC + verify button) | B.5 | ✅ shipped (PR #47 trajectory section + PR #48 kill chain + PR #61 verify-fix button) |
+| Per-team / per-repo views | B.6 | ⬜ — single-org dashboard; team mapping ⬜ |
+| Triage keyboard shortcuts (j/k/d/f) | B.7 | ⬜ |
+
+### 9.3 Phase C — Compliance layer (SOC 2 / ISO / HIPAA)
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| **Control mapping** auto-tag (every finding gets SOC 2 / ISO / PCI / GDPR control IDs) | C.1 | ✅ shipped (PR #42 — `compliance_controls` JSONB on every finding); ⚠️ mapping table lives engine-side now (compliance_evidence.json) — **wrapper should consume that artifact** |
+| **Compliance dashboard** per framework, per control | C.2 | ✅ shipped (PR #52 — `ComplianceOverlay`); ⬜ per-framework "X of N controls passing" view |
+| Evidence pack generator (PDF / Markdown / DOCX with auditor sections) | C.3 | ✅ ZIP shipped (PR #50 — engine #129 7-file bundle with `audit_log` entry); ⬜ PDF / DOCX rendering |
+| Remediation SLAs per severity | C.4 | ⬜ |
+| Risk register integration | C.5 | ⬜ |
+| Continuous compliance daemon | C.6 | ⬜ — depends on Phase F |
+| **Customer-facing trust page** (`<org>.trust.strix.io`) | C.7 | ⬜ **not started** — Drata's killer feature |
+| Auditor portal (read-only time-bounded access) | C.8 | ⬜ |
+
+### 9.4 Phase D — Integrations (Slack / Linear / Jira / GitHub Code Scanning)
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| **Slack integration** (slash commands + real-time alerts) | D.1 | 🚧 — webhook channel shipped (PR #62) for scan-complete pings; slash commands ⬜ |
+| Linear integration (auto-create issues, two-way sync) | D.2 | ⬜ |
+| Jira integration | D.3 | ⬜ |
+| **GitHub Code Scanning** integration (push SARIF to Security tab) | D.4 | ⬜ — engine emits SARIF (PR #219); wrapper just needs to forward |
+| Generic outbound webhook | D.5 | ⬜ |
+| CLI / API + per-org keys | D.6 | ⬜ |
+| CI integration packs (GH Actions, GitLab, CircleCI, Jenkins) | D.7 | 🚧 — CI snippet generator (PR #57) emits a YAML; full Actions / Marketplace ⬜ |
+
+### 9.5 Phase E — Auto-fix PR workflow
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| **"Apply Fix" PR-comment button** (engine emits validated patches → wrapper opens fix-PR) | E.1-E.6 | ⬜ **not started** — depends on engine Phase 12 (codemod library) |
+
+### 9.6 Phase F — Continuous monitoring dashboard
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| Real-time scan status (WebSocket-driven) | F.1 | ✅ shipped (Supabase realtime channels on scan_events / scans) |
+| Trend charts (open findings over time, MTTR per severity, fix-rate per repo) | F.2 | ⬜ |
+| Drift detection (engine `continuous_scan_deltas.jsonl` → alerting daemon) | F.3 | ⬜ — depends on engine Phase 13 |
+| Compliance posture trend ("SOC 2 readiness 87%, up from 82%") | F.4 | ⬜ — Phase 9.2 baseline data exists, wrapper trend chart ⬜ |
+| Asset inventory (discovered endpoints / deps / infra) | F.5 | ⬜ |
+| Cost / usage metrics for billing transparency | F.6 | 🚧 — per-scan cost displayed; aggregated monthly view ⬜ |
+
+### 9.7 Phase G — Multi-tenant org features
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| Org structure (user → team → repo) | G.1 | 🚧 — user → org → target works; **team layer missing** |
+| **RBAC** (Owner / Admin / Member / Auditor) | G.2 | 🚧 — owner/admin/member shipped; auditor read-only role ⬜ |
+| SSO / SAML / SCIM | G.3 | ⬜ — Supabase auth supports magic-link + OAuth; SAML/SCIM via WorkOS ⬜ |
+| **Stripe billing** (Free / Pro / Team / Enterprise tiers) | G.4 | ⬜ — schema fields exist (`organizations.plan`); billing flow ⬜ |
+| Audit log of every action | G.5 | ✅ shipped (audit_log table + writes from sensitive actions) |
+| Data residency (US / EU / Singapore) | G.6 | ⬜ — single-region today |
+| Per-team customization (severity / auto-fix / integrations) | G.7 | ⬜ |
+
+### 9.8 Phase H — Customer trust + audit polish
+
+| Item | Engine-team ask | webappsec status |
+|---|---|---|
+| Trust page customization (custom domain, branding, configurable sections) | H.1 | ⬜ |
+| Public sub-page modules ("Security at <Customer>") | H.2 | ⬜ |
+| Customer-questionnaire automation (SIG / CAIQ pre-fill) | H.3 | ⬜ |
+| Insurance / cyber-policy export | H.4 | ⬜ |
+| Auditor-handover automation ("Prepare for SOC 2" wizard) | H.5 | ⬜ |
+| Compliance-benchmark feed (cross-customer anonymized) | H.6 | ⬜ |
+
+### 9.9 New engine artifacts the wrapper should consume
+
+The engine has shipped artifacts the wrapper doesn't yet ingest. Consuming each is a small wrapper-side PR.
+
+| Artifact | Engine ref | Wrapper consumer status |
+|---|---|---|
+| `sca_inventory.json` | engine Phase 6 (PR #219) | ⬜ — should drive a "Dependencies" tab + dependency-CVE inbox |
+| `sast_findings.json` (SARIF 2.1.0) | engine Phase 7 (PR #219) | ⬜ — should forward to GitHub Code Scanning + render in inbox |
+| `finding_chains.json` | engine §4a v2 (PR #219) | ⬜ — should collapse N findings under one chain card; avoid double-render |
+| `compliance_evidence.json` | engine §4b (PR #219) | ⬜ — replaces wrapper's per-finding `compliance_controls` derivation; emits per-control verdict (`pass/fail/warn/info/untested`) |
+| `event_stream.jsonl` | engine Phase 9.1 (PR #219) | ⬜ — should drive a "New KEV-listed CVE matches your deps" banner |
+| `behavioural_baselines.jsonl` | engine Phase 9.2 (PR #219) | ⬜ — should render "what's normal here" panel next to anomaly findings |
+| `decision_log.jsonl` | engine Phase 1.6 | ⬜ — should drive the per-finding "evidence trail" walk per `AISecurityEngineerUX.md` B.5 |
+| `code_map.json` | engine Phase 1.7 | ⬜ |
+| `specialist_telemetry.jsonl` | engine Phase 5.4 | ⬜ — should drive Phase F per-specialist progress bars |
+| `specialist_misses.jsonl` | engine Phase 5.3 | ⬜ — should feed FP learning telemetry |
+| `iac_posture.json` | engine Phase 11 (PR #219) | ⬜ — should drive a "Cloud posture" tab grouped by Vercel / Cloudflare / Netlify / Docker |
+| `auto_fix_patches.json` | engine Phase 12 (pending) | n/a |
+| `llm_fallback_costs.jsonl` | engine Phase 10 (pending) | n/a |
+| `continuous_scan_deltas.jsonl` | engine Phase 13 (pending) | n/a |
+
+### 9.10 Honest gap summary
+
+The wrapper today is in roughly this shape against the engine team's
+roadmap:
+
+```
+Phase A  (GitHub App + PR comments)        ~10% — major gap, primary surface missing
+Phase B  (findings triage UX)              ~70% — most of the pieces shipped, missing bulk + per-team views
+Phase C  (compliance)                      ~50% — infra shipped; trust page + remediation SLAs ⬜
+Phase D  (integrations)                    ~15% — Slack scaffolding only
+Phase E  (auto-fix PRs)                    ~0% — depends on engine Phase 12
+Phase F  (continuous monitoring)           ~25% — realtime scan status works, trend charts ⬜
+Phase G  (multi-tenant + billing)          ~40% — org/RLS shipped, SSO/Stripe ⬜
+Phase H  (trust pages)                     ~0%
+```
+
+The 64 PRs shipped this session optimised heavily for the
+**security-engineer / pentester** mental model (per-target dashboards,
+casefile per finding, compliance pack download, HAR/Burp upload). A
+non-trivial fraction of that effort is reusable for the
+vibe-coded-founder persona — the FP feedback loop, casefile, kill
+chain, trajectory, compliance overlay, vendor-risk gauge, MFA badge,
+all carry over. **What's missing is the GitHub-App-first surface that
+makes the product reach Persona 1.**
+
+The fastest path to product-market-fit alignment with the engine
+team's vision: prioritise **Phase A (GitHub App + PR-comment renderer)**
+next, then **Phase E (auto-fix workflow)** when engine Phase 12 lands.
+
+---
+
 ## Pointers
 
 | Doc | What's there |
@@ -316,5 +489,7 @@ upstream engine fix is filed.
 | [`roadmap.md`](roadmap.md) §19 | Tier-by-tier feature status (✅ / 🚧 / ⬜) |
 | [`tools-wishlist.md`](tools-wishlist.md) | Engine PRs the wrapper would like (upstream asks) |
 | [`CLAUDE.md`](CLAUDE.md) | Agent guide: doctrine + operational habits |
+| [strix `AISecurityEngineer.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineer.md) | **Engine roadmap** — phases the engine team is building |
+| [strix `AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md) | **Wrapper UX roadmap** — Phase A-H product surface this repo should deliver |
 
-Last updated: 2026-05-05 (after PRs #46–#64).
+Last updated: 2026-05-06 (after PRs #46–#66 + alignment with engine team's UX roadmap).
