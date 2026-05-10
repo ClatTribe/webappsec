@@ -50,10 +50,33 @@ interface DismissIntent {
 interface ShowOpenIntent {
   kind: 'show_open';
 }
+interface ComplianceReadinessIntent {
+  kind: 'compliance_readiness';
+  framework: string;          // canonical: 'soc2_type_2' | 'iso_27001' | …
+  framework_label: string;    // user-facing: 'SOC 2 Type 2' | 'ISO 27001' | …
+}
 interface UnknownIntent {
   kind: 'unknown';
 }
-type Intent = DismissIntent | ShowOpenIntent | UnknownIntent;
+type Intent =
+  | DismissIntent
+  | ShowOpenIntent
+  | ComplianceReadinessIntent
+  | UnknownIntent;
+
+// Framework name aliases — what users type → (canonical_id, display_label).
+// Order matters: longer / more-specific names must come before short ones
+// so 'soc 2 type 2' matches before 'soc 2'.
+const FRAMEWORK_ALIASES: Array<{ pattern: RegExp; id: string; label: string }> = [
+  { pattern: /\b(soc[\s-]?2[\s-]?type[\s-]?(2|ii))\b/i,        id: 'soc2_type_2', label: 'SOC 2 Type 2' },
+  { pattern: /\b(soc[\s-]?2[\s-]?type[\s-]?(1|i))\b/i,         id: 'soc2_type_1', label: 'SOC 2 Type 1' },
+  { pattern: /\bsoc[\s-]?2\b/i,                                id: 'soc2_type_2', label: 'SOC 2' },
+  { pattern: /\biso[\s-]?27001\b/i,                            id: 'iso_27001',   label: 'ISO 27001' },
+  { pattern: /\bpci[\s-]?dss\b/i,                              id: 'pci_dss',     label: 'PCI DSS' },
+  { pattern: /\bhipaa\b/i,                                     id: 'hipaa',       label: 'HIPAA' },
+  { pattern: /\bgdpr\b/i,                                      id: 'gdpr',        label: 'GDPR' },
+  { pattern: /\bfedramp\b/i,                                   id: 'fedramp_moderate', label: 'FedRAMP' },
+];
 
 // V1 classifier. Deliberately narrow — false positives here would be
 // destructive (bulk-dismissing the wrong things). Patterns require a
@@ -75,6 +98,26 @@ function classify(text: string): Intent {
     /\bwhat\s+do\s+i\s+have\b/.test(t)
   ) {
     return { kind: 'show_open' };
+  }
+
+  // "how ready am I for SOC 2?" / "soc 2 readiness?" / "soc 2 status?" /
+  // "where am I with iso 27001?" / "where do i stand on hipaa?" — any of
+  // these expressions tied to a recognised framework name routes to the
+  // compliance-readiness intent.
+  for (const fw of FRAMEWORK_ALIASES) {
+    if (fw.pattern.test(t)) {
+      if (
+        /\b(ready|readiness|status|stand|progress|prepar|score|posture)\b/.test(t) ||
+        /\bhow\s+(am|are)\b/.test(t) ||
+        /\bwhere\s+(am|do)\b/.test(t)
+      ) {
+        return {
+          kind: 'compliance_readiness',
+          framework: fw.id,
+          framework_label: fw.label,
+        };
+      }
+    }
   }
 
   return { kind: 'unknown' };
@@ -127,6 +170,16 @@ export async function POST(req: Request) {
     return await handleShowOpen(supabase, admin, thread);
   }
 
+  if (intent.kind === 'compliance_readiness') {
+    return await handleComplianceReadiness(
+      supabase,
+      admin,
+      thread,
+      intent.framework,
+      intent.framework_label,
+    );
+  }
+
   // Fallback — polite acknowledgement.
   await admin.from('agent_messages').insert({
     thread_id: thread.id,
@@ -134,7 +187,7 @@ export async function POST(req: Request) {
     blocks: [
       {
         type: 'text',
-        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
+        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n- **"how ready am I for SOC 2?"** (or ISO 27001 / PCI DSS / HIPAA / GDPR) — compliance posture summary.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
       },
     ],
     citations: [],
@@ -318,4 +371,121 @@ async function handleShowOpen(
   } as never);
 
   return NextResponse.json({ ok: true, intent: 'show_open', total, counts });
+}
+
+async function handleComplianceReadiness(
+  supabase: ReturnType<typeof createClient>,
+  admin: ReturnType<typeof createAdminClient>,
+  thread: { id: string; org_id: string },
+  framework: string,
+  frameworkLabel: string,
+) {
+  // Readiness summary via the RPC (org-scoped).
+  const { data: readinessData, error: readinessErr } = await supabase
+    .rpc('org_compliance_readiness', {
+      p_org_id: thread.org_id,
+      p_framework: framework,
+    } as never);
+  if (readinessErr) {
+    return NextResponse.json({ error: `readiness rpc failed: ${readinessErr.message}` }, { status: 500 });
+  }
+  const summary = (readinessData ?? [])[0] as unknown as
+    | {
+        framework: string;
+        total: number;
+        passing: number;
+        failing: number;
+        warning: number;
+        untested: number;
+        readiness_pct: number;
+      }
+    | undefined;
+
+  // No evidence yet? Tell the user honestly + suggest a first scan.
+  if (!summary || summary.total === 0) {
+    await admin.from('agent_messages').insert({
+      thread_id: thread.id,
+      role: 'agent',
+      blocks: [
+        {
+          type: 'text',
+          markdown: `I don't have ${frameworkLabel} evidence yet. Once your next scan completes against a registered asset, the engine ships a \`compliance_evidence.json\` and I can give you a real readiness picture.\n\nFor now I'd estimate **not enough data**. Register an asset under **Targets** or kick off a scan, and ask me again.`,
+        },
+      ],
+      citations: [],
+    } as never);
+    return NextResponse.json({
+      ok: true,
+      intent: 'compliance_readiness',
+      framework,
+      total: 0,
+    });
+  }
+
+  // Pull the failing + warning controls for inline context.
+  const { data: postureData } = await supabase
+    .from('org_compliance_posture_v')
+    .select('framework, control_id, verdict, evidence_summary')
+    .eq('framework', framework)
+    .order('verdict')
+    .order('control_id');
+  const posture = (postureData ?? []) as unknown as Array<{
+    framework: string;
+    control_id: string;
+    verdict: string;
+    evidence_summary: string | null;
+  }>;
+
+  const failing = posture.filter((p) => p.verdict === 'fail');
+  const warning = posture.filter((p) => p.verdict === 'warn');
+
+  const failingBlock = failing.length
+    ? `\n\n**Failing controls (${failing.length}):**\n${failing
+        .slice(0, 8)
+        .map((p) => `- \`${p.control_id}\` — ${p.evidence_summary ?? 'no summary'}`)
+        .join('\n')}${failing.length > 8 ? `\n_…and ${failing.length - 8} more._` : ''}`
+    : '';
+  const warningBlock = warning.length
+    ? `\n\n**Warnings (${warning.length}):**\n${warning
+        .slice(0, 5)
+        .map((p) => `- \`${p.control_id}\` — ${p.evidence_summary ?? 'no summary'}`)
+        .join('\n')}${warning.length > 5 ? `\n_…and ${warning.length - 5} more._` : ''}`
+    : '';
+
+  // Calibrated emoji — green at 90%+, amber 70-90%, red below.
+  const pctNum = Number(summary.readiness_pct);
+  const emoji = pctNum >= 90 ? '🟢' : pctNum >= 70 ? '🟡' : '🔴';
+  const headline = `${emoji} **${frameworkLabel} readiness: ${pctNum}%** — ${summary.passing}/${summary.passing + summary.failing + summary.warning} controls passing (${summary.untested} untested).`;
+
+  await admin.from('agent_messages').insert({
+    thread_id: thread.id,
+    role: 'agent',
+    blocks: [
+      {
+        type: 'text',
+        markdown: `${headline}${failingBlock}${warningBlock}\n\n_(Latest evidence per control; aggregated across all your scans.)_`,
+      },
+    ],
+    citations: [
+      // Cite up to 8 failing controls so the user can click through.
+      ...failing.slice(0, 8).map((p) => ({
+        kind: 'compliance_evidence',
+        id: `${framework}:${p.control_id}`,
+        label: p.control_id,
+      })),
+    ],
+  } as never);
+
+  return NextResponse.json({
+    ok: true,
+    intent: 'compliance_readiness',
+    framework,
+    framework_label: frameworkLabel,
+    readiness_pct: pctNum,
+    total: summary.total,
+    passing: summary.passing,
+    failing: summary.failing,
+    warning: summary.warning,
+    untested: summary.untested,
+  });
 }
