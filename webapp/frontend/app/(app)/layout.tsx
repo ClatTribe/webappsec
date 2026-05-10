@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import {
   LayoutDashboard,
+  MessageSquare,
   Target,
   ScanLine,
   ShieldAlert,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 
 const NAV = [
+  { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/targets', label: 'Targets', icon: Target },
   { href: '/scans', label: 'Scans', icon: ScanLine },
