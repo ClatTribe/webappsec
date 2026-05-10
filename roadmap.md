@@ -553,9 +553,36 @@ Reverse-chronological log.
 
 ## 19. ClatTribe/strix integration backlog (wrapper-wishlist gap-closure)
 
+> **Reframing note (2026-05-06).** The catalog below was structured
+> around the original [`wrapper-wishlist.md`](wrapper-wishlist.md)
+> (engine team's per-PR rendering specs). It optimised for the
+> "consume-everything-the-engine-emits" loop. That work is largely
+> done — Tiers 1-5 mostly ✅.
+>
+> The engine team has since published authoritative product docs at
+> [strix `AISecurityEngineer.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineer.md)
+> (engine roadmap) and
+> [strix `AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md)
+> (**wrapper UX roadmap, Phase A-H**). Those docs reframe the product
+> as **"AI security engineer for vibe-coded SaaS founders"** with
+> GitHub-App-first delivery, PR-comment renderer as the primary
+> surface, auto-fix workflow, customer trust pages, etc.
+>
+> Most of §19's wishlist work is the *plumbing layer* underneath that
+> product surface — still useful, but no longer the *product*. See
+> [`usage.md` §9](usage.md#9-alignment-with-engine-teams-wrapper-ux-roadmap)
+> for the alignment table mapping what's built vs. what the engine
+> team's UX roadmap (Phase A-H) expects.
+>
+> **The biggest gaps relative to that roadmap:**
+> - **Phase A.2/A.5** — GitHub App + PR-comment renderer (~10% built; the primary surface for the vibe-coded-founder persona)
+> - **Phase E** — Auto-fix PR workflow (depends on engine Phase 12)
+> - **Phase H** — Customer-facing trust pages
+> - **9.9 unconsumed engine artifacts** (`finding_chains.json`, `compliance_evidence.json`, SARIF, `event_stream.jsonl`, `behavioural_baselines.jsonl`) — all shipped engine-side in PR #219 but not yet ingested wrapper-side
+
 The fork at [`ClatTribe/strix`](https://github.com/ClatTribe/strix) ships a substantially richer engine than upstream. [`wrapper-wishlist.md`](wrapper-wishlist.md) (16 sections, written *by* the engine team *for* this wrapper) catalogues every integration gap. [`engine-usage.md`](engine-usage.md) is the operating manual. Per the doctrine in [`Architecture.md` §1.1](Architecture.md#11-design-principles), the engine's deterministic signal should be the primary input; wrapper heuristics should be fallbacks.
 
-**Status (after PRs #42–#58):** Tiers 1–3 closed end-to-end (one Tier 1 row blocked upstream on `check.completed` event emission). Tier 4 majority shipped — compliance pack download, vendor-risk + MFA + monitoring + compliance-posture hero badges, full compliance overlay, SBOM viewer + CycloneDX export. Tier 5 ergonomics largely shipped — branch picker, CIDR preview, `--quiet` CI snippet generator, upstream-retry banner, cost-cap configurator with budget-exceeded UX, cancel→SIGTERM. Tier 0 (sandbox image rebuild) remains an ops gate. Tier 6 (big product features) is deferred until the wrapper-engine integration loop is fully closed.
+**Status (after PRs #42–#66):** Tiers 1–3 closed end-to-end (one Tier 1 row blocked upstream on `check.completed` event emission). Tier 4 majority shipped — compliance pack download, vendor-risk + MFA + monitoring + compliance-posture hero badges, full compliance overlay, SBOM viewer + CycloneDX export, coverage-banner trust-gap fix. Tier 5 ergonomics largely shipped — branch picker, CIDR preview, `--quiet` CI snippet generator, upstream-retry banner, cost-cap configurator with budget-exceeded UX, cancel→SIGTERM. Tier 0 (sandbox image) rebuilt from fork commit `3b48809`; engine has since shipped through PR #219 with single-lead architecture, SCA, SAST/SARIF, finding-chains, compliance evidence emission, real-time threat intel — wrapper consumption of those new artifacts is the next slice of work.
 
 The catalog below is grouped by tier. Tier 0 is ops; tier 1 is "read what the engine writes"; tier 2 is "close the FP feedback loop"; tier 3+ is feature surface area.
 
