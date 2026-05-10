@@ -138,6 +138,84 @@ export interface AgentMemoryPreferences {
   updated_by: string | null;
 }
 
+// ---------------- Conversational shell (migration 042) ----------------
+//
+// AgentBlock — the typed schema the agent emits and the wrapper renders.
+// Unknown block types fall through to a collapsed-JSON renderer so
+// adding a new type doesn't require a frontend deploy.
+
+export type AgentBlock =
+  | { type: 'text'; markdown: string }
+  | { type: 'table'; columns: string[]; rows: unknown[][]; caption?: string }
+  | { type: 'chart'; kind: 'line' | 'bar' | 'pie'; data: unknown; caption?: string }
+  | { type: 'diff'; file: string; before: string; after: string; language?: string }
+  | { type: 'code'; language: string; content: string; caption?: string }
+  | { type: 'screenshot'; url: string; alt: string; caption?: string }
+  | {
+      type: 'timeline';
+      events: { at: string; label: string; evidence?: unknown }[];
+    }
+  | { type: 'finding_ref'; finding_id: string }
+  | { type: 'scan_ref'; scan_id: string }
+  | { type: 'asset_ref'; target_id: string }
+  | {
+      type: 'pr_ref';
+      provider: 'github' | 'gitlab' | 'bitbucket';
+      url: string;
+      title: string;
+      status: string;
+    };
+
+export interface AgentCitation {
+  kind: 'finding' | 'scan' | 'scan_event' | 'episode' | 'asset' | 'compliance_evidence';
+  id: string;
+  label?: string;
+}
+
+export interface AgentSuggestion {
+  label: string;
+  action: string;                         // 'apply_fix' | 'see_diff' | 'snooze' | …
+  payload?: Record<string, unknown>;
+}
+
+export interface AgentAction {
+  kind: string;                            // 'finding_dismissed' | 'fix_applied' | …
+  target?: string;                         // generic id reference
+  at: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface AgentThread {
+  id: string;
+  org_id: string;
+  user_id: string | null;
+  title: string | null;
+  /**
+   * Soft binding to a finding/scan/asset/onboarding the thread is about.
+   * Examples: {kind:'finding', id:'<uuid>'} | {kind:'primary'} |
+   * {kind:'onboarding'} | {kind:'daily_digest', date:'2026-05-23'}.
+   */
+  context: Record<string, unknown> | null;
+  archived: boolean;
+  created_at: string;
+  last_message_at: string;
+}
+
+export interface AgentMessage {
+  id: string;
+  thread_id: string;
+  org_id: string;
+  role: 'user' | 'agent' | 'system' | 'tool';
+  blocks: AgentBlock[];
+  citations: AgentCitation[];
+  suggestions: AgentSuggestion[] | null;
+  reasoning_trace: string[] | null;
+  confidence: number | null;
+  acted_on: AgentAction[] | null;
+  parent_id: string | null;
+  created_at: string;
+}
+
 export interface Profile {
   id: string;
   full_name: string | null;
