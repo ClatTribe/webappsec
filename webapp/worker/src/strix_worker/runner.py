@@ -1137,6 +1137,11 @@ async def _upload_compliance_pack(
     uploads are still useful for auditors. A whole-step failure is
     swallowed so a misconfigured storage bucket can't take down the
     scan finalisation.
+
+    After uploading: scans the pack for `compliance_evidence.json`
+    (engine PR #219 §4b) and calls the wrapper's ingest RPC so the
+    chat handler + trust page can answer "how ready am I for SOC 2?"
+    with real data. Ingest failures don't fail the upload.
     """
     pack_root = pack_root or _compliance_pack_root(scan_id)
     if not pack_root.exists():
@@ -1172,6 +1177,72 @@ async def _upload_compliance_pack(
             logger.exception(
                 "scan %s: failed to flip compliance_pack_uploaded", scan_id
             )
+
+    # Compliance-evidence ingest. Runs whether or not the storage upload
+    # succeeded — the structured ingest is independent of the auditor-pack
+    # zip and useful on its own (chat + trust page query the DB, not S3).
+    try:
+        _ingest_compliance_evidence_from_pack(sb, scan_id, pack_root)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "scan %s: compliance_evidence.json ingest failed", scan_id
+        )
+
+
+def _ingest_compliance_evidence_from_pack(
+    sb: WorkerSupabase,
+    scan_id: str,
+    pack_root: Path,
+) -> None:
+    """Find + parse + ingest compliance_evidence.json (engine PR #219 §4b).
+
+    The engine writes per-control verdicts into
+    `<compliance_pack>/<run_id>/compliance_evidence.json`. We rglob
+    because the run_id directory layer is part of the engine's layout
+    and we don't want to hardcode it. First match wins — multi-run
+    packs are not expected.
+
+    Older engines that don't emit this file leave it absent and we
+    silently skip — the chat handler answers "no evidence yet" until
+    the engine version that emits it lands in the operator's sandbox.
+    """
+    matches = list(pack_root.rglob("compliance_evidence.json"))
+    if not matches:
+        logger.info(
+            "scan %s: no compliance_evidence.json in pack; skipping ingest",
+            scan_id,
+        )
+        return
+
+    evidence_path = matches[0]
+    try:
+        with evidence_path.open("r", encoding="utf-8") as f:
+            evidence = json.load(f)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "scan %s: compliance_evidence.json at %s unreadable: %s",
+            scan_id, evidence_path, e,
+        )
+        return
+
+    if not isinstance(evidence, dict) or not evidence:
+        logger.info(
+            "scan %s: compliance_evidence.json is empty / non-dict; nothing to ingest",
+            scan_id,
+        )
+        return
+
+    try:
+        count = sb.ingest_compliance_evidence(scan_id, evidence)
+        logger.info(
+            "scan %s: ingested %d compliance controls from %s",
+            scan_id, count, evidence_path,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "scan %s: ingest RPC failed: %s",
+            scan_id, e,
+        )
 
 
 async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -> None:
