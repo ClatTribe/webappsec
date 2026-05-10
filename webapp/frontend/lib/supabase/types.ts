@@ -62,6 +62,82 @@ export interface Target {
   archived_at: string | null;
 }
 
+// ---------------- Per-org agent memory (migration 041) ----------------
+//
+// The wrapper's continuity-of-context layer. The chat agent reads from
+// + writes to these on every meaningful turn.
+//
+// All three tables are RLS-scoped by org_id and never cross-tenanted.
+
+export type AgentMemoryFactSource =
+  | 'told_by_user'
+  | 'inferred_from_repo'
+  | 'inferred_from_scan'
+  | 'derived_from_audit'
+  | 'agent_decision';
+
+export interface AgentMemoryFact {
+  id: string;
+  org_id: string;
+  scope: string;        // 'stack' | 'team' | 'compliance' | 'suppression' | ...
+  key: string;
+  value: Record<string, unknown> | unknown[] | string | number | boolean | null;
+  source: AgentMemoryFactSource;
+  confidence: number;   // 0.0 - 1.0
+  superseded_by: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AgentMemoryEpisode {
+  id: string;
+  org_id: string;
+  thread_id: string | null;   // FK to agent_threads added in follow-up migration
+  user_id: string | null;
+  agent_action: string;       // 'finding_dismissed' | 'fix_applied' | 'scan_run' | 'rule_added' | ...
+  payload: Record<string, unknown>;
+  rationale: string | null;
+  created_at: string;
+}
+
+export interface AgentAutonomyPrefs {
+  default: 'ask_before_act' | 'autopilot' | string;
+  auto_fix_severity: Severity | null;   // fix without asking at this severity and above
+  auto_dismiss: boolean;
+  slack_notify: 'always' | 'critical_only' | 'never' | string;
+  // Per-category overrides — additive, future-extensible
+  [category: string]: unknown;
+}
+
+export interface AgentVoicePrefs {
+  tone: 'professional_friendly' | 'terse' | 'verbose' | string;
+  verbosity: 'low' | 'mid' | 'high' | string;
+  name: string;
+}
+
+export interface AgentChannelPrefs {
+  slack_channel_id?: string | null;
+  github_app_installation_id?: string | null;
+  // Future: linear_team_id, jira_project_key, etc.
+  [k: string]: unknown;
+}
+
+export interface AgentSchedulePrefs {
+  daily_digest_time?: string;        // ISO time-of-day, e.g. '09:00Z'
+  digest_channels?: string[];        // ['in_app', 'slack', 'email']
+  [k: string]: unknown;
+}
+
+export interface AgentMemoryPreferences {
+  org_id: string;
+  autonomy: AgentAutonomyPrefs;
+  voice: AgentVoicePrefs;
+  channels: AgentChannelPrefs;
+  schedule: AgentSchedulePrefs;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 export interface Profile {
   id: string;
   full_name: string | null;
