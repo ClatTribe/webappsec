@@ -236,6 +236,21 @@ class WorkerSupabase:
         except Exception:  # noqa: BLE001
             return None
 
+    def enqueue_scheduled_scans(self) -> int:
+        """Trigger the periodic scheduled-scan sweep (migration 050).
+
+        Calls worker_enqueue_scheduled_scans() which finds targets whose
+        cadence is up and inserts queued scan rows for each. The existing
+        scan_queued pg_notify trigger pings the worker fleet to pick them
+        up via the normal dispatch path.
+
+        Returns the count of scans enqueued in this sweep. Failures are
+        propagated — the worker's loop traps them so the daemon keeps
+        running.
+        """
+        result = self.client.rpc("worker_enqueue_scheduled_scans").execute()
+        return int(result.data or 0)
+
     def decrypt_org_slack_webhook_by_org(self, org_id: str) -> str | None:
         """Returns the org's Slack webhook URL when called outside a scan
         context (e.g. the chat-bridge worker forwarding agent_messages).

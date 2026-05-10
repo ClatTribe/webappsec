@@ -36,6 +36,15 @@ logger = logging.getLogger(__name__)
 STALE_SWEEP_INTERVAL_SEC = 5 * 60
 STALE_SCAN_TOLERANCE_SEC = 10 * 60
 
+# How often to call worker_enqueue_scheduled_scans (migration 050). The
+# wall-clock check inside the RPC bucketizes by day/week/month so running
+# every minute is wasteful — once per minute is plenty for daily cadence,
+# once every 5 minutes is plenty for weekly/monthly. We pick 60s to keep
+# UX snappy: a freshly-registered daily target gets its first scheduled
+# scan within ~60s of becoming due (whereas, e.g., 5min would mean the
+# first scan can slip into the next minute by 5 minutes).
+SCHEDULED_SCAN_INTERVAL_SEC = 60
+
 
 class ScanQueueListener:
     def __init__(self, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
@@ -50,6 +59,7 @@ class ScanQueueListener:
         # longer have a live worker behind them.
         await self._sweep_pending()
         sweeper = asyncio.create_task(self._stale_sweep_loop())
+        scheduler = asyncio.create_task(self._scheduled_scan_loop())
 
         try:
             async with await psycopg.AsyncConnection.connect(
@@ -78,6 +88,7 @@ class ScanQueueListener:
                             return
         finally:
             sweeper.cancel()
+            scheduler.cancel()
 
     async def stop(self) -> None:
         self._stopping.set()
@@ -153,6 +164,43 @@ class ScanQueueListener:
                 asyncio.create_task(self._dispatch(row["id"]))
         except Exception as e:  # noqa: BLE001
             logger.warning("sweep failed: %s", e)
+
+    async def _scheduled_scan_loop(self) -> None:
+        """Periodically enqueue scheduled scans (Phase F v1).
+
+        Calls worker_enqueue_scheduled_scans() every
+        SCHEDULED_SCAN_INTERVAL_SEC. The RPC handles all the cadence
+        math + idempotence (won't double-enqueue if a scan is already
+        in flight). The worker's existing scan_queued listener picks up
+        the freshly-inserted rows via pg_notify.
+
+        Single-worker race: if multiple workers are running, they'll
+        all call this RPC. Per-target dedup inside the SQL function
+        protects against double-enqueue (the "no in-flight scan"
+        guard runs inside the same transaction as the insert). One
+        worker may "win" a particular target in any given tick.
+        """
+        # Stagger the first tick like the stale sweeper does — avoids
+        # a thundering herd of fleet workers all hitting the DB at boot.
+        try:
+            await asyncio.sleep(min(30, SCHEDULED_SCAN_INTERVAL_SEC))
+        except asyncio.CancelledError:
+            return
+        while not self._stopping.is_set():
+            try:
+                n = self.sb.enqueue_scheduled_scans()
+                if n > 0:
+                    logger.info("enqueued %d scheduled scan(s)", n)
+            except Exception:  # noqa: BLE001
+                logger.exception("scheduled-scan sweep failed")
+            try:
+                await asyncio.wait_for(
+                    self._stopping.wait(), timeout=SCHEDULED_SCAN_INTERVAL_SEC
+                )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
 
     async def _stale_sweep_loop(self) -> None:
         """Periodically reap scans whose worker has gone silent.
