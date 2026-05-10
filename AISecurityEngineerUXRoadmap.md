@@ -1,44 +1,57 @@
-# `AISecurityEngineerUXRoadmap.md` — wrapper roadmap for an AI-native security engineer
+# `AISecurityEngineerUXRoadmap.md` — wrapper roadmap for a multi-tenant AI-security-engineer endpoint
 
 **Audience:** webappsec contributors. This doc is the wrapper-side
 proposal for delivering the engine team's
 [`strix/AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md)
-phases A-H **as an AI-native, conversation-first product** — not as a
-traditional dashboard with security findings.
+phases A-H **as a multi-tenant SaaS endpoint** where many companies
+register their assets (repos, web apps, domains, IPs, services) and
+Strix continuously analyzes them in a **scalable, per-org-isolated**
+manner — with AI-native surfaces (chat, PR comments, Slack, Living
+Docs) layered *on top of* that platform.
 
-> **The shift this doc makes.** Phase A-H in the engine team's spec
-> reads like a SaaS product roadmap (onboarding, dashboard, settings,
-> billing). That's the *minimum viable contract*. But the customer is
-> a vibe-coded founder who picked Cursor over VS Code because Cursor
-> *talks back*. They didn't want a better autocomplete — they wanted a
-> partner who codes for them. They'll choose us over Aikido / Snyk for
-> the same reason: not because we have better lists and filters, but
-> because we feel like *an engineer they hired*.
+> **The product shape this doc commits to.** webappsec is an online
+> endpoint that thousands of companies will use. Each customer org
+> signs up, **registers assets** (GitHub repos, production URLs,
+> staging URLs, domains, IPs), and Strix runs continuously against
+> that asset inventory — in a sandbox isolated to that org, with
+> memory scoped to that org, with findings + compliance evidence
+> stored under that org's RLS partition. The product is the
+> **platform** (asset inventory + scalable isolated analysis +
+> per-org evidence ledger). The AI-native surfaces are how each org's
+> people *interact* with their slice of that platform.
 >
-> This doc reframes every Phase A-H deliverable around that. **The
-> agent is the product. Everything else is supporting cast.**
+> **The shift this doc makes (vs. PR #68's first draft).** The
+> engine-team's Phase A-H spec reads as a dashboard SaaS. That's
+> necessary but not sufficient: the customer (a vibe-coded founder
+> who picked Cursor over VS Code because Cursor *talks back*) wants
+> the wrapper to *feel* like a security engineer they hired, not a
+> form they fill in. So every Phase A-H deliverable here is reframed
+> twice: first around the **multi-tenant asset-analysis substrate**
+> (the thing that scales), then around the **AI-native interaction
+> surfaces** (the thing that delights).
 
 > **Companion to:**
 > [`engine-usage.md`](engine-usage.md) (engine-emit contract),
 > [`usage.md`](usage.md) (product summary + Phase A-H gap inventory),
 > [`roadmap.md`](roadmap.md) §19 (plumbing-tier work),
+> [`Architecture.md`](Architecture.md) §1.1 + §3 (tenant-isolation model — the substrate this doc layers on top of),
 > [strix `AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md) (the engine team's UX roadmap this doc proposes implementation for).
 
 ---
 
 ## Contents
 
-0. [The shift — why dashboards are the wrong default](#0-the-shift)
-1. [The agent has shape — design language](#1-design-language)
-2. [Surfaces — where the agent lives](#2-surfaces)
-3. [Phase A — The agent arrives](#3-phase-a)
-4. [Phase B — Triage as conversation](#4-phase-b)
-5. [Phase C — Compliance as a living document](#5-phase-c)
-6. [Phase D — Tools the agent uses](#6-phase-d)
-7. [Phase E — Autonomy is a slider, not a toggle](#7-phase-e)
-8. [Phase F — Ambient awareness](#8-phase-f)
-9. [Phase G — Each org gets its own agent](#9-phase-g)
-10. [Phase H — Trust pages as agent portfolios](#10-phase-h)
+0. [The product shape — multi-tenant asset-analysis endpoint](#0-the-product-shape)
+1. [The interaction surface — design language for AI-native UX](#1-design-language)
+2. [Surfaces — where each org's agent presence lives](#2-surfaces)
+3. [Phase A — Org onboarding + asset registration + first analysis](#3-phase-a)
+4. [Phase B — Triage as conversation, per-org-isolated](#4-phase-b)
+5. [Phase C — Compliance as a living document, per-org ledger](#5-phase-c)
+6. [Phase D — Tools the per-org agent uses](#6-phase-d)
+7. [Phase E — Autonomy is a slider, per-org-scoped](#7-phase-e)
+8. [Phase F — Ambient awareness across each org's asset inventory](#8-phase-f)
+9. [Phase G — Scale: thousands of orgs, isolated analysis](#9-phase-g)
+10. [Phase H — Trust pages as the org's outward-facing portfolio](#10-phase-h)
 11. [Generative UI components — the new design system](#11-generative-ui-components)
 12. [How this changes the previous PR plan](#12-how-this-changes-the-pr-plan)
 13. [Implementation specifics — schema, routes, components](#13-implementation-specifics)
@@ -46,102 +59,217 @@ traditional dashboard with security findings.
 
 ---
 
-## 0. The shift
+## 0. The product shape
 
-### What the existing roadmap got right and wrong
+### 0.1 What we are building
 
-Right:
-- The GitHub-App-first surface (PR comments where the founder lives).
+webappsec is a **multi-tenant SaaS endpoint**. The product is the
+combination of:
+
+1. **A multi-tenant asset inventory.** Each customer org signs up,
+   creates an org workspace, and registers their assets:
+     - GitHub / GitLab / Bitbucket repos (via App install)
+     - Web applications (production URL + staging URL + auth recipes)
+     - Domains (DNS roots) for surface-mapping
+     - Public IPs / IP ranges
+     - Cloud accounts (AWS / GCP / Azure account IDs) for posture review
+     - Container images / package registries (for SCA + supply chain)
+   The same wrapper serves thousands of orgs, each with their own
+   asset list, their own findings ledger, their own compliance
+   posture, their own people, their own audit log.
+
+2. **Scalable, per-org-isolated analysis.** When an org's asset is
+   scanned, Strix runs in a sandbox container that is *isolated to
+   that org and that scan*. The sandbox sees only that scan's target,
+   only that org's credentials (materialised from the org's Supabase
+   vault, never cross-tenanted), and only that org's prior context
+   (memory facts, suppression rules, autonomy settings). Many orgs'
+   scans run concurrently on the worker fleet without interfering.
+   The wrapper is what makes this safe: RLS on every read, vault per
+   org, audit log per org, signed evidence chain per scan.
+
+3. **A per-org evidence ledger.** Every finding, every scan event,
+   every signed artefact (`vulnerabilities.json`, `coverage.json`,
+   `compliance_evidence.json`, `run.signature.json`,
+   `finding_chains.json`, `event_stream.jsonl`,
+   `behavioural_baselines.jsonl`, `trajectory.jsonl`, SBOM, SARIF) is
+   stored under the org's partition. The ledger is *the source of
+   truth* the wrapper renders into AI-native surfaces.
+
+4. **AI-native interaction surfaces** — the layer the user sees.
+   Chat, PR comments, Slack, Living Docs, Console — these are
+   *views into* the platform, each scoped to one org at a time, each
+   showing only what that org's user is authorised to see.
+
+The platform is the product. The interaction surfaces are how each
+org's people *use* it.
+
+### 0.2 The isolation contract
+
+This is the contract the wrapper guarantees, regardless of which
+surface the user is interacting through:
+
+| Dimension | Guarantee |
+|---|---|
+| **Data** | Every row keyed by `org_id`; RLS enforces `org_id = auth.jwt().org_id`. No cross-org reads. (Architecture.md §3) |
+| **Credentials** | Per-org Supabase vault; materialised into the sandbox at scan-start; destroyed at scan-end. Never cross-tenanted. (migration 028 `org_secrets`) |
+| **Sandbox** | Each Strix scan = one container, one network namespace, one workdir under `/tmp/strix-runs/<scan_id>/`. The container only sees its own org's target + its own scan budget. |
+| **Memory** | The agent's `agent_memory_facts` / `_episodes` / `_preferences` (§9) are RLS-scoped. Acme's agent never reads Beta's facts. |
+| **Audit log** | Every state-changing action lands in `audit_log` with `org_id`, `actor`, `action`, `payload`. Per-org auditor share-links query under their own scope. |
+| **Evidence chain** | Each scan's artefacts are signed (`run.signature.json` HMAC chain). The signing key is per-org. An auditor verifying Acme's evidence can prove the chain belongs to Acme and only Acme. |
+| **Realtime** | Supabase realtime channels filtered by `org_id`. An Acme user's WebSocket subscription cannot see Beta's `agent_messages` or `scan_events`. |
+
+The isolation contract holds whether the surface is chat, PR
+comments, Slack, Living Docs, or the API. **A scan kicked off by
+Acme can only ever produce findings under Acme's partition. Period.**
+
+### 0.3 What scale looks like at the platform
+
+| Layer | Order of magnitude |
+|---|---|
+| Orgs onboarded | ~10⁴ (tens of thousands) |
+| Assets per org | 1-50 typical, 100s+ for Persona 3 |
+| Scans per org per day | 1-10 typical (daily DAST + per-PR + ad-hoc) |
+| Concurrent scans, fleet-wide | ~10²-10³ |
+| Findings per org over 12 months | 10²-10⁴ |
+| AI-surface interactions per org per day | 1-100 (Persona 1: a few; Persona 2: dozens) |
+| Per-org isolated sandbox containers | one per running scan |
+
+The wrapper's job is to make **scaling this fan-out invisible** to
+each individual user. The org that signed up 4 minutes ago feels
+like they have a dedicated security engineer. The platform behind
+them is running thousands of orgs concurrently.
+
+### 0.4 What the existing roadmap got right and what it missed
+
+The engine-team's Phase A-H spec got right:
+- The GitHub-App-first surface (most orgs land here first).
 - The five personas + tier layout.
 - The eventual auto-fix flow.
 - The compliance-pack handoff.
 
-Wrong (or at least, "necessary but not sufficient"):
-- A **dashboard with a findings inbox** is the 2018 model. The
-  customer doesn't want to log in and click through 47 issues —
-  they want the agent to surface *the two that matter today* and
+What was necessary but not sufficient:
+- A **dashboard with a findings inbox** is the 2018 model. Each org's
+  people don't want to log in and click through 47 issues — they
+  want the platform to *surface the two that matter today* via
+  whatever surface they live in (PR comment / Slack / chat) and
   *do something about them*.
-- A **settings page** is friction for a founder who doesn't know what
-  "MFA enforcement attestation" means yet. The agent should *infer*
-  the right defaults and explain them in plain language.
-- A **scan creation form** is a tool. The customer doesn't want a
-  tool — they hired an engineer.
-- An **integrations page** is configuration. The agent doesn't *have*
-  integrations; it *uses tools* the way a human engineer uses Slack
-  and Jira.
+- A **settings page** is friction for a founder who doesn't know
+  what "MFA enforcement attestation" means yet. The platform should
+  *infer* the right defaults from the asset inventory and explain
+  them in plain language.
+- A **scan creation form** treats every scan as a one-off. In a
+  multi-tenant SaaS, scans are continuous and asset-triggered: a
+  push to a registered repo, a daily schedule against a registered
+  URL, a KEV-CVE match against a registered SBOM.
+- An **integrations page** is configuration. The org's *agent
+  presence* on Slack / Linear / Jira is *one of the surfaces*, not a
+  separately-configured product.
 
-### What "AI-native" means for this product
+### 0.5 The AI-native layer (what makes this not just another DAST SaaS)
 
-It means **the agent is the interface, not the back-end**.
-
-The user's primary interaction is conversation:
+Within each org's view of the platform, the user's primary
+interaction can be conversation — scoped to their org's asset
+inventory and their org's analysis history:
 
 ```
-You    " any new issues today? "
+[ Alice, founder of GetEdunext (org_id=acme), in their chat panel ]
 
-Strix  " yes — 2 critical and 3 medium since yesterday's deploy.
+Alice  " any new issues today? "
+
+Strix  [ scoped to org=acme; reading acme.findings, acme.scan_events,
+         acme.agent_memory_episodes ]
+
+       " across your 4 repos and your prod URL —
+         2 critical and 3 medium since yesterday's deploy.
+
          the critical one is interesting:
-         someone refactored auth.ts in PR #142 and removed the
-         middleware that checks user.role on /api/admin/*.
-         I verified the bug is reachable from the live site.
-         I've drafted a fix PR — want to see it? "
+         someone refactored auth.ts in PR #142 (getedunext-api repo)
+         and removed the middleware that checks user.role on
+         /api/admin/*. I verified the bug is reachable from
+         www.getedunext.com right now.
 
-You    " show me the diff "
+         I've drafted a fix PR. want to see it? "
 
-Strix  [renders inline diff with the missing middleware re-added,
-        plus a regression test, plus a CHANGELOG entry]
+Alice  " show me the diff "
 
-You    " merge it "
+Strix  [renders inline diff against acme's repo, plus a regression
+        test, plus a CHANGELOG entry]
 
-Strix  " merged. I added a test so this regression can't recur.
-         I also created a Linear ticket for the team to review the
-         deploy gate that let this through.
-         the 3 medium findings are all the same dep-CVE class —
-         lodash@4.17.20 in three different services.
-         want me to bump them? "
+Alice  " merge it "
+
+Strix  " merged into acme/getedunext-api. I added a test so this
+         regression can't recur, and I created a Linear ticket in
+         your acme workspace for the team to review the deploy gate.
+
+         the 3 medium findings — all the same dep-CVE class, lodash
+         in three of your services. want me to bump them? "
 ```
 
-That's the product. Lists, dashboards, forms — they're a *fallback*
-for when the conversation isn't the right modality. They are not the
-thing you optimise for.
+Meanwhile, in a different browser, a different org's founder is
+having a different conversation about a different asset inventory,
+backed by a completely isolated analysis. The platform doesn't blink.
 
-### What this doc commits to
+### 0.6 What this doc commits to
 
-1. **Conversation is the primary surface.** Every Phase A-H feature
-   gets a "what's the conversation?" answer first.
-2. **The agent has memory.** It knows your stack, your team, your
-   past decisions, your false-positive patterns, your customers'
-   trust questionnaires.
-3. **The agent is proactive.** It pings you when something matters.
-   It does not wait for you to refresh a dashboard.
-4. **The agent acts on your behalf with calibrated autonomy.** A
-   slider — co-pilot ↔ autopilot — per category, per severity.
-5. **The agent shows its work.** Every claim is verifiable. Every
-   action is auditable. No black boxes.
-6. **Generative UI for the long-tail.** The agent builds the view it
-   needs on demand instead of forcing one canonical layout.
-7. **The dashboard still exists** — but as the *secondary* surface
-   (Persona 2 AppSec engineer + audit-evidence rendering). Persona 1
-   (vibe-coded founder) lives in chat + PR comments + Slack.
+1. **The platform is multi-tenant by default; AI-native surfaces are
+   layered on top.** Every feature gets a "how does this scale across
+   thousands of orgs?" answer before it gets a "what's the
+   conversation?" answer.
+2. **Conversation is one primary surface among several** (PR
+   comments, Slack, Living Docs, Console are co-primary depending on
+   persona). Each surface is org-scoped, each shows only the data
+   the user's auth context permits.
+3. **The agent has memory — per-org.** Acme's "agent" knows Acme's
+   stack, Acme's team, Acme's past decisions, Acme's compliance
+   landscape. It knows zero about Beta. Memory is just per-org state
+   in the platform's data layer.
+4. **The agent is proactive — fired by platform events.** New
+   `finding.created` in an org's partition → that org's chat /
+   Slack / PR comment updates. The user doesn't refresh a dashboard.
+5. **The agent acts with calibrated autonomy — per org.** A
+   per-org slider (co-pilot ↔ autopilot) per category, per severity.
+   Defaults are conservative for new orgs; tunable as trust grows.
+6. **The agent shows its work — and the evidence is signed.** Every
+   claim is verifiable; the evidence chain is per-org and tamper-
+   evident.
+7. **Generative UI for the long-tail.** The agent builds the view it
+   needs on demand against that org's data.
+8. **The dashboard still exists** — as one of several surfaces,
+   especially for Persona 2 (AppSec engineer wanting filters + bulk
+   actions). Persona 1 (vibe-coded founder) lives in PR comments +
+   Slack + chat; the dashboard is a fallback.
 
 ---
 
 ## 1. Design language
 
-### 1.1 Presence
+### 1.1 Presence — per-org, across surfaces
 
-The agent always has a *visible presence* somewhere:
+Each org has an **agent presence** scoped to that org's people +
+that org's asset inventory. The wrapper runs one logical agent per
+org (in practice, many concurrent inference sessions, but with
+shared per-org memory + autonomy state). The agent's presence shows
+up wherever that org's people work:
 
-- **In-app:** persistent chat panel, never-collapsed by default.
-  Avatar + name (`Strix`) + status indicator (idle / thinking / acting
-  / waiting on you).
-- **In Slack:** a bot user that posts in `#security` or whatever
-  channel the org configures, with the same status indicators.
-- **In GitHub:** PR comments and Check Runs from a branded bot.
-- **In email:** weekly digest signed by the agent.
+- **In-app:** persistent chat panel scoped to the active org
+  workspace. Never-collapsed by default. Avatar + name (`Strix`) +
+  status indicator (idle / thinking / acting / waiting on you).
+  Org-scoped data only: switching to a different org in the
+  workspace switcher swaps the chat thread, memory, and pending
+  actions.
+- **In Slack:** a bot user installed into that org's workspace,
+  posting in their `#security` channel (or wherever they configured
+  it). The Slack install is bound to one wrapper-org; the bot only
+  speaks for that org's data.
+- **In GitHub:** PR comments and Check Runs from a branded bot,
+  posted only on the repos that have been registered to that org.
+- **In email:** weekly digest signed by the agent — addressed to that
+  org's people, summarising that org's asset analysis.
 
-Customers should feel like *the same engineer* is talking to them
-across all surfaces. Same name, same voice, same memory.
+Within an org, customers feel like *the same engineer* is talking to
+them across all surfaces (same name, same voice, same memory). Across
+orgs, each conversation is fully isolated.
 
 ### 1.2 Conversation as the primary surface
 
@@ -284,190 +412,317 @@ The chat blocks (1.3) include all of these as first-class types.
 
 ## 2. Surfaces
 
-The agent doesn't have *one* interface. It has *presence* across the
-surfaces the customer already uses:
+The platform doesn't have *one* interface. Each org's people access
+their org's slice through several surfaces. All of them are
+org-scoped by auth context (the wrapper enforces `org_id` everywhere
+— see Architecture.md §3).
 
-### 2.1 The Chat (in-app, primary)
+### 2.1 The Chat (in-app)
 
-The default home page after onboarding. Persistent thread with the
-agent, plus a sidebar showing "recent threads" (one per finding /
-incident / engagement). Cmd+K opens the command palette for faster
-nav.
+The default in-app view for the org workspace. Persistent thread with
+the agent, plus a sidebar showing "recent threads" (one per finding /
+incident / engagement, all within the active org). Cmd+K opens the
+command palette for faster nav.
 
-**What lives here:** every conversation, the latest digest, action
-buttons, generative artefacts (tables / charts / diffs the agent
-renders inline).
+A workspace switcher in the header lets users with access to
+multiple orgs (consultants, sub-companies) flip between
+**isolated** chat workspaces — each with their own thread history,
+memory, autonomy state, and findings ledger.
+
+**What lives here:** every conversation within the org, the latest
+digest of *the org's* asset analysis, action buttons (scoped to the
+org's permitted actions), generative artefacts the agent renders
+inline.
 
 ### 2.2 The PR (GitHub)
 
-The agent reviews every PR before the customer does. Posts inline
-comments on findings. Posts a single Check Run summary. Opens fix
-PRs with the same bot identity. Replies to threaded discussion the
-human reviewer starts.
+For each org that has installed the GitHub App on their repos: the
+agent reviews every PR. Posts inline comments on findings. Posts a
+single Check Run summary. Opens fix PRs with the same bot identity.
+Replies to threaded discussion the human reviewer starts.
+
+The PR comment is *the* primary surface for many Persona 1 founders
+— they live in GitHub, not in the wrapper's chat. PR comments link
+back to the chat thread for follow-up.
 
 **What lives here:** per-PR scan results, fix proposals, threaded
 discussion with reviewers, auto-merge-block on critical findings.
+All scoped to the org that registered the repo.
 
 ### 2.3 The Slack channel
 
-The agent joins the customer's `#security` channel as a bot user.
-Posts daily digests. Replies to `@strix` mentions. Pings the
-on-call engineer for critical findings. Opens private threads for
-sensitive discussions.
+For orgs that installed the Slack app into their workspace: the
+agent joins their `#security` channel as a bot user. Posts daily
+digests of *that org's* asset analysis. Replies to `@strix`
+mentions. Pings that org's on-call engineer for critical findings.
+Opens private threads for sensitive discussions.
+
+A wrapper-org maps to one Slack workspace. The bot's identity in a
+Slack workspace only carries one org's data.
 
 **What lives here:** team-visible alerts, slash commands, async
 discussion that doesn't belong in a PR.
 
 ### 2.4 The Living Doc
 
-Some artefacts are documents that *update over time*: the auditor
-pack, the trust page, the security runbook, the SOC 2 SAQ.
+Some artefacts are documents that *update over time* — and they
+need to be addressable by URL so external parties (auditors,
+customers, partners) can bookmark them. Per-org URLs:
+
+- `https://trust.<org-slug>.strix.io/` or `https://trust.<custom-domain>/` for the org's trust page
+- `https://app.strix.io/o/<org-slug>/saq/soc2-type-2` for the org's SAQ
+- `https://app.strix.io/o/<org-slug>/runbook` for the org's runbook
 
 These are not downloads. They are URLs the agent maintains. The
 auditor opens the URL today; the agent has updated it since
-yesterday's scan; the URL still works.
+yesterday's scan; the URL still works. Tamper-evidence: the trust
+page surfaces the `run.signature.json` HMAC chain so the auditor
+can verify that the evidence belongs to that org and hasn't been
+edited post-hoc.
 
 **What lives here:** auditor pack, trust page, security runbook,
 SOC 2 SAQ, ISO 27001 SoA, vendor-questionnaire response library.
 
-### 2.5 The Console (secondary)
+### 2.5 The Console
 
-The traditional dashboard exists for Persona 2 (AppSec engineer who
-wants metrics + filters + bulk actions) and for cases where the
-chat isn't the right modality (e.g. visual inspection of a kill
-chain across 50 events).
+The traditional dashboard, scoped to the active org workspace. This
+surface is for:
 
-**What lives here:** findings inbox with filters, scan history,
-team / repo views, raw event timeline, settings.
+- Persona 2 (AppSec engineer who wants filters + bulk actions)
+- Persona 3 (compliance lead reviewing evidence across many scans)
+- Auditor share-links (read-only, time-bounded URL into the
+  console's evidence views)
+- Cases where chat isn't the right modality (visual inspection of a
+  kill chain across 50 events, bulk dismissing 200 findings of the
+  same fingerprint, etc.)
+
+**What lives here:** findings inbox with filters, asset inventory
+view, scan history, team / repo views, raw event timeline, org
+settings, billing.
 
 The console is *a tool the agent uses* — when you ask "show me all
-auth issues this month," the agent navigates the console and
-displays a filtered view in chat. The customer can also navigate
-the console directly, but the agent's chat handles ~90% of
-real-world flows.
+auth issues this month," the agent renders a filtered view in chat.
+Power users can also navigate the console directly.
+
+### 2.6 The API (additive)
+
+For Persona 3 + 4 (security teams with their own automations): a
+per-org REST API. Org-scoped API keys. Same data model as the
+console. Every API call writes to the org's audit log. Rate-limited
+per org. The chat agent itself can be invoked over this API for
+programmatic agent access.
+
+**What lives here:** programmatic access to findings, scan triggers,
+evidence-chain verification, autonomy-state updates.
 
 ---
 
-## 3. Phase A — The agent arrives
+## 3. Phase A — Org onboarding + asset registration + first analysis
 
 **Engine-team goal (verbatim):** *"a founder signs up, installs the
 GitHub App, and sees their first finding inline on a PR within 5
 minutes."*
 
-### What the conversation looks like
+### Reframe for the multi-tenant endpoint
+
+What's actually happening at sign-up:
+
+1. **A new org workspace gets provisioned** in the platform — a
+   `public.organizations` row, an RLS partition, a per-org Supabase
+   vault, a per-org signing key for evidence chains, a fresh
+   `agent_memory_*` namespace, a default `agent_autonomy` state.
+2. **The first user is invited** into that org (as `owner`); future
+   teammates join via SSO or invite link.
+3. **Assets get registered** — repos via GitHub App install, web
+   apps via URL paste, domains via DNS-root entry. Each asset goes
+   into `public.scan_targets` (or a new `public.assets` table — see
+   §13) keyed by `org_id`.
+4. **The platform schedules + runs scans** against the registered
+   assets in **isolated sandbox containers** (one container per
+   running scan), each materialising only this org's credentials,
+   each writing findings only under this org's partition.
+5. **Findings stream into the org's surfaces** — chat panel, PR
+   comments on the registered repos, Slack if installed.
+
+The user *experience* of all this can still be conversational + low
+friction. But what's happening under the hood is the platform
+onboarding a new tenant.
+
+### What the user sees (Persona 1, vibe-coded founder)
 
 ```
-[ founder signs up with email + magic link ]
+[ Alice lands on app.strix.io, creates an org workspace 'getedunext'
+  with email + magic link. Workspace = org_id under the platform's
+  RLS partition. ]
 
-Strix  " hey — I'm Strix, your AI security engineer. before I dig
-         into your code, can you tell me about what you're building?
-         the more I know, the better I can prioritize. "
+Strix  [ in the new workspace's chat panel ]
+       " welcome to your getedunext workspace. I'm Strix — I'll
+         analyse the code, web apps, and infrastructure you register
+         here.
 
-You    " we're building a SaaS for college applications, Next.js +
-         Supabase, deployed on Vercel "
+         everything that runs against your assets is isolated to
+         this workspace. nothing crosses into anyone else's account.
 
-Strix  " got it. that means: SQLi, IDOR, and Supabase RLS misconfigs
-         are top priority for me. I'll also keep an eye on the
-         vendor footprint (Vercel + Supabase + your CDN) for
-         configuration drift.
+         to get started I need to know what to look at. you can add
+         assets as you go, but the fast path is:
 
-         to do my job I need to read your repo. want me to install
-         the GitHub App now? takes 30 seconds. "
+           1. install our GitHub App on the repos you want me to scan
+           2. paste your production URL(s) — I'll DAST them daily
+           3. (later) domain / IP ranges for surface mapping
 
-You    [ click 'install ' ]
+         want to start with GitHub? "
 
-Strix  " thanks. I have access to 4 repos:
+Alice  [ clicks 'Install GitHub App' → granted access to 4 repos ]
+
+Strix  " registered 4 repos to your workspace:
            - getedunext-frontend
            - getedunext-api
            - getedunext-admin
            - getedunext-marketing
-         I'm scanning all four. while that runs, what's your
-         production URL? I'll set up a daily DAST baseline. "
 
-You    " https://www.getedunext.com "
+         I'm queueing a baseline SAST + SCA scan against each.
+         each scan runs in its own isolated sandbox; they'll execute
+         in parallel as the worker fleet has capacity. ETA for first
+         results: ~2-4 minutes.
 
-Strix  " checked — it's up, served by Vercel, TLS is fine. I'll do
-         a baseline scan now and re-scan daily at 03:00 UTC.
+         while those run, what's your production URL? I'll add it as
+         a web-app asset and set up a daily DAST baseline. "
 
-         your first scan results are coming in — 1 critical SCA
-         finding (jsonwebtoken@8.5.0 has CVE-2022-23529, RCE in your
-         api repo), 4 medium SCA findings (lodash, ws, semver,
-         qs — typical npm hygiene). no SAST issues yet.
+Alice  " https://www.getedunext.com "
 
-         the critical one matters: jsonwebtoken is in your auth path.
-         I drafted a fix PR — bump to 9.0.2, no API changes needed.
-         want to see it? "
+Strix  " checked — it's up, served by Vercel, TLS is fine.
+         registered as a web-app asset (workspace getedunext).
+         scheduled: daily 03:00 UTC + ad-hoc on demand.
 
-You    " yes "
+         your asset inventory now:
+           4 repos (sast+sca, on push)
+           1 web app (dast, daily + ad-hoc)
+         add more anytime in your console / by asking me.
 
-Strix  [ renders fix-PR diff inline + linked GitHub PR ]
+         first scan results landing —
+
+         repo getedunext-api  → 1 critical SCA: jsonwebtoken@8.5.0
+                                 (CVE-2022-23529, KEV-listed RCE).
+                                 it's in your auth path.
+                                 I drafted a fix PR against that repo.
+         repo getedunext-frontend → clean.
+         repo getedunext-admin   → 4 medium SCA (lodash, ws, semver, qs).
+         repo getedunext-marketing → clean.
+         web app www.getedunext.com → first DAST in progress, ETA 3 min.
+
+         the critical matters most. want to see the fix diff? "
+
+Alice  " yes "
+
+Strix  [ renders fix-PR diff inline + linked GitHub PR opened against
+         the registered repo, scoped to this org's GitHub App install ]
 ```
 
-That's the product. The founder hasn't navigated a dashboard, hasn't
-configured anything, hasn't read CVSS vectors. They've had a
-conversation with someone who understood what they're building and
-took action.
+The founder hasn't navigated a settings page, hasn't filled a scan
+form, hasn't picked a sandbox size. They've **created an org
+workspace, registered 5 assets, and the platform has run 5 isolated
+scans in parallel** — surfaced as a conversation.
 
-### What the wrapper builds for this conversation
+### What's happening on the platform side (per-org isolation contract)
+
+| Step | Platform action | Isolation guarantee |
+|---|---|---|
+| Sign up | Create `organizations` row, RLS partition, per-org signing key, per-org vault entry stub | New `org_id` is the partition key for every subsequent row |
+| Install GitHub App | Write `github_app_installations` row keyed to `org_id`; store installation token in `org_secrets` (encrypted via the org's vault key) | App install can only ever post to repos that org owns |
+| Add web app | Insert `scan_targets` row with `org_id` + `target_kind=web_application` | DNS / reachability check is for that URL only |
+| Trigger scan | Enqueue `scan_queued` notify; worker claims; spawns sandbox container in network namespace isolated to that scan | Container env vars + mounted dir contain only this scan's creds + workdir |
+| Stream findings | Engine emits `finding.created` → wrapper writes to `findings` with `org_id` → realtime channel filtered by `org_id` → only this org's users see it | RLS + realtime filter |
+| Sign evidence | `run.signature.json` HMAC chain uses the org's signing key | Auditor verifying the chain can prove it belongs to this org |
+
+### What the wrapper builds for Phase A
 
 | Item | What it is | Effort |
 |---|---|---|
-| **Conversational onboarding flow** | One screen, chat-style. Replaces the current multi-step form. Agent asks ~3-4 questions, infers the rest. | M |
-| **Repo / stack inference** | After GitHub install, agent reads `package.json`, framework markers (`next.config.js`, `wrangler.toml`, etc.), infers stack. Stored in `agent_memory.facts.stack`. | S |
-| **Agent's own personality / voice** | System prompt + tone guide for the agent's chat outputs. Same name, same voice, same memory across all surfaces. Versioned per release. | XS (one config file) |
-| **Live findings stream into chat** | As the engine emits `finding.created`, the agent posts a chat message in the form *"I found X. it matters because Y. want me to do Z?"* — not a raw finding card. | M |
-| **PR-comment renderer** (engine team A.5) | Same as the previous roadmap, but with the agent's voice. Comment is signed by the agent, links back to the chat thread. | L |
-| **GitHub App install + first-scan trigger** | Same as the previous roadmap. | M |
-| **Production URL capture as part of conversation** | Agent asks; customer pastes; agent validates + creates `web_application` target. No separate form. | XS |
-
-The traditional onboarding wizard (steps 1-7 in the engine team's
-roadmap) is **replaced by the conversation**. Steps still exist
-internally — sign up, create org, install app, capture URL — but as
-*the agent's actions* during the conversation, not as separate
-screens the customer clicks through.
+| **Org workspace provisioning** | On sign-up: create `organizations` row, RLS partition, per-org vault namespace, per-org signing key, default `agent_autonomy` state, seeded `agent_memory_preferences`. | M (partial — RLS already exists) |
+| **Conversational onboarding flow** | One screen, chat-style. Explains the workspace/isolation model in plain language. Agent asks ~3-4 questions to seed memory, infers the rest from registered assets. | M |
+| **Asset-registration primitives** | First-class `public.assets` table (or extension of `scan_targets`) with rich metadata: kind, identifier, owning team, schedule, last scan, current posture. The console's asset-inventory view + the chat agent both read from this. | M |
+| **Repo / stack inference** | After GitHub App install, worker reads `package.json` / framework markers across each registered repo, writes to `agent_memory_facts` per repo + per org. | S |
+| **Per-asset auto-scheduling** | Each new asset registration enqueues an immediate baseline scan + sets up its recurring schedule (daily for web-apps, on-push for repos). Workers claim per-org with fair-share. | M |
+| **Concurrent fan-out** | Worker pool runs N scans simultaneously across orgs; each scan in its own sandbox. Per-org concurrency cap (default 4) so a noisy org can't starve others. | M (partial — single-worker exists) |
+| **Live findings stream into the org's chat** | As the engine emits `finding.created`, the wrapper writes to `findings` (org-scoped), then the agent composes a chat message — *"I found X in your getedunext-api repo. it matters because Y. want me to do Z?"* | M |
+| **PR-comment renderer** (engine A.5) | Same as the previous roadmap. PR comments posted via the GitHub App install scoped to that org's permission. Comment links back to the chat thread under that org. | L |
+| **GitHub App install + multi-repo registration** | One install can register many repos under the same org. Customer can later add / remove repos without re-installing. | M |
+| **Web-app capture as conversation step** | Agent asks; founder pastes; agent validates + creates an `asset` row + enqueues first DAST. No separate form. | XS |
+| **Agent voice + system prompt** | System prompt + tone guide. Org-aware (substitutes org name, asset names, registered targets). Same name, same voice across all surfaces *within an org*. | XS |
 
 ### Acceptance criteria
 
 - Time-to-first-finding < 5 min from sign-up.
-- Customer never sees a "settings" or "configure" page during
-  onboarding. The agent infers and explains.
-- The first chat message after sign-up is the agent introducing
-  itself and asking about the company.
-- The first action the agent takes is the GitHub App install — not
-  the customer navigating to a settings page.
+- The first finding lands in *every* surface the org has enabled:
+  in-app chat, PR comment (if repo asset), Slack (if installed).
+- The customer never sees data from any other org — workspace
+  switcher, queries, realtime channels are all RLS-scoped.
+- Sign-up of a new org succeeds in < 30 s end-to-end (provisioning
+  + first scan-queued event) under load (10 concurrent sign-ups).
+- A scan kicked off by org A and a scan kicked off by org B run in
+  fully isolated sandboxes; both succeed within their own SLA.
 
 ### What's already shipped that carries over
 
-- Multi-tenant org schema + RLS + audit_log (the substrate the
-  agent runs on).
-- Engine PR #29 preflight (the agent's "is the URL up?" check).
-- Coverage banner (PR #64) — when the agent's scan can't reach the
-  target, it says so honestly in chat instead of pretending.
+- Multi-tenant org schema + RLS + audit_log — **the foundation
+  this whole roadmap stands on**. (Architecture.md §3)
+- Per-org vault for credentials (migration 028) — extends to the new
+  per-org signing key.
+- Engine PR #29 preflight — the "is your URL reachable?" check
+  per registered asset.
+- Coverage banner (PR #64) — when the daily scan against the org's
+  registered URL can't reach it, the agent + the trust page both
+  say so honestly.
+- Subprocess + events.jsonl tailer infra in `strix_worker` — the
+  per-scan isolated execution path.
 
 ### New components needed
 
-- `<ChatThread>` — the primary surface. Streaming response, inline
-  artefacts, citations, suggestions row at the bottom.
-- `<AgentMessage>` — composed of typed blocks (text, table, chart,
-  code, diff, screenshot, action-button-row).
-- `<AgentSuggestions>` — 1-3 buttons the agent surfaces beneath each
-  message ("Apply Fix", "See diff", "Ignore for this release").
+- `<ChatThread>` — surface for the org's chat. Streaming response,
+  inline artefacts, citations, suggestions row. Realtime
+  subscription filtered to the active org.
+- `<AgentMessage>` — composed of typed blocks (see §11).
+- `<AgentSuggestions>` — 1-3 action buttons beneath each message,
+  filtered to actions the active user is authorised for in this org.
+- `<WorkspaceSwitcher>` — header dropdown for users with access to
+  multiple orgs. Switching swaps chat thread, asset inventory,
+  findings ledger, autonomy state — all org-scoped.
 - `<OnboardingChat>` — variant of `<ChatThread>` for the first-run
-  experience. Pre-seeded with the agent's introduction.
+  experience of a freshly-provisioned org. Pre-seeded with the
+  agent's introduction explaining the isolation model.
+- `<AssetInventoryPanel>` — sidebar / page showing the org's
+  registered assets (repos, web apps, domains, IPs), current
+  posture, last scan time, scheduled next scan.
 
 ---
 
-## 4. Phase B — Triage as conversation
+## 4. Phase B — Triage as conversation, per-org-isolated
 
 **Engine-team goal:** *"customers spend < 1 minute per finding to
 triage; false-positive rate < 10%."*
 
-### What the conversation looks like
+### Reframe
 
-Daily digest in chat (or Slack):
+In a multi-tenant SaaS, "triage" is **one org's view of one org's
+findings** rendered into whichever surface that org's user is on
+(chat / PR / Slack / console). The platform is producing findings
+across thousands of orgs concurrently; each user only ever sees
+their own.
+
+The agent's daily digest is composed by reading **the active org's
+findings table joined to that org's asset inventory** — never
+across orgs. The NL triage handler updates **that org's**
+suppression rules + autonomy state, scoped by `org_id` on every
+write.
+
+### What the conversation looks like (Alice's view of acme's findings)
+
+Daily digest in Alice's chat panel (and acme's Slack `#security`
+channel if installed):
 
 ```
-Strix  " yesterday's scans found 12 issues across 3 repos:
+Strix  " yesterday's scans across your getedunext workspace —
+         12 issues across 3 of your 4 repos + 1 on your prod URL:
            critical : 1   ← matters
            high     : 2
            medium   : 6
@@ -508,9 +763,10 @@ Strix  " bumping lodash@4.17.20 → 4.17.21 in 3 services. PR #290.
 ```
 
 That's triage. No filters, no bulk-action toolbar, no
-"recently dismissed" view. The customer responded in natural
-language; the agent did the right things, learned the suppression
-rule for next time.
+"recently dismissed" view. The user responded in natural language;
+the platform did the right things in their org's partition, learned
+the suppression rule **for that org**, and the rule applies to
+future scans of *that org's* assets only.
 
 ### What the wrapper builds for this conversation
 
@@ -519,7 +775,7 @@ rule for next time.
 | **Daily digest as chat post** | Agent composes a digest after the daily scan; posts to chat + Slack. Group by exploit chain (engine `finding_chains.json`), explain in plain language, surface the 1-2 things that matter. | M |
 | **Per-finding chat thread** | Click a finding in the digest → opens a sub-thread with that finding's evidence, the agent's reasoning, action buttons. Persists across sessions. | M |
 | **NL triage actions** | "dismiss the lows" / "fix the critical" / "snooze for 30 days" — agent parses intent, applies action, confirms. Same NL handler covers all triage shortcuts. | L |
-| **Suppression rule learning** | When the customer dismisses a class with a reason ("we have Cloudflare WAF"), agent stores it as a per-org suppression rule. Next scan, the agent doesn't re-flag — but writes a chat note: "I would have flagged X but your Cloudflare WAF rule covers it." | M |
+| **Suppression rule learning** | When the user dismisses a class with a reason ("we have Cloudflare WAF"), the platform stores it as a per-org suppression rule (`agent_memory_facts` scope='suppression', `org_id` keyed). Next scan against *that org's* assets, the agent doesn't re-flag — but writes a chat note: "I would have flagged X but your Cloudflare WAF rule covers it." Other orgs are unaffected. | M |
 | **`finding_chains.json` ingestion** | Engine PR #219 §4a v2. Already in the previous roadmap (PR #80). Reframed: chains drive the *narrative* of the digest, not just a UI grouping. | M |
 | **`compliance_evidence.json` ingestion** | Engine PR #219 §4b. Reframed: compliance posture is part of the digest ("you went from 87% to 89% SOC 2 readiness today"), not a separate page. | M |
 | **Generative UI artefacts** | Tables, diffs, charts the agent emits inline as part of triage answers. Typed `agent_artifact` schema; rendered by `<AgentMessage>`. | M |
@@ -559,20 +815,33 @@ handles 90% of triage from chat.
 
 ---
 
-## 5. Phase C — Compliance as a living document
+## 5. Phase C — Compliance as a living document, per-org ledger
 
 **Engine-team goal:** *"replace Vanta/Drata for security-finding
 evidence collection."*
+
+### Reframe
+
+Each org has its own compliance posture. The platform aggregates
+**that org's** `compliance_evidence.json` across **that org's**
+scans, signs the chain with **that org's** key, and renders the
+result into living URLs that **that org** can share externally
+(auditor share-link, trust page, customer-questionnaire response).
+
+A SOC 2 readiness number for acme is computed only over acme's
+assets + acme's scan history. The same SOC 2 framework, evaluated
+against beta's assets, gives beta a different number. Each is
+isolated.
 
 ### What the conversation looks like
 
 ```
 You    " how ready am I for SOC 2 Type 2? "
 
-Strix  " right now:
+Strix  " for the getedunext workspace, right now:
            SOC 2  : 89% ready — 11 of 12 controls passing
            ISO 27001 : 76% — needs 4 more controls
-           PCI DSS : N/A (no payment data flow detected)
+           PCI DSS : N/A (no payment data flow detected in your assets)
 
          the SOC 2 control failing is CC7.2 (system monitoring) —
          we don't have evidence of log retention. that's not a
@@ -659,17 +928,22 @@ maintains*.
 
 ---
 
-## 6. Phase D — Tools the agent uses
+## 6. Phase D — Tools the per-org agent uses
 
 **Engine-team goal:** *"meet customers where they are. Slack, Linear,
 Jira, GitHub annotations."*
 
 ### Reframe
 
-The wrapper doesn't have *integrations*. The agent has **tools** —
-the way a real engineer uses Slack, Jira, and GitHub. The customer
-*sees the agent using them*; they don't configure them as separate
-products.
+Each org has its own Slack workspace, its own Linear team, its own
+Jira project, its own GitHub org. The wrapper installs the org's
+*agent presence* into each of those, scoped to that org's data only.
+
+From the org's perspective: "the agent uses Slack / Linear / Jira"
+— meeting the team where they live. From the platform's perspective:
+**per-org OAuth tokens stored in the per-org vault, per-org bot
+identity, per-org cross-tool action audit log.** A wrapper-org maps
+one-to-one to a Slack workspace install, a Linear OAuth grant, etc.
 
 ### What the conversation looks like
 
@@ -707,23 +981,31 @@ The customer's experience: the agent is *in their Slack*, posting
 when relevant, replying when mentioned, doing what a teammate would.
 There is no "Slack settings" page where the customer configures
 which alerts go where — the agent figures that out from
-conversation context (this org has Slack; they have a `#security`
-channel; that's where this kind of thing belongs).
+conversation context (this org installed Slack; they have a
+`#security` channel; that's where this kind of thing belongs).
+
+Behind the scenes: the Slack bot, when posting, is acting under that
+org's install. The Slack message it generates pulls from that org's
+findings only. The Linear ticket it creates uses that org's Linear
+OAuth grant.
 
 ### What the wrapper builds for this conversation
 
 | Item | What it is | Effort |
 |---|---|---|
-| **Slack as a presence** | Agent joins a Slack workspace, can be DM'd or `@mentioned`, posts proactively. OAuth install flow + slash commands. | L (was PR #89) |
-| **Linear / Jira as agent tools** | When the agent decides "this needs a ticket," it creates one. The customer doesn't choose what gets ticketed; the agent does, calibrated by the autonomy slider. | M each (PR #90, #91) |
-| **GitHub Code Scanning as agent surface** | SARIF forward (PR #72 in old roadmap). Agent's PR comments reference the GitHub Security tab where applicable. | S |
-| **Generic outbound webhook** | For the customer's custom internal tool (Datadog / PagerDuty / homegrown). Agent calls it when configured. | S |
-| **Public REST API + per-org keys** | For the customer's own automations. The agent can also be invoked over the API (programmatic agent access). | M |
-| **CI integration packs** | GitHub Actions composite action — published. The agent's PR-comment flow already exists; the action is for customers running scans in their own CI. | S |
+| **Slack as a presence** | Per-org Slack install. OAuth grant + bot token stored in that org's vault. The bot only posts that org's findings + only replies in that org's workspace. | L (was PR #89) |
+| **Linear / Jira as agent tools** | Per-org OAuth grant. When the agent decides "this needs a ticket," it creates one in the org's Linear / Jira project, calibrated by that org's autonomy slider. | M each (PR #90, #91) |
+| **GitHub Code Scanning as agent surface** | Per-org GitHub App permissions cover SARIF upload to the org's repos. Agent's PR comments reference the GitHub Security tab where applicable. | S |
+| **Generic outbound webhook** | For the org's custom internal tool (Datadog / PagerDuty / homegrown). Per-org webhook URL + signing secret. Agent calls it when configured. | S |
+| **Public REST API + per-org keys** | Per-org API keys (created in the org's settings). Every API call is org-scoped via the key. Programmatic agent invocation = "this org wants the agent to do X." | M |
+| **CI integration packs** | GitHub Actions composite action — published. Each org's CI run authenticates with that org's API key + posts findings to that org's partition. | S |
 
 The wrapper *exposes* these as configurable, but the customer's
 mental model is **"the agent uses these tools"**, not "I have
-integrations."
+integrations." The wrapper's responsibility: keep per-org tool
+credentials encrypted and never cross-tenant the bot identity (the
+Slack bot speaking in Acme's workspace cannot, by construction,
+post Beta's data).
 
 ### What's already shipped that carries over
 
@@ -736,18 +1018,25 @@ integrations."
 
 ---
 
-## 7. Phase E — Autonomy is a slider
+## 7. Phase E — Autonomy is a slider, per-org-scoped
 
 **Engine-team goal:** *"customers click 'Apply Fix' on a PR comment
 and get a fix PR opened automatically."*
 
 ### Reframe
 
+Each org has its own autonomy state — its own appetite for letting
+the agent act without asking. Acme can be in autopilot for
+dep-CVEs; beta can require confirmation on everything. The platform
+stores this per-org in `agent_autonomy` (column on
+`agent_memory_preferences`), reads it on every proposed action, and
+enforces it in the action handler.
+
 "Apply Fix" as a one-time button click is the basic case. The bigger
-unlock is **the autonomy slider** (§1.6). Once a customer trusts the
-agent on a category, they don't want to click "Apply Fix" 47 times —
-they want to say "you fix critical and high autonomously, ask me on
-medium."
+unlock is **the per-org autonomy slider** (§1.6). Once an org trusts
+the agent on a category, they don't want to click "Apply Fix" 47
+times — they want to say "you fix critical and high autonomously,
+ask me on medium." That decision is bound to that org's policy.
 
 ### What the conversation looks like
 
@@ -811,15 +1100,23 @@ primary.
 
 ---
 
-## 8. Phase F — Ambient awareness
+## 8. Phase F — Ambient awareness across each org's asset inventory
 
 **Engine-team goal:** *"customers see their security posture trend in
 real-time, alerted on regressions."*
 
 ### Reframe
 
-Trend dashboards are a *fallback*. The default is the agent **noticing
-and reaching out**.
+Trend dashboards are a *fallback*. The default is the platform
+**noticing changes against an org's asset inventory and reaching
+out to that org's people**.
+
+The continuous-scanning daemon runs across all registered assets,
+fleet-wide, with per-org concurrency caps so a noisy org can't
+starve others. Drift detection compares the latest scan's surface
+map against the org's stored baseline. When drift is detected, the
+alert lands in *that org's* Slack channel + chat — not the
+platform's. Each org sees only their own drift.
 
 ### What the conversation looks like
 
@@ -886,60 +1183,100 @@ for this — they didn't have to.
 
 ---
 
-## 9. Phase G — Each org gets its own agent
+## 9. Phase G — Scale: thousands of orgs, isolated analysis
 
 **Engine-team goal:** *"scale to 50+ person companies (Persona 2/3
 customers)."*
 
 ### Reframe
 
-Multi-tenancy isn't just RLS + RBAC. **Each org has its own agent,
-with its own memory.** The agent that talks to Acme Co. knows Acme's
-stack, team, decisions, customers, and audit history. The agent that
-talks to Beta Inc. is a different agent — same engine, different
-memory.
+This is the phase where the multi-tenant SaaS endpoint shape really
+shows up. The platform must support:
 
-### What the conversation looks like
+- **Thousands of concurrent orgs**, each with their own asset
+  inventory, scan history, findings ledger, compliance posture,
+  memory, autonomy state, team members, billing.
+- **Strict per-org isolation** at every layer — data (RLS),
+  credentials (per-org vault), execution (per-scan sandbox),
+  memory (RLS), audit log (per-org), evidence chain (per-org
+  signing key), realtime (filtered channels), Slack/Linear/Jira/
+  GitHub identity (per-org install).
+- **Scalable execution** — many scans running in parallel across
+  the worker fleet, fair-share across orgs, no noisy-neighbour
+  starvation, per-org cost-cap enforcement.
+- **Per-org enterprise primitives** — SSO, RBAC across roles
+  (`owner`, `admin`, `member`, `viewer`, `auditor`), per-team
+  sub-scopes, billing, contract-level retention.
+
+The user-visible promise: **each org's people experience a single
+dedicated security engineer with continuous memory of their
+company.** They never see the platform's multi-tenancy. The fact
+that 10,000 other companies share the same fleet of workers is an
+implementation detail the wrapper hides.
+
+### What the user notices (or doesn't)
 
 ```
-[ Acme's agent ]
-You (Acme founder)   " what was the SSRF we found last quarter? "
-Strix (Acme agent)   " March 14 — SSRF in /api/import/url, you
-                       fixed it by adding an SSRF allowlist. you
-                       marked the same issue 'known intentional' on
-                       the /api/health endpoint because it's behind
-                       VPC. "
+[ Acme's chat workspace, Alice ]
+Alice (Acme)   " what was the SSRF we found last quarter? "
+Strix          " March 14 — SSRF in /api/import/url on your
+                 acme-api repo, you fixed it by adding an SSRF
+                 allowlist. you marked the same issue 'known
+                 intentional' on the /api/health endpoint because
+                 it's behind VPC. "
 
-[ Beta's agent — same wrapper, different memory ]
-You (Beta founder)   " what was the SSRF we found last quarter? "
-Strix (Beta agent)   " I haven't been with you that long — only
-                       2 weeks. but in that time I haven't seen any
-                       SSRF findings. want me to scan for them
-                       specifically? "
+[ Beta's chat workspace, Bob, on the same wrapper deployment ]
+Bob (Beta)     " what was the SSRF we found last quarter? "
+Strix          " I haven't been with your workspace that long —
+                 only 2 weeks. but in that time I haven't seen any
+                 SSRF findings against your registered assets. want
+                 me to scan for them specifically? "
 ```
 
-The customer never knows the agent is multi-tenant. Each org
-experiences a single, dedicated security engineer with continuous
-memory of their company.
+Two different orgs, two different memories, two different asset
+inventories, two different chat threads, two different signing
+keys — one platform.
 
-### What the wrapper builds for this
+### Per-org isolation: where it lives in the stack
+
+| Layer | Per-org primitive |
+|---|---|
+| Database | RLS policies on every table keyed by `org_id = auth.jwt().org_id` |
+| Storage (`scan-artifacts`, `evidence`) | Object path includes `org_id/`; bucket policies enforce `auth.jwt().org_id` prefix |
+| Vault | `org_secrets` with per-org encryption key derived from the platform KMS |
+| Worker fleet | Per-org concurrency cap; fair-share queue; cost-cap-per-org enforced before scan-claim |
+| Sandbox containers | One per scan; ephemeral; only that scan's creds materialised; destroyed at scan-end |
+| Memory | `agent_memory_*` RLS-scoped |
+| Audit log | `audit_log` rows keyed by `org_id`; auditor share-links filter to one org |
+| Evidence signing | Per-org signing key (KMS-derived) used for `run.signature.json` HMAC chain |
+| Realtime | Supabase realtime channels filtered to `org_id` |
+| Slack / GitHub / Linear / Jira | Per-org OAuth grant + install; bot identity bound to one org per workspace |
+
+### What the wrapper builds for Phase G
 
 | Item | What it is | Effort |
 |---|---|---|
-| **Per-org agent memory** | New schema: `agent_memory_facts`, `agent_memory_episodes`, `agent_memory_preferences`. Org-scoped via RLS. | M |
-| **Memory-aware chat handler** | Every agent message reads from + writes to memory. Powered by retrieval (vector + structured) over the org's history. | L |
-| **Per-team sub-agents** | For Persona 2 (50-500 person company): each team can have its own sub-agent that reports to the org agent. Inherits org-level memory; adds team-specific context. | M (post G.1 team layer) |
-| **Auditor role** | Read-only "agent shadow" — auditor sees what the agent has seen + done, can't change anything. | S |
-| **WorkOS SSO** | Same as the previous roadmap; foundational for enterprise. | L |
-| **Stripe billing** | Same as the previous roadmap. Tier flags gate which agent capabilities are enabled (e.g. autopilot needs Pro+; living trust page needs Team+). | L |
+| **Per-org agent memory** | Tables: `agent_memory_facts`, `agent_memory_episodes`, `agent_memory_preferences`. RLS-scoped by `org_id`. (Schema sketch below.) | M |
+| **Memory-aware chat handler** | Every chat-agent turn reads + writes the active org's memory only. Retrieval layer (vector index over the org's episodes; structured query for facts). | L |
+| **Per-team sub-scopes** | For Persona 2/3 orgs: teams as sub-scopes under `org_id`. Findings tagged by team; team-level autonomy state inherits from org defaults. | M |
+| **RBAC** | Five roles: owner, admin, member, viewer, auditor. Enforced at every API endpoint + UI route. Audit log captures `actor_role`. | M |
+| **Per-org fair-share worker scheduler** | Queue claim respects per-org concurrency cap (default 4 simultaneous scans); no org can starve the fleet. Cost-cap-per-org enforced before scan-claim. | M |
+| **Per-org signing keys** | Each org's `run.signature.json` HMAC chain uses an org-specific key (KMS-derived). Auditor verifies the chain belongs to that org. | S |
+| **WorkOS SSO** | Per-org SSO config (Google Workspace / Okta / OneLogin / Microsoft). | L |
+| **Stripe billing** | Per-org subscription. Tier flags gate which platform features are enabled (autopilot needs Pro+; living trust page needs Team+; per-team sub-scopes need Enterprise). Cost-cap-per-org defaults from tier. | L |
+| **Per-org retention** | Configurable retention windows for `findings`, `scan_events`, `agent_memory_episodes`. Enterprise tier can set per-asset retention. | M |
+| **Org-level audit-log export** | Auditor / compliance lead can export the org's `audit_log` for a date range. Signed manifest. | S |
 
-### Why agent memory matters
+### Why per-org memory matters
 
-This is the moat. Acme's agent knows that Acme uses Cloudflare WAF
-and dismisses certain header findings because of it. The next time
-the same finding class lands, the agent doesn't re-flag — but writes
-a chat note. **No competing tool has this**, because no competing
-tool talks to the customer continuously.
+This is the moat. Acme's slice of the platform knows that Acme uses
+Cloudflare WAF and dismisses certain header findings because of it.
+The next time the same finding class lands against Acme's assets,
+the agent doesn't re-flag — but writes a chat note. The same scan
+against Beta's assets *does* flag, because Beta has no such
+suppression. **No competing tool can do this**, because no competing
+tool combines continuous scanning of an org's asset inventory with
+continuous conversation with that org's people.
 
 Memory schema (sketch):
 
@@ -983,17 +1320,24 @@ real engineer rather than a stateless tool.
 
 ---
 
-## 10. Phase H — Trust pages as agent portfolios
+## 10. Phase H — Trust pages as the org's outward-facing portfolio
 
 **Engine-team goal:** *"become the security-credential-display layer
 customers use to **sell** to their customers."*
 
 ### Reframe
 
-The trust page isn't a marketing brochure. It's the **agent's
-portfolio of work** for that customer. The agent maintains it. The
-customer's prospects, auditors, and partners visit it. It updates
-in real time.
+Each org gets a public URL — their trust page — backed by **their
+org's evidence chain**. The agent maintains it. The org's
+prospects, auditors, and partners visit it. It updates in real time
+from that org's continuous scanning.
+
+The page is one of the org's living-doc surfaces (§2.4). The
+content is rendered from that org's `compliance_evidence.json`
+aggregated across that org's scans + that org's finding stats +
+narrative entries the agent appended after each meaningful event.
+The signing chain proves the evidence belongs to that org and
+hasn't been edited post-hoc.
 
 ### What it looks like
 
@@ -1130,21 +1474,27 @@ PRs across phases A-H, structured as "ship the GitHub App + dashboard
 
 ### What's now urgent
 
-1. **The conversational shell**: `<ChatThread>` + `<AgentMessage>` +
-   the SSE stream from the worker. Without this, none of the
-   AI-native interactions have a home.
+0. **Multi-tenant scale plumbing (§13.10) + asset inventory table
+   (§13.0)**. The SaaS endpoint cannot safely take external traffic
+   without `auth.jwt_org_id()`, per-org signing keys, fair-share
+   scheduler, realtime-filter audit, and a first-class `assets`
+   registry. This sits under everything else.
 
-2. **Agent memory**: `agent_memory_facts` + `_episodes` +
-   `_preferences` schema. Without memory, the agent feels stateless
-   and the product is just a chat-skinned dashboard.
+1. **The conversational shell**: `<ChatThread>` + `<AgentMessage>` +
+   the SSE stream from the worker, org-scoped from day one. Without
+   this, none of the AI-native interactions have a home.
+
+2. **Per-org agent memory**: `agent_memory_facts` + `_episodes` +
+   `_preferences` schema, RLS-scoped. Without memory, the agent feels
+   stateless and the product is just a chat-skinned dashboard.
 
 3. **Generative UI artefact schema**: typed blocks the agent emits.
    Without this, the agent is constrained to plain text + canned
    components.
 
-4. **The autonomy slider**: per-category trust state. Without this,
-   auto-fix is binary and the customer either trusts everything or
-   trusts nothing.
+4. **The per-org autonomy slider**: per-category trust state stored
+   per org. Without this, auto-fix is binary and the org either
+   trusts everything or trusts nothing.
 
 ### What gets de-prioritised
 
@@ -1172,51 +1522,100 @@ PRs across phases A-H, structured as "ship the GitHub App + dashboard
 
 ### Revised PR sequencing
 
-Top-priority shift:
+Top-priority shift — the multi-tenant substrate first, then the
+AI-native interaction layer, then the surfaces:
 
 | New seq | Phase | Why first |
 |---|---|---|
-| 1 | **Conversational shell** (new) | Without it, every other phase regresses to the dashboard mental model. |
-| 2 | **Agent memory schema** (new) | Without it, the agent feels stateless. |
-| 3 | **Phase A — onboarding via conversation** | Replaces the form-based wizard. Required for first-touch. |
-| 4 | **`finding_chains.json` ingestion + chat narrative** | The agent's daily digest needs chain-grouped findings. |
-| 5 | **Phase B — triage via NL** | Replaces the dashboard inbox as primary. |
-| 6 | **`compliance_evidence.json` ingestion + Living SAQ doc** | Compliance becomes a conversation + a living doc. |
-| 7 | **Phase D.1 — Slack as agent presence** | Agent's second home. |
-| 8 | **Phase E — autonomy slider + auto-fix flow** | Trust calibration unlocks customer scaling. |
-| 9 | **Phase F — ambient awareness daemon** | Agent always-on. |
-| 10 | **Phase G — multi-tenant agent + WorkOS SSO + Stripe** | Enterprise revenue. |
-| 11 | **Phase H — trust pages as agent portfolios** | Sales tool. |
+| 0 | **Multi-tenant scale plumbing (§13.10)** | The SaaS endpoint can't safely accept external orgs without `auth.jwt_org_id()`, per-org signing keys, fair-share scheduler, realtime-filter audit, org-deletion contract. Most items are S individually. |
+| 1 | **Asset inventory as first-class table (§13.0)** | Every other phase reads `assets`. Today's `scan_targets` is per-scan; the platform needs a registry. |
+| 2 | **Conversational shell** (new) | Without it, every other phase regresses to the dashboard mental model. Org-scoped from day one. |
+| 3 | **Per-org agent memory schema** (new) | Without it, the agent feels stateless. Org-scoped via RLS. |
+| 4 | **Phase A — org onboarding + asset registration + first analysis** | Replaces the form-based wizard. Required for first-touch. |
+| 5 | **`finding_chains.json` ingestion + chat narrative** | The agent's daily digest needs chain-grouped findings, per org. |
+| 6 | **Phase B — triage via NL** | Replaces the dashboard inbox as primary, per org. |
+| 7 | **`compliance_evidence.json` ingestion + Living SAQ doc** | Compliance becomes a conversation + a living doc, per org. |
+| 8 | **Phase D.1 — per-org Slack install** | Agent's second home, per org. |
+| 9 | **Phase E — autonomy slider + auto-fix flow** | Per-org trust calibration unlocks customer scaling. |
+| 10 | **Phase F — continuous scanning fleet + drift detection** | Asset-inventory-driven always-on. |
+| 11 | **Phase G — RBAC + WorkOS SSO + Stripe + per-team sub-scopes** | Enterprise revenue. |
+| 12 | **Phase H — per-org trust pages** | Sales tool. |
 
-The full original 45-PR set still exists; this reordering puts
-AI-native primitives first, then layers traditional surface area on
-top.
+The full original 45-PR set still exists; this reordering puts the
+multi-tenant substrate underneath, the AI-native primitives in the
+middle, and the surfaces on top.
 
 ---
 
 ## 13. Implementation specifics
 
-### 13.1 The conversational shell (the foundational primitive)
+### 13.0 Asset inventory as a first-class table
 
-**Migration 040 (replaces the old GitHub App migration as PR #1):**
+The platform's center of gravity is the per-org asset inventory.
+Today's `scan_targets` table is per-scan; what's needed is a
+**registry** (the org's continuously-monitored inventory) that
+scans run *against*.
+
+**Migration 040 — `public.assets`:**
 
 ```sql
--- chat threads (conversation context)
+create table public.assets (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references public.organizations(id) on delete cascade,
+  kind          text not null check (kind in (
+                  'repository','web_application','domain','ip_range',
+                  'cloud_account','container_image','package_index'
+                )),
+  identifier    text not null,                 -- repo full name / URL / DNS root / CIDR / cloud account id
+  display_name  text,
+  owning_team   uuid references public.teams(id) on delete set null,
+  schedule      jsonb not null default '{}',   -- {kind:'daily',time:'03:00Z'} | {kind:'on_push'} | {kind:'manual'}
+  metadata      jsonb not null default '{}',   -- framework hints, auth recipes, allowlists, severity overrides
+  posture       jsonb,                         -- latest summary {critical,high,med,low,coverage_percent,last_scan_at}
+  created_by    uuid references auth.users(id),
+  created_at    timestamptz not null default now(),
+  archived_at   timestamptz,
+  unique (org_id, kind, identifier) where archived_at is null
+);
+
+alter table public.assets enable row level security;
+create policy "assets are org-scoped" on public.assets
+  for all using (org_id = auth.jwt_org_id());
+
+create index assets_org_kind on public.assets (org_id, kind) where archived_at is null;
+```
+
+Every scan references an asset; every finding has both `org_id` and
+`asset_id`. The chat agent's daily digest reads `assets` joined to
+`findings`. The console's primary view (for Persona 2) is the asset
+inventory.
+
+### 13.1 The conversational shell (foundational primitive)
+
+**Migration 041 — chat threads + messages, org-scoped:**
+
+```sql
+-- chat threads (conversation context, per-org)
 create table public.agent_threads (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references public.organizations(id) on delete cascade,
   user_id     uuid references auth.users(id) on delete set null,
   title       text,                            -- agent-generated; mutable
-  context     jsonb,                           -- 'finding_id', 'scan_id', etc.
+  context     jsonb,                           -- 'finding_id', 'scan_id', 'asset_id'
   created_at  timestamptz not null default now(),
   last_message_at timestamptz not null default now(),
   archived    boolean not null default false
 );
 
+alter table public.agent_threads enable row level security;
+create policy "threads are org-scoped" on public.agent_threads
+  for all using (org_id = auth.jwt_org_id());
+
 -- chat messages (typed blocks)
 create table public.agent_messages (
   id          uuid primary key default gen_random_uuid(),
   thread_id   uuid not null references public.agent_threads(id) on delete cascade,
+  org_id      uuid not null references public.organizations(id) on delete cascade,
   role        text not null check (role in ('user','agent','system')),
   blocks      jsonb not null default '[]',     -- typed AgentBlock[]
   citations   jsonb not null default '[]',
@@ -1227,19 +1626,34 @@ create table public.agent_messages (
   created_at  timestamptz not null default now()
 );
 
--- realtime: subscribe by thread_id
+alter table public.agent_messages enable row level security;
+create policy "messages are org-scoped" on public.agent_messages
+  for all using (org_id = auth.jwt_org_id());
+
+-- realtime: subscribe by org_id, filtered server-side via RLS
 alter publication supabase_realtime add table public.agent_messages;
 ```
 
-**Worker module:** new `agent_orchestrator.py` — owns the agent's
-control loop. Reads user messages; calls the engine for finding
-context; calls inference for natural-language responses; writes
-agent messages back. Streaming via SSE.
+The `org_id` is duplicated on `agent_messages` (denormalised from
+the thread) so realtime filters can run without join — every
+WebSocket subscription resolves on `org_id = auth.jwt_org_id()`,
+guaranteeing no cross-tenant leakage in the realtime layer.
 
-**Frontend:** new `<ChatThread>` component on `/chat` route (and
-embedded as a panel on every other page). Subscribes to
-`agent_messages` realtime channel. Renders blocks per the
-generative-UI schema.
+**Worker module:** new `agent_orchestrator.py` — owns the chat
+agent's control loop. Resolves the active org from the user's JWT,
+then operates strictly within that org's partition: reads user
+messages, queries that org's findings + asset inventory + memory,
+calls inference for natural-language responses, writes agent
+messages back. Streaming via SSE. **The orchestrator never holds a
+service-role connection across orgs in a single request** — every
+DB call uses the user's JWT so RLS is the second line of defence.
+
+**Frontend:** new `<ChatThread>` component on `/o/<org-slug>/chat`
+route (and embedded as a panel on every other org-scoped page).
+Subscribes to the org-filtered `agent_messages` realtime channel.
+Renders blocks per the generative-UI schema. `<WorkspaceSwitcher>`
+remounts the chat surface when the active org changes — no shared
+state across orgs in the client either.
 
 **Effort:** L (~10 days for the foundation; iterations after).
 
@@ -1331,14 +1745,38 @@ because of the cross-surface conversation threading).
 
 Backend tool that parses customer messages like "dismiss the lows"
 or "fix this" or "snooze this for 30 days" into structured triage
-actions. The agent calls this tool via its existing tool-calling
-loop.
+actions, scoped to the active org. The agent calls this tool via
+its existing tool-calling loop.
 
 Implemented as a small classifier + slot-filler over the recent chat
 context (the agent already knows what "the lows" refers to from the
-preceding message).
+preceding message). The resulting writes go through the org's RLS
+context — a user cannot dismiss findings in any org other than the
+one in their active JWT.
 
 **Effort:** M.
+
+### 13.10 Multi-tenant scale plumbing
+
+Things the platform needs to deliver Phase G:
+
+| Item | What it is | Effort |
+|---|---|---|
+| **`auth.jwt_org_id()` helper** | Postgres function reading `org_id` from the JWT claim; used by every RLS policy. Plus a `set_active_org(org_uuid)` RPC that lets a multi-org user switch context — emits an `audit_log` row on every switch. | S |
+| **Per-org signing key in KMS** | KMS-derived per-org HMAC key for `run.signature.json`. On org create: derive + cache; on scan-end: sign artefacts. Key rotation per org without losing prior chain. | M |
+| **Fair-share worker scheduler** | Replace today's FIFO queue with weighted-fair-queueing keyed by `org_id`. Default per-org concurrency cap = 4. Per-org cost-cap-per-day enforced at claim time. | M |
+| **Per-org rate-limit on chat agent inference** | LLM-call budget per org per day. Defaults from billing tier. Hard cap with grace + soft cap with chat warning. | S |
+| **Realtime channel filter audit** | Sweep every Supabase realtime publication to confirm RLS-filtered subscription works. Test: subscribe as user-from-orgA; verify zero rows from orgB land in the channel. | S |
+| **Per-org storage path enforcement** | `scan-artifacts` and `evidence` buckets accept writes only under `<org_id>/<scan_id>/...`. Bucket policy enforces `auth.jwt_org_id()` prefix on every read + write. | S |
+| **Sandbox container teardown discipline** | Every scan container destroyed on scan-end (success, failure, cancel, budget-exceeded). Sweep job to reap orphans. Verify per-scan: no shared volume across scans. | S |
+| **Org-deletion contract** | When an org is deleted: cancel running scans, delete all rows across all per-org tables in a single transaction (RLS cascade), revoke per-org secrets in vault, revoke OAuth tokens, mark per-org signing key for crypto-shredding. Right-to-be-forgotten compliance. | M |
+| **Per-org audit-log retention + export** | Retention windows + signed exports. (Already partially shipped — extend.) | S |
+
+These items are **non-negotiable for opening the SaaS endpoint to
+external customers**. They sit underneath every other phase: A-H
+above all assume this plumbing is solid.
+
+**Effort:** M cumulatively; most items are S individually.
 
 ---
 
@@ -1406,5 +1844,8 @@ disabled).
 | [strix `AISecurityEngineer.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineer.md) | Engine roadmap |
 | [strix `AISecurityEngineerUX.md`](https://github.com/ClatTribe/strix/blob/main/AISecurityEngineerUX.md) | Engine team's wrapper-UX roadmap (the spec this doc proposes implementation for) |
 
-Last updated: 2026-05-06 (rewritten for AI-native interaction model;
-supersedes the dashboard-first first draft).
+Last updated: 2026-05-11 (reframed around the multi-tenant SaaS
+endpoint shape — many orgs registering assets and getting analysed
+in scalable, per-org-isolated sandboxes, with AI-native surfaces
+layered on top; supersedes the AI-native-only second draft that
+under-emphasised the multi-tenant substrate).
