@@ -228,3 +228,150 @@ def _headline(
     if error_message and "budget" in error_message.lower():
         return ("💸", "Scan stopped — budget exceeded")
     return ("❌", f"Scan failed — {error_message or 'no structured error'}")
+
+
+# ============================================================
+# Phase D v1 — chat-bridge: agent_messages → Slack
+# ============================================================
+#
+# When an agent_messages row lands with role=agent AND parent_id IS NULL
+# AND the org has slack_bridge_enabled=true (migration 048), the DB
+# triggers pg_notify('agent_message_for_slack', message_id). The
+# listener calls this function.
+#
+# We extract the first text-or-finding-ref block, compose a minimal
+# Slack payload (text + optional context line), and POST to the org's
+# webhook. Designed for high throughput — keep block parsing simple.
+
+
+async def forward_agent_message_to_slack(
+    sb: "WorkerSupabase",
+    message_id: str,
+) -> None:
+    """Forward a single agent_messages row to the org's Slack webhook.
+
+    Best-effort everywhere — any failure (message gone, no webhook,
+    Slack 5xx) is logged + swallowed. The canonical message lives in
+    agent_messages; Slack is just a delivery channel.
+    """
+    # Load the message + thread → org_id.
+    try:
+        msg_row = (
+            sb.client.table("agent_messages")
+            .select("id, thread_id, role, blocks, citations, org_id, created_at")
+            .eq("id", message_id)
+            .single()
+            .execute()
+            .data
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("slack-bridge: failed to load message %s", message_id)
+        return
+
+    if not msg_row:
+        logger.debug("slack-bridge: message %s vanished", message_id)
+        return
+
+    org_id = msg_row.get("org_id")
+    if not org_id:
+        logger.debug("slack-bridge: message %s has no org_id", message_id)
+        return
+
+    webhook = sb.decrypt_org_slack_webhook_by_org(org_id)
+    if not webhook:
+        # Either the org has slack_bridge_enabled but no webhook
+        # configured, or the webhook decrypt returned null. Either way
+        # — silent skip. The trigger filter rules out unsubscribed orgs
+        # before we get here, but defensively check.
+        logger.debug("slack-bridge: org %s has slack_bridge_enabled but no decryptable webhook", org_id)
+        return
+
+    payload = _compose_chat_bridge_payload(msg_row)
+    if payload is None:
+        # Message has no text-renderable content (e.g. only opaque
+        # block types). Nothing useful to forward.
+        return
+
+    try:
+        with httpx.Client(timeout=_HTTP_TIMEOUT_SEC) as client:
+            resp = client.post(webhook, json=payload)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "slack-bridge: message %s — Slack returned %d: %s",
+                    message_id, resp.status_code, resp.text[:200],
+                )
+    except Exception:  # noqa: BLE001
+        logger.exception("slack-bridge: POST failed for message %s", message_id)
+
+
+def _compose_chat_bridge_payload(msg_row: dict) -> dict | None:
+    """Render the first interesting block of an agent_message as a
+    Slack-friendly payload. None if there's nothing renderable.
+
+    Strategy:
+      - First 'text' block becomes the Slack `text` field.
+      - finding_ref / scan_ref blocks (and a few others) append a small
+        context line.
+      - The fallback `text` is always set so notification previews work.
+    """
+    blocks = msg_row.get("blocks") or []
+    if not isinstance(blocks, list) or not blocks:
+        return None
+
+    headline_md: str | None = None
+    refs: list[str] = []
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text" and headline_md is None:
+            md = block.get("markdown")
+            if isinstance(md, str) and md.strip():
+                headline_md = md.strip()
+        elif btype in ("finding_ref", "scan_ref", "asset_ref", "pr_ref"):
+            label = block.get("title") or block.get("finding_id") or block.get("scan_id") or btype
+            refs.append(f"_{btype}_: {label}")
+
+    if not headline_md and not refs:
+        return None
+
+    text = headline_md or ""
+    if refs:
+        text += ("\n\n" if text else "") + "\n".join(refs[:3])
+
+    # Use Slack blocks for richer rendering; fall back to plain text
+    # in notification previews.
+    return {
+        "text": _strip_markdown_for_fallback(headline_md or refs[0]),
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": text,
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": ":sparkles: Strix",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def _strip_markdown_for_fallback(s: str) -> str:
+    """Strip the most disruptive markdown for the Slack notification
+    preview (which doesn't render markdown). Keep it cheap — Slack's
+    own renderer handles the message body."""
+    out = s
+    out = out.replace("**", "")
+    out = out.replace("__", "")
+    out = out.replace("`", "")
+    out = " ".join(out.split())
+    return out[:200] + ("…" if len(out) > 200 else "")

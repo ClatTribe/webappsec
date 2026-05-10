@@ -22,6 +22,7 @@ import psycopg
 
 from .config import WorkerConfig
 from .discovery import discover_subdomains_for_target
+from .notifier import forward_agent_message_to_slack
 from .runner import cancel_running_scan, run_scan
 from .supabase_client import WorkerSupabase
 
@@ -58,9 +59,11 @@ class ScanQueueListener:
                     await cur.execute("LISTEN scan_queued")
                     await cur.execute("LISTEN scan_cancel")
                     await cur.execute("LISTEN target_discovery_requested")
+                    await cur.execute("LISTEN agent_message_for_slack")
                     logger.info(
                         "listening for scan_queued + scan_cancel + "
-                        "target_discovery_requested notifications"
+                        "target_discovery_requested + agent_message_for_slack "
+                        "notifications"
                     )
 
                     while not self._stopping.is_set():
@@ -95,6 +98,11 @@ class ScanQueueListener:
                     "scan %s cancel notification ignored (not owned by this worker)",
                     payload,
                 )
+        elif channel == "agent_message_for_slack":
+            # Forward an agent_messages row to the org's Slack webhook.
+            # Cheap I/O bound work; bypass the scan semaphore. A delivery
+            # failure is logged but never fails the worker.
+            asyncio.create_task(self._dispatch_slack_bridge(payload))
         elif channel == "target_discovery_requested":
             # Discovery jobs are cheap (one HTTP call, parse, write). They
             # share the worker process but bypass the scan-concurrency
@@ -118,6 +126,16 @@ class ScanQueueListener:
             # Discovery is best-effort; a failure here is logged but
             # doesn't surface to the user (the target is still scannable).
             logger.exception("discovery failed for target %s", target_id)
+
+    async def _dispatch_slack_bridge(self, message_id: str) -> None:
+        try:
+            await forward_agent_message_to_slack(self.sb, message_id)
+        except Exception:  # noqa: BLE001
+            # Slack forwarding is best-effort — agent messages live
+            # canonically in agent_messages; a Slack 5xx is not an
+            # incident. A failure here is logged and the worker moves
+            # on, same pattern as scan-completion notifier.
+            logger.exception("slack bridge failed for message %s", message_id)
 
     async def _sweep_pending(self) -> None:
         """At startup, look for queued scans that may have been notified while we were down."""
