@@ -205,8 +205,54 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'thread not found' }, { status: 404 });
   }
 
-  const intent = classify(text);
   const admin = createAdminClient();
+
+  // Per-org rate limit (Phase G v1, migration 051). Caps the per-org
+  // chat-handler call rate so one runaway client can't drain shared
+  // inference budget for the rest of the fleet. The free tier limit
+  // is conservative; future tiers + a per-tier multiplier land with
+  // billing (Phase G full).
+  const RATE_LIMIT_PER_MINUTE = 60;
+  const { data: rateData } = await admin.rpc('enforce_chat_rate_limit', {
+    p_org_id: thread.org_id,
+    p_limit_per_min: RATE_LIMIT_PER_MINUTE,
+  } as never);
+  const rateRow = (rateData ?? [])[0] as
+    | {
+        allowed: boolean;
+        current_count: number;
+        limit_value: number;
+        window_started: string;
+      }
+    | undefined;
+  if (rateRow && !rateRow.allowed) {
+    // Post a fallback chat note so the user sees what happened.
+    // Retry-After hints at the next window boundary.
+    const windowEnd = new Date(rateRow.window_started).getTime() + 60_000;
+    const retryAfter = Math.max(1, Math.ceil((windowEnd - Date.now()) / 1000));
+    await admin.from('agent_messages').insert({
+      thread_id: thread.id,
+      role: 'system',
+      blocks: [
+        {
+          type: 'text',
+          markdown: `⏳ Slow down — your org has hit the chat rate limit (${rateRow.limit_value}/min). Wait about **${retryAfter}s** and try again.`,
+        },
+      ],
+      citations: [],
+    } as never);
+    return NextResponse.json(
+      {
+        error: 'rate_limited',
+        limit: rateRow.limit_value,
+        current: rateRow.current_count,
+        retry_after_seconds: retryAfter,
+      },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+    );
+  }
+
+  const intent = classify(text);
 
   if (intent.kind === 'dismiss_by_severity') {
     return await handleDismissBySeverity(
