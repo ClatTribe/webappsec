@@ -22,6 +22,24 @@ export type TargetType = 'local_code' | 'repository' | 'web_application' | 'doma
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
 export type TargetStatus = 'active' | 'archived';
 
+export interface TargetSchedule {
+  kind: 'manual' | 'daily' | 'weekly' | 'monthly' | 'on_push' | 'cron';
+  time?: string;            // ISO time-of-day, e.g. '03:00Z' — for daily/weekly/monthly
+  expr?: string;            // cron expression — for kind='cron'
+  on_branches?: string[];   // for kind='on_push'
+}
+
+export interface TargetPosture {
+  critical?: number;
+  high?: number;
+  medium?: number;
+  low?: number;
+  info?: number;
+  coverage_percent?: number;
+  last_scan_status?: ScanStatus;
+  last_scan_at?: string;
+}
+
 export interface Target {
   id: string;
   org_id: string;
@@ -37,6 +55,11 @@ export interface Target {
   status: TargetStatus;
   auto_discover: boolean;
   config: Record<string, unknown>;
+  // Added in migration 040 (target registry extension).
+  // Optional/null on rows written before the migration.
+  schedule: TargetSchedule | null;
+  posture: TargetPosture | null;
+  archived_at: string | null;
 }
 
 export interface Profile {
