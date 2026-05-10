@@ -84,8 +84,24 @@ export function ChatPanel({ threadId, orgId, userId, initialMessages }: ChatPane
       // Surface inline; restore the input so the user can retry.
       setInput(text);
       console.error('agent_messages insert failed', error);
+      setPosting(false);
+      return;
     }
     setPosting(false);
+
+    // Fire-and-forget — process the user message via the NL triage handler.
+    // If an intent is recognised, the agent posts a confirmation message
+    // (which arrives via realtime). If not, the agent posts a polite
+    // fallback. Either way, no client-side branching needed.
+    void fetch('/api/chat/process-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_id: threadId, text }),
+    }).catch((err) => {
+      // Best-effort. The user message is already in the thread; a missed
+      // intent classification is recoverable (user can use buttons).
+      console.error('process-message failed', err);
+    });
   }
 
   return (
