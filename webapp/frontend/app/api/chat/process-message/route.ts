@@ -55,6 +55,16 @@ interface ComplianceReadinessIntent {
   framework: string;          // canonical: 'soc2_type_2' | 'iso_27001' | …
   framework_label: string;    // user-facing: 'SOC 2 Type 2' | 'ISO 27001' | …
 }
+interface SetAutonomyIntent {
+  kind: 'set_autonomy';
+  /** What the user wants the agent to do without asking. */
+  mode: 'ask_before_act' | 'autopilot';
+  /** When set, restrict autopilot to this severity and above. */
+  auto_fix_severity?: Severity;
+}
+interface ShowAutonomyIntent {
+  kind: 'show_autonomy';
+}
 interface UnknownIntent {
   kind: 'unknown';
 }
@@ -62,6 +72,8 @@ type Intent =
   | DismissIntent
   | ShowOpenIntent
   | ComplianceReadinessIntent
+  | SetAutonomyIntent
+  | ShowAutonomyIntent
   | UnknownIntent;
 
 // Framework name aliases — what users type → (canonical_id, display_label).
@@ -117,6 +129,47 @@ function classify(text: string): Intent {
           framework_label: fw.label,
         };
       }
+    }
+  }
+
+  // Show autonomy / "what are you allowed to do" / "what's your autonomy"
+  if (
+    /\b(what.?s|show|tell\s+me)\b.*\bautonomy\b/.test(t) ||
+    /\bwhat.?\s*can\s+you\s+do\b/.test(t) ||
+    /\bwhat\s+are\s+you\s+allowed\s+to\s+do\b/.test(t) ||
+    /\bautonomy\s+(level|state|settings)\b/.test(t)
+  ) {
+    return { kind: 'show_autonomy' };
+  }
+
+  // "ask me before everything" / "ask me before acting" / "co-pilot mode"
+  // / "stop auto-fixing"
+  if (
+    /\bask\s+(me\s+)?(before\s+)?(everything|every\s+action|any\s+action|acting|act)\b/.test(t) ||
+    /\bco[-\s]?pilot\b/.test(t) ||
+    /\b(stop|disable|turn\s+off)\s+(auto[-\s]?fix(ing)?|autopilot)\b/.test(t)
+  ) {
+    return { kind: 'set_autonomy', mode: 'ask_before_act' };
+  }
+
+  // "auto-fix critical[s]" / "auto-fix highs" / "autopilot for criticals" /
+  // "go autopilot on dep-CVEs above high" / "fix critical and high autonomously"
+  const autoFixSev = t.match(
+    /\b(auto[-\s]?fix|autopilot|auto[-\s]?merge|auto[-\s]?patch|fix\s+(critical|high|medium|low)\s+autonomously)\b/,
+  );
+  if (autoFixSev) {
+    // Pull the severity from the surrounding context.
+    const sevHit = t.match(/\b(critical|high|medium|low)s?\b/);
+    if (sevHit) {
+      return {
+        kind: 'set_autonomy',
+        mode: 'autopilot',
+        auto_fix_severity: sevHit[1] as Severity,
+      };
+    }
+    // "autopilot mode" without a severity → full autopilot.
+    if (/\b(autopilot|auto[-\s]?fix\s+(all|everything))\b/.test(t)) {
+      return { kind: 'set_autonomy', mode: 'autopilot' };
     }
   }
 
@@ -180,6 +233,14 @@ export async function POST(req: Request) {
     );
   }
 
+  if (intent.kind === 'show_autonomy') {
+    return await handleShowAutonomy(supabase, admin, thread);
+  }
+
+  if (intent.kind === 'set_autonomy') {
+    return await handleSetAutonomy(supabase, admin, user.id, thread, intent);
+  }
+
   // Fallback — polite acknowledgement.
   await admin.from('agent_messages').insert({
     thread_id: thread.id,
@@ -187,7 +248,7 @@ export async function POST(req: Request) {
     blocks: [
       {
         type: 'text',
-        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n- **"how ready am I for SOC 2?"** (or ISO 27001 / PCI DSS / HIPAA / GDPR) — compliance posture summary.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
+        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n- **"how ready am I for SOC 2?"** (or ISO 27001 / PCI DSS / HIPAA / GDPR) — compliance posture summary.\n- **"what's your autonomy"** / **"auto-fix critical"** / **"ask me before everything"** — view or adjust my autonomy.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
       },
     ],
     citations: [],
@@ -487,5 +548,190 @@ async function handleComplianceReadiness(
     failing: summary.failing,
     warning: summary.warning,
     untested: summary.untested,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase E v1 — autonomy NL handlers
+// ---------------------------------------------------------------------------
+
+interface AutonomyPrefsShape {
+  default?: string;                 // 'ask_before_act' | 'autopilot'
+  auto_fix_severity?: Severity | null;
+  auto_dismiss?: boolean;
+  slack_notify?: string;
+  [k: string]: unknown;
+}
+
+async function loadAutonomy(
+  supabase: ReturnType<typeof createClient>,
+  orgId: string,
+): Promise<AutonomyPrefsShape | null> {
+  const { data } = await supabase
+    .from('agent_memory_preferences')
+    .select('autonomy')
+    .eq('org_id', orgId)
+    .single();
+  const row = data as unknown as { autonomy: AutonomyPrefsShape } | null;
+  return row?.autonomy ?? null;
+}
+
+async function handleShowAutonomy(
+  supabase: ReturnType<typeof createClient>,
+  admin: ReturnType<typeof createAdminClient>,
+  thread: { id: string; org_id: string },
+) {
+  const autonomy = await loadAutonomy(supabase, thread.org_id);
+  if (!autonomy) {
+    await admin.from('agent_messages').insert({
+      thread_id: thread.id,
+      role: 'agent',
+      blocks: [
+        {
+          type: 'text',
+          markdown:
+            `I don't have autonomy preferences on file yet. New orgs default to **ask_before_act** — I won't take state-changing actions without confirming.\n\nYou can change this by telling me, e.g.: "auto-fix critical" or "ask me before everything".`,
+        },
+      ],
+      citations: [],
+    } as never);
+    return NextResponse.json({ ok: true, intent: 'show_autonomy', preference: null });
+  }
+
+  const mode = autonomy.default ?? 'ask_before_act';
+  const sev = autonomy.auto_fix_severity;
+  const autoDismiss = autonomy.auto_dismiss ? 'on' : 'off';
+  const slackNotify = autonomy.slack_notify ?? 'always';
+
+  const modeLine =
+    mode === 'autopilot' && sev
+      ? `🚀 **Autopilot** for **${sev}** and above`
+      : mode === 'autopilot'
+      ? `🚀 **Autopilot** (all severities)`
+      : `🙋 **Ask before acting** — I'll confirm before any state-changing action`;
+
+  await admin.from('agent_messages').insert({
+    thread_id: thread.id,
+    role: 'agent',
+    blocks: [
+      {
+        type: 'text',
+        markdown:
+          `Here's my current autonomy for your org:\n\n${modeLine}\n\n- **Auto-dismiss (KNN false-positive learner):** ${autoDismiss}\n- **Slack notify on critical events:** ${slackNotify}\n\nTo change: "auto-fix critical" · "ask me before everything" · "autopilot mode".`,
+      },
+    ],
+    citations: [],
+  } as never);
+
+  return NextResponse.json({
+    ok: true,
+    intent: 'show_autonomy',
+    preference: autonomy,
+  });
+}
+
+async function handleSetAutonomy(
+  supabase: ReturnType<typeof createClient>,
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  thread: { id: string; org_id: string },
+  intent: { mode: 'ask_before_act' | 'autopilot'; auto_fix_severity?: Severity },
+) {
+  const current = (await loadAutonomy(supabase, thread.org_id)) ?? {};
+  const previous = { ...current };
+
+  // Compose the next autonomy state. Preserve unrelated keys; only flip
+  // the fields the intent dictates.
+  const next: AutonomyPrefsShape = {
+    ...current,
+    default: intent.mode,
+  };
+  if (intent.mode === 'autopilot') {
+    if (intent.auto_fix_severity) {
+      next.auto_fix_severity = intent.auto_fix_severity;
+    }
+    // If user said full autopilot with no severity, clear the gate.
+    else if (current.auto_fix_severity == null) {
+      next.auto_fix_severity = null;
+    }
+  } else {
+    // ask_before_act revokes any prior auto-fix permission so the
+    // promise of the new mode actually holds.
+    next.auto_fix_severity = null;
+  }
+
+  // Only admins can change org autonomy. RLS on the table is admin-update
+  // only; we'll see the error inline if the policy denies.
+  const { error: updErr } = await supabase
+    .from('agent_memory_preferences')
+    .update({
+      autonomy: next,
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq('org_id', thread.org_id);
+
+  if (updErr) {
+    await admin.from('agent_messages').insert({
+      thread_id: thread.id,
+      role: 'agent',
+      blocks: [
+        {
+          type: 'text',
+          markdown: `I couldn't update autonomy — that's an admin-only setting. Ask your org admin to flip it (or use the settings page, coming soon).\n\n_(Error: ${updErr.message})_`,
+        },
+      ],
+      citations: [],
+    } as never);
+    return NextResponse.json(
+      { ok: false, intent: 'set_autonomy', error: updErr.message },
+      { status: 200 }, // user-actionable, not an HTTP failure
+    );
+  }
+
+  // Record the change as an episode for the audit trail + suppression
+  // learning isn't affected; this is a separate fact-class.
+  await admin.from('agent_memory_episodes').insert({
+    org_id: thread.org_id,
+    thread_id: thread.id,
+    user_id: userId,
+    agent_action: 'autonomy_adjusted',
+    payload: { previous, next },
+    rationale: null,
+  } as never);
+
+  // Confirmation message.
+  const confirmLine =
+    intent.mode === 'autopilot' && intent.auto_fix_severity
+      ? `🚀 **Autopilot** is now on for **${intent.auto_fix_severity}** severity and above. I'll act without asking — and post here when I do.`
+      : intent.mode === 'autopilot'
+      ? `🚀 **Autopilot** is on. I'll act on findings without asking first.`
+      : `🙋 **Ask-before-act** is on. I won't change anything without your confirmation. I'll keep flagging findings and you can dismiss / fix from the cards.`;
+
+  await admin.from('agent_messages').insert({
+    thread_id: thread.id,
+    role: 'agent',
+    blocks: [
+      {
+        type: 'text',
+        markdown:
+          `${confirmLine}\n\n_(Heads-up: the underlying auto-fix runner ships with engine Phase 12. Until then, this preference is recorded — pending actions are visible but will still wait for you.)_`,
+      },
+    ],
+    citations: [],
+    acted_on: [
+      {
+        kind: 'autonomy_adjusted',
+        at: new Date().toISOString(),
+        payload: { previous, next },
+      },
+    ],
+  } as never);
+
+  return NextResponse.json({
+    ok: true,
+    intent: 'set_autonomy',
+    previous,
+    next,
   });
 }
