@@ -28,6 +28,12 @@ const PUBLIC_PREFIXES = [
   '/changelog',
   '/blog',
   '/.well-known',
+  // Public Living Trust Page (migration 047). Each org opts in via
+  // organizations.trust_page_enabled; the page payload comes from a
+  // SECURITY DEFINER RPC that enforces the opt-in gate. Without this
+  // prefix, /trust/<slug> would be redirected to /login and the page
+  // would never reach an unauthenticated visitor.
+  '/trust',
 ];
 
 export async function middleware(request: NextRequest) {
