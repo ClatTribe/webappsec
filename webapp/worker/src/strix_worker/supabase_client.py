@@ -236,6 +236,23 @@ class WorkerSupabase:
         except Exception:  # noqa: BLE001
             return None
 
+    def decrypt_org_slack_webhook_by_org(self, org_id: str) -> str | None:
+        """Returns the org's Slack webhook URL when called outside a scan
+        context (e.g. the chat-bridge worker forwarding agent_messages).
+
+        Mirrors decrypt_org_slack_webhook but the SQL RPC keys on org_id
+        directly. See migration 049. Same fail-open behaviour: any RPC
+        error returns None so the bridge silently skips rather than
+        propagating an exception into the listener loop.
+        """
+        try:
+            result = self.client.rpc(
+                "worker_decrypt_org_slack_webhook_by_org", {"p_org_id": org_id}
+            ).execute()
+            return result.data
+        except Exception:  # noqa: BLE001
+            return None
+
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         try:
             result = self.client.rpc(
