@@ -4,6 +4,7 @@
 // Unknown block types fall through to collapsed JSON so adding a new
 // block kind doesn't require a frontend deploy.
 
+import { useState } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function AgentMessageView({ message, userId }: Props) {
+  void userId;
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -57,7 +59,7 @@ export function AgentMessageView({ message, userId }: Props) {
         {message.suggestions && message.suggestions.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {message.suggestions.map((s, idx) => (
-              <SuggestionButton key={idx} suggestion={s} />
+              <SuggestionButton key={idx} suggestion={s} threadId={message.thread_id} />
             ))}
           </div>
         )}
@@ -220,27 +222,101 @@ function AgentBlockView({ block }: { block: AgentBlock }) {
   }
 }
 
-function SuggestionButton({ suggestion }: { suggestion: AgentSuggestion }) {
-  // Phase A renders these as labelled buttons; the action handler is a
-  // Phase B concern. For now: emit a CustomEvent the parent can listen
-  // to (or a per-action route navigation).
-  function onClick() {
-    if (suggestion.action === 'open_finding' && suggestion.payload?.finding_id) {
-      window.location.href = `/findings/${suggestion.payload.finding_id}`;
+function SuggestionButton({
+  suggestion,
+  threadId,
+}: {
+  suggestion: AgentSuggestion;
+  threadId: string;
+}) {
+  // Phase B — wire dismiss / suggest_fix / mark_real to the triage-action
+  // API. open_finding is a plain navigation. Unknown actions fall through
+  // to a CustomEvent so future handlers can be added without modifying
+  // this file.
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<'ok' | 'err' | null>(null);
+
+  async function onClick() {
+    if (busy) return;
+    const findingId =
+      typeof suggestion.payload?.finding_id === 'string'
+        ? suggestion.payload.finding_id
+        : null;
+
+    if (suggestion.action === 'open_finding' && findingId) {
+      window.location.href = `/findings/${findingId}`;
       return;
     }
-    // Other actions (suggest_fix, dismiss) await Phase B's NL handler.
+
+    if (
+      (suggestion.action === 'dismiss' ||
+        suggestion.action === 'mark_real' ||
+        suggestion.action === 'suggest_fix') &&
+      findingId
+    ) {
+      // Optional inline reason for dismiss — keeps the suppression-rule
+      // path useful. For Phase B v1 we use a native prompt to avoid
+      // hauling in a modal; richer UX (textarea overlay) can land later.
+      let reason: string | undefined;
+      if (suggestion.action === 'dismiss') {
+        const r = window.prompt(
+          'Why are you dismissing this finding? (optional — helps the agent learn your suppression rules)',
+          '',
+        );
+        // User hit cancel — don't proceed
+        if (r === null) return;
+        reason = r.trim() || undefined;
+      }
+
+      setBusy(true);
+      try {
+        const resp = await fetch('/api/chat/triage-action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: suggestion.action,
+            finding_id: findingId,
+            thread_id: threadId,
+            reason,
+          }),
+        });
+        if (resp.ok) {
+          setDone('ok');
+        } else {
+          setDone('err');
+          // Best-effort error surfacing — the realtime stream will
+          // bring an updated message if one was posted.
+          console.error('triage-action failed', resp.status, await resp.text());
+        }
+      } catch (e) {
+        setDone('err');
+        console.error('triage-action error', e);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Unknown — emit for any external listener.
     window.dispatchEvent(
       new CustomEvent('strix:suggestion', { detail: suggestion }),
     );
   }
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1 text-xs text-neutral-200 transition-colors hover:bg-neutral-800"
+      disabled={busy || done === 'ok'}
+      className={`rounded-md border px-3 py-1 text-xs transition-colors ${
+        done === 'ok'
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+          : done === 'err'
+          ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+          : 'border-neutral-700 bg-neutral-800/60 text-neutral-200 hover:bg-neutral-800'
+      } disabled:cursor-not-allowed disabled:opacity-60`}
     >
-      {suggestion.label}
+      {busy ? '…' : done === 'ok' ? '✓ Done' : done === 'err' ? '! Retry' : suggestion.label}
     </button>
   );
 }
