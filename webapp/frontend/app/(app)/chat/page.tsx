@@ -16,7 +16,7 @@ import type { AgentMessage, AgentThread } from '@/lib/supabase/types';
 const INITIAL_MESSAGE_LIMIT = 100;
 
 export const metadata = {
-  title: 'Strix — Chat',
+  title: 'TensorShield — Chat',
 };
 
 export default async function ChatPage() {
@@ -42,7 +42,7 @@ export default async function ChatPage() {
     const { data: created } = await supabase
       .from('agent_threads')
       .insert({
-        title: 'Strix',
+        title: 'TensorShield',
         context: { kind: 'primary' },
       } as never)
       .select('*')

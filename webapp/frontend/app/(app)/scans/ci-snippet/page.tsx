@@ -270,7 +270,7 @@ jobs:
             -m ${scanMode}
             -t ${target}
 
-      # Strix exit codes:
+      # Exit codes:
       #   0 → completed, no findings
       #   2 → completed, findings emitted (we treat as failure)
       #   1 → engine error (treated as failure too)
@@ -296,7 +296,7 @@ strix-security-scan:
     # (Settings → CI/CD → Variables).
   script:
     - strix -n --quiet -m ${scanMode} -t ${target}
-  # Strix exit codes:
+  # Exit codes:
   #   0 → completed, no findings (job passes)
   #   2 → findings emitted (job fails — this is what you want for PRs)
   #   1 → engine error (job fails)

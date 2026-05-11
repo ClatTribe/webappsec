@@ -75,7 +75,7 @@ export default function Image() {
               gap: '0 18px',
             }}
           >
-            <span>An AI security engineer</span>
+            <span>TensorShield —</span>
             <span
               style={{
                 background:
@@ -84,9 +84,9 @@ export default function Image() {
                 color: 'transparent',
               }}
             >
-              who never
+              the AI security
             </span>
-            <span>forgets.</span>
+            <span>engineer for vibe-coded apps.</span>
           </div>
           <div
             style={{
@@ -96,7 +96,7 @@ export default function Image() {
               maxWidth: 920,
             }}
           >
-            Reinforcement-trained to eliminate false positives. 5 free scans / month.
+            Scans your code. Remembers your decisions. 5 free scans / month.
           </div>
         </div>
 
@@ -110,7 +110,7 @@ export default function Image() {
             fontFamily: 'monospace',
           }}
         >
-          → youraisecurityengineer
+          → tensorshield.ai
         </div>
       </div>
     ),

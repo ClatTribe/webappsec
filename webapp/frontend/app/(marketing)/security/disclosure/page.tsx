@@ -69,10 +69,10 @@ export default function DisclosurePage() {
               <p className="text-sm text-neutral-200">
                 Email{' '}
                 <a
-                  href="mailto:security@youraisecurityengineer.com"
+                  href="mailto:security@tensorshield.ai"
                   className="font-semibold text-cyan-300 hover:underline"
                 >
-                  security@youraisecurityengineer.com
+                  security@tensorshield.ai
                 </a>{' '}
                 with as much detail as you can: the affected endpoint or component, reproduction
                 steps, the impact you&apos;ve observed, and (if you have one) a PoC.
@@ -123,7 +123,7 @@ export default function DisclosurePage() {
           title="In scope"
           color="emerald"
           items={[
-            'app.youraisecurityengineer.com (the hosted SaaS)',
+            'app.tensorshield.ai (the hosted SaaS)',
             'API authentication, authorization, and tenant-isolation issues',
             'XSS / CSRF / SSRF in the application',
             'Improper credential storage or decryption-context leaks',

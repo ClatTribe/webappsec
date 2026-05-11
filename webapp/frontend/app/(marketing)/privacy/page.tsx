@@ -30,8 +30,8 @@ export default function PrivacyPage() {
           <p>
             "we", "us", or "our" refers to the entity operating the service at the
             domain you reached this policy from. For privacy questions, contact us at{' '}
-            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              privacy@youraisecurityengineer.com
+            <a href="mailto:privacy@tensorshield.ai" className="text-cyan-300 hover:underline">
+              privacy@tensorshield.ai
             </a>
             .
           </p>
@@ -182,8 +182,8 @@ export default function PrivacyPage() {
           </ul>
           <p className="mt-3">
             To exercise any of these rights, email{' '}
-            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              privacy@youraisecurityengineer.com
+            <a href="mailto:privacy@tensorshield.ai" className="text-cyan-300 hover:underline">
+              privacy@tensorshield.ai
             </a>
             . We respond within 30 days.
           </p>
@@ -216,8 +216,8 @@ export default function PrivacyPage() {
         <Section heading="11. Contact">
           <p>
             Questions, requests, or complaints:{' '}
-            <a href="mailto:privacy@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              privacy@youraisecurityengineer.com
+            <a href="mailto:privacy@tensorshield.ai" className="text-cyan-300 hover:underline">
+              privacy@tensorshield.ai
             </a>
             .
           </p>

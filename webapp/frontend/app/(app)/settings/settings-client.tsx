@@ -37,8 +37,8 @@ interface Props {
 const POPULAR_MODELS = [
   { value: 'gemini/gemini-2.5-flash', label: 'Gemini 2.5 Flash (cheap, fast)' },
   { value: 'gemini/gemini-2.5-pro', label: 'Gemini 2.5 Pro (recommended for deep scans)' },
-  { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4 (Strix recommended)' },
-  { value: 'anthropic/claude-sonnet-4-6', label: 'Anthropic Claude Sonnet 4.6 (Strix recommended)' },
+  { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4 (TensorShield recommended)' },
+  { value: 'anthropic/claude-sonnet-4-6', label: 'Anthropic Claude Sonnet 4.6 (TensorShield recommended)' },
   { value: 'deepseek/deepseek-chat', label: 'DeepSeek (cheap, OSS-friendly)' },
 ];
 
@@ -363,7 +363,7 @@ function LlmSection({
     <Section
       title="LLM provider"
       Icon={Sparkles}
-      hint="Strix uses LiteLLM under the hood. Pick any LiteLLM-supported provider; the API key is stored in Supabase Vault and only decrypted server-side at scan time."
+      hint="TensorShield uses LiteLLM under the hood. Pick any LiteLLM-supported provider; the API key is stored in an encrypted vault and only decrypted server-side at scan time."
     >
       <Field label="Model">
         <div className="space-y-2">
@@ -867,7 +867,7 @@ function FpAutoDismissSection({ orgId, onSaved }: { orgId: string; onSaved: () =
     <Section
       title="Engine FP auto-dismiss"
       Icon={Brain}
-      hint="The Strix engine reads your team's accumulated triage decisions (feedback.jsonl) and can auto-dismiss findings whose fingerprint has prior FP labels. This policy controls how aggressively it does that. Distinct from the wrapper's own KNN auto-dismiss (which uses cosine similarity over the same labels)."
+      hint="The TensorShield engine reads your team's accumulated triage decisions (feedback.jsonl) and can auto-dismiss findings whose fingerprint has prior FP labels. This policy controls how aggressively it does that. Distinct from the wrapper's own KNN auto-dismiss (which uses cosine similarity over the same labels)."
     >
       {policy === null ? (
         <div className="flex items-center gap-2 text-xs text-neutral-500">
@@ -997,7 +997,7 @@ function ApiKeysSection({ orgId }: { orgId: string }) {
       title="Threat-intel & recon API keys"
       Icon={KeyRound}
       hint={
-        'Strix uses these to enrich domain scans with code-search, SaaS-leak discovery, ' +
+        'TensorShield uses these to enrich domain scans with code-search, SaaS-leak discovery, ' +
         "passive DNS history, and reverse-IP recon. Each is optional — without a key, the " +
         'corresponding tool fails open silently. Values are stored vault-encrypted and only ' +
         'decrypted in the worker at scan time.'

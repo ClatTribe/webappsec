@@ -112,7 +112,7 @@ export function ChatPanel({ threadId, orgId, userId, initialMessages }: ChatPane
             <Sparkles className="h-4 w-4 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-neutral-100">Strix</h1>
+            <h1 className="text-base font-semibold text-neutral-100">TensorShield</h1>
             <p className="text-xs text-neutral-400">Your AI security engineer</p>
           </div>
         </div>
@@ -146,7 +146,7 @@ export function ChatPanel({ threadId, orgId, userId, initialMessages }: ChatPane
                 postUserMessage();
               }
             }}
-            placeholder="Ask Strix anything about your scans, findings, or assets…"
+            placeholder="Ask TensorShield anything about your scans, findings, or assets…"
             rows={1}
             className="flex-1 resize-none rounded-lg border border-neutral-800 bg-neutral-900/50 px-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 outline-none focus:border-neutral-600"
           />
@@ -159,7 +159,8 @@ export function ChatPanel({ threadId, orgId, userId, initialMessages }: ChatPane
           </button>
         </form>
         <p className="mt-2 text-xs text-neutral-500">
-          Strix is scoped to your org. Findings, scans, and compliance evidence here are isolated to org{' '}
+          TensorShield is scoped to your workspace. Findings, scans, and compliance evidence stay
+          in workspace{' '}
           <code className="font-mono text-neutral-400">{orgId.slice(0, 8)}…</code>.
         </p>
       </footer>
@@ -175,7 +176,7 @@ function EmptyState() {
       </div>
       <h2 className="mb-2 text-lg font-semibold text-neutral-100">Welcome to your security workspace</h2>
       <p className="max-w-md text-sm text-neutral-400">
-        Register an asset (repo, web app, domain) and Strix will start scanning. Findings stream into this chat as
+        Register an asset (repo, web app, domain) and TensorShield will start scanning. Findings stream into this chat as
         they&apos;re discovered. Ask follow-up questions, dismiss false positives, or request fixes — all from
         here.
       </p>

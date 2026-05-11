@@ -7,14 +7,14 @@ import type { Metadata } from 'next';
 export const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ||
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '') ||
-  'https://youraisecurityengineer.com'
+  'https://tensorshield.ai'
 ).replace(/\/$/, '');
 
-export const SITE_NAME = 'your AI security engineer';
+export const SITE_NAME = 'TensorShield';
 
 // Used as the description fallback on pages that don't override it.
 export const DEFAULT_DESCRIPTION =
-  'An AI security engineer that scans your code, watches your URLs, and remembers every decision you make — so the same false positive never lands twice. Continuous monitoring, closed-loop suppression, and a living compliance posture, per-org isolated.';
+  'TensorShield is the AI security engineer for your vibe-coded apps. It scans your code, watches your URLs, and remembers every decision you make — so the same false positive never lands twice.';
 
 interface PageSeoArgs {
   /** The bare page title — no site suffix. The root layout's title template

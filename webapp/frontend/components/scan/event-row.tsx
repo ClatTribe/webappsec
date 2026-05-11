@@ -17,7 +17,7 @@ import type { ScanEvent } from '@/lib/supabase/types';
 
 const EVENT_META: Record<string, { label: string; Icon: LucideIcon; color: string }> = {
   'scan.started': { label: 'Scan started', Icon: Play, color: 'text-blue-300' },
-  'scan.command': { label: 'Strix command', Icon: Terminal, color: 'text-blue-300' },
+  'scan.command': { label: 'Engine command', Icon: Terminal, color: 'text-blue-300' },
   'scan.finished': { label: 'Scan finished', Icon: CheckCircle2, color: 'text-emerald-300' },
   'finding.created': { label: 'Vulnerability found', Icon: AlertOctagon, color: 'text-red-300' },
   'agent.created': { label: 'Agent created', Icon: Bot, color: 'text-violet-300' },

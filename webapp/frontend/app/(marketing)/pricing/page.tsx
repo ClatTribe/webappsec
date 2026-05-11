@@ -59,7 +59,7 @@ const TIERS: Tier[] = [
       '100 scans / month + continuous scheduled scans',
       'Private repos · all integrations',
       'GitHub PR comments · Slack #security bridge',
-      'Living Trust Page (per-org URL)',
+      'Living Trust Page (your own URL)',
       'Up to 10 users · email support',
     ],
   },
@@ -92,7 +92,7 @@ const MATRIX: { label: string; values: [string | boolean, string | boolean, stri
   { label: 'Autonomy slider (co-pilot ↔ autopilot)', values: ['Co-pilot only', true, true] },
   { label: 'GitHub PR comments', values: [false, true, true] },
   { label: 'Slack #security bridge for chat messages', values: [false, true, true] },
-  { label: 'Living Trust Page (per-org URL)', values: [false, true, true] },
+  { label: 'Living Trust Page (your own URL)', values: [false, true, true] },
   { label: 'Compliance evidence ingest (SOC 2 / ISO 27001 / PCI)', values: [false, true, true] },
   { label: 'HMAC-signed evidence chain (auditor pack)', values: [false, false, true] },
   { label: 'SARIF / CSV / JSON export', values: [false, false, true] },
@@ -118,8 +118,8 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
     a: 'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time. When set, your key replaces ours and your scans are billed to your provider, not us.',
   },
   {
-    q: 'How does Strix actually reduce false positives?',
-    a: "When you dismiss a finding with a reason (\"behind Cloudflare WAF — header injected at the edge\"), Strix records that as a per-org suppression rule keyed on the finding's fingerprint. The next scan that would surface the same pattern doesn't — instead, a chat note says \"Suppressed: your rule from 4 days ago covers this.\" Per-org, per-fingerprint, fully auditable. Dismiss once, never re-asked.",
+    q: 'How does TensorShield actually reduce false positives?',
+    a: "When you dismiss a finding with a reason (\"behind Cloudflare WAF — header injected at the edge\"), TensorShield records that as a suppression rule in your workspace keyed on the finding's fingerprint. The next scan that would surface the same pattern doesn't — instead, a chat note says \"Suppressed: your rule from 4 days ago covers this.\" Fingerprint-precise, fully auditable. Dismiss once, never re-asked.",
   },
   {
     q: 'Do you offer annual billing?',
@@ -160,8 +160,8 @@ const FAQ_PLAIN_ANSWERS: Record<string, string> = {
     'New scans are blocked at the limit with a clear in-app message. We never auto-charge overage. Bump your plan or wait for the monthly reset.',
   'Can I bring my own LLM key?':
     'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time.',
-  'How does Strix actually reduce false positives?':
-    'When you dismiss a finding with a reason, Strix records it as a per-org suppression rule keyed on the finding fingerprint. The next scan that would surface the same pattern doesn\'t — instead you get a chat note citing your rule. Per-org, per-fingerprint, fully auditable.',
+  'How does TensorShield actually reduce false positives?':
+    'When you dismiss a finding with a reason, TensorShield records it as a suppression rule in your workspace keyed on the finding fingerprint. The next scan that would surface the same pattern doesn\'t — instead you get a chat note citing your rule. Fingerprint-precise, fully auditable.',
   'Do you offer annual billing?':
     'Yes — 20% off when paid annually. Available at signup or any time from your billing dashboard.',
   'How do you bill if my team grows?':
@@ -222,10 +222,10 @@ export default function PricingPage() {
               Closed-loop suppression on every plan.
             </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-300">
-              Dismiss a finding once with your reason. Strix records a per-org rule keyed on the
-              finding fingerprint. The next scan that would surface the same pattern doesn&apos;t —
-              you get a chat note citing your rule instead. Free, Team, and Business tiers all
-              include the full closed loop.
+              Dismiss a finding once with your reason. TensorShield records a rule in your
+              workspace keyed on the finding fingerprint. The next scan that would surface the
+              same pattern doesn&apos;t — you get a chat note citing your rule instead. Free,
+              Team, and Business tiers all include the full closed loop.
             </p>
           </div>
           <Link

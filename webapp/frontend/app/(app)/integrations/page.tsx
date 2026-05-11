@@ -24,7 +24,7 @@ export default async function IntegrationsPage() {
       <header>
         <h1 className="text-2xl font-semibold">Integrations</h1>
         <p className="text-sm text-neutral-400">
-          Credentials Strix can use during scans. Decrypted only at scan time and never sent to the LLM.
+          Credentials TensorShield can use during scans. Decrypted only at scan time and never sent to the LLM.
         </p>
       </header>
 
