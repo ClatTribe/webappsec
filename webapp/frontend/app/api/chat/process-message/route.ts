@@ -65,6 +65,11 @@ interface SetAutonomyIntent {
 interface ShowAutonomyIntent {
   kind: 'show_autonomy';
 }
+interface RemediateControlIntent {
+  kind: 'remediate_control';
+  control_id: string;          // 'CC7.2', 'A1.2', 'P1.1', etc.
+  framework: string;           // inferred from the control ID prefix
+}
 interface UnknownIntent {
   kind: 'unknown';
 }
@@ -74,7 +79,20 @@ type Intent =
   | ComplianceReadinessIntent
   | SetAutonomyIntent
   | ShowAutonomyIntent
+  | RemediateControlIntent
   | UnknownIntent;
+
+// Control-ID → framework inference. Trust Services Criteria (SOC 2)
+// use CC*.* / CC*.*.A / A1.* / A2.* / P*.* / C*.*. ISO 27001 uses
+// A.x.y. PCI DSS uses x.y.z (3.4.1, etc.). For v1 we only ship SOC 2
+// templates so non-SOC-2 control IDs hit the "no template" branch.
+function inferFramework(controlId: string): string | null {
+  const c = controlId.toUpperCase();
+  if (/^(CC|A\d|P|C\d)\d/.test(c)) return 'soc2_type_2';
+  if (/^A\.\d/.test(c)) return 'iso_27001';
+  if (/^\d+\.\d+/.test(c)) return 'pci_dss';
+  return null;
+}
 
 // Framework name aliases — what users type → (canonical_id, display_label).
 // Order matters: longer / more-specific names must come before short ones
@@ -129,6 +147,27 @@ function classify(text: string): Intent {
           framework_label: fw.label,
         };
       }
+    }
+  }
+
+  // Remediation intent: "how do I close CC7.2" / "fix CC7.2" /
+  // "remediate CC7.2" / "what should I do about CC7.2". Matches a
+  // control-ID pattern (SOC 2 CC.*, A1.*, P1.*, C1.*; ISO A.x.y;
+  // PCI x.y.z 3-segment) somewhere in the message, plus a
+  // remediation verb. PCI uses 3 segments to avoid false-matching
+  // bare 2-segment numerics like "1.2 second latency".
+  const controlIdMatch = text.match(
+    /\b(CC\d+\.\d+|A\d+\.\d+|P\d+\.\d+|C\d+\.\d+|A\.\d+(?:\.\d+)+|\d+\.\d+\.\d+)\b/i,
+  );
+  if (
+    controlIdMatch &&
+    (/\b(close|fix|remediate|pass|address|resolve|how\s+do\s+i)\b/.test(t) ||
+      /\bwhat\s+(should\s+i|to\s+do)\b/.test(t))
+  ) {
+    const controlId = controlIdMatch[1].toUpperCase();
+    const framework = inferFramework(controlId);
+    if (framework) {
+      return { kind: 'remediate_control', control_id: controlId, framework };
     }
   }
 
@@ -287,6 +326,16 @@ export async function POST(req: Request) {
     return await handleSetAutonomy(supabase, admin, user.id, thread, intent);
   }
 
+  if (intent.kind === 'remediate_control') {
+    return await handleRemediateControl(
+      supabase,
+      admin,
+      thread,
+      intent.control_id,
+      intent.framework,
+    );
+  }
+
   // Fallback — polite acknowledgement.
   await admin.from('agent_messages').insert({
     thread_id: thread.id,
@@ -294,7 +343,7 @@ export async function POST(req: Request) {
     blocks: [
       {
         type: 'text',
-        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n- **"how ready am I for SOC 2?"** (or ISO 27001 / PCI DSS / HIPAA / GDPR) — compliance posture summary.\n- **"what's your autonomy"** / **"auto-fix critical"** / **"ask me before everything"** — view or adjust my autonomy.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
+        markdown: `I'm still learning natural-language triage. For now I understand:\n\n- **"dismiss the lows"** (or highs / mediums / criticals) — bulk-dismiss findings at that severity.\n- **"what's open"** — summarise current open findings.\n- **"how ready am I for SOC 2?"** (or ISO 27001 / PCI DSS / HIPAA / GDPR) — compliance posture summary.\n- **"how do I close CC7.2?"** — concrete remediation options for a failing control.\n- **"what's your autonomy"** / **"auto-fix critical"** / **"ask me before everything"** — view or adjust my autonomy.\n\nFor anything else, the action buttons under each finding card are wired up — give those a try.`,
       },
     ],
     citations: [],
@@ -779,5 +828,114 @@ async function handleSetAutonomy(
     intent: 'set_autonomy',
     previous,
     next,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tier A #4 — remediation generator
+// ---------------------------------------------------------------------------
+//
+// Founder asks "how do I close CC7.2?" → we look up the org's current
+// verdict (so the answer leads with where they stand) and pull
+// hand-curated remediation options from compliance_remediation_templates.
+
+interface RemediationOption {
+  option_position: number;
+  option_title: string;
+  option_body_md: string;
+  effort_hours: number | null;
+  trust_impact: 'high' | 'medium' | 'low' | 'negative' | string;
+}
+
+const TRUST_TONE: Record<string, string> = {
+  high:     '🟢 high trust',
+  medium:   '🟡 medium trust',
+  low:      '🟠 low trust',
+  negative: '🔴 hurts trust',
+};
+
+async function handleRemediateControl(
+  supabase: ReturnType<typeof createClient>,
+  admin: ReturnType<typeof createAdminClient>,
+  thread: { id: string; org_id: string },
+  controlId: string,
+  framework: string,
+) {
+  // Look up options + current verdict in parallel.
+  const [optionsResp, postureResp] = await Promise.all([
+    supabase.rpc('get_control_remediation', {
+      p_framework: framework,
+      p_control_id: controlId,
+    } as never),
+    supabase
+      .from('org_compliance_posture_v')
+      .select('verdict, evidence_summary, observed_at')
+      .eq('framework', framework)
+      .eq('control_id', controlId)
+      .maybeSingle(),
+  ]);
+
+  const options = (optionsResp.data ?? []) as RemediationOption[];
+  const posture = (postureResp.data ?? null) as {
+    verdict: string;
+    evidence_summary: string | null;
+    observed_at: string | null;
+  } | null;
+
+  // Compose the message. Lead with current verdict, then options.
+  let md = `🛠 **Remediation options for \`${controlId}\`**\n`;
+
+  if (posture) {
+    const verdictBadge =
+      posture.verdict === 'pass' ? '🟢 currently passing'
+      : posture.verdict === 'warn' ? '🟡 currently warn'
+      : posture.verdict === 'fail' ? '🔴 currently failing'
+      : '⚪ untested';
+    md += `\n${verdictBadge}${
+      posture.evidence_summary ? ` — _${posture.evidence_summary}_` : ''
+    }\n`;
+  } else {
+    md += `\n⚪ I don't have a verdict for \`${controlId}\` yet — register an asset and run a scan, or add this to your next audit prep cycle.\n`;
+  }
+
+  if (options.length === 0) {
+    md += `\n_I don't have a remediation template for \`${controlId}\` yet. The most common SOC 2 controls I've prepared options for are CC6.7, CC7.2, CC7.3, CC8.2, A1.2, and P1.1._\n\nIf you want me to draft something custom, ask in a follow-up — or open an issue for us to add this control to the catalog.`;
+  } else {
+    md += `\n_${options.length} option${options.length === 1 ? '' : 's'}, ranked by trust impact_\n\n---\n`;
+    for (const opt of options) {
+      const tone = TRUST_TONE[opt.trust_impact] ?? opt.trust_impact;
+      const eff =
+        opt.effort_hours == null
+          ? 'varies'
+          : opt.effort_hours === 0
+          ? '0 hours'
+          : `~${opt.effort_hours} hour${opt.effort_hours === 1 ? '' : 's'}`;
+      md +=
+        `\n### Option ${opt.option_position} · ${opt.option_title}\n\n` +
+        `${tone} · **${eff}**\n\n${opt.option_body_md}\n\n---\n`;
+    }
+    md += `\n_Tell me which option you want to take and I'll draft the kickoff doc + Linear epic once those integrations land._`;
+  }
+
+  await admin.from('agent_messages').insert({
+    thread_id: thread.id,
+    role: 'agent',
+    blocks: [{ type: 'text', markdown: md }],
+    citations: [
+      {
+        kind: 'compliance_evidence',
+        id: `${framework}:${controlId}`,
+        label: controlId,
+      },
+    ],
+  } as never);
+
+  return NextResponse.json({
+    ok: true,
+    intent: 'remediate_control',
+    control_id: controlId,
+    framework,
+    options_count: options.length,
+    verdict: posture?.verdict ?? null,
   });
 }
