@@ -11,6 +11,7 @@ import {
   Users,
   Settings,
   LogOut,
+  FileLock,
 } from 'lucide-react';
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
   { href: '/targets', label: 'Targets', icon: Target },
   { href: '/scans', label: 'Scans', icon: ScanLine },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
+  { href: '/compliance', label: 'Compliance', icon: FileLock },
   { href: '/integrations', label: 'Integrations', icon: Plug },
   { href: '/team', label: 'Team', icon: Users },
   { href: '/settings', label: 'Settings', icon: Settings },
