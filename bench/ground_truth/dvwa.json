@@ -1,0 +1,76 @@
+{
+  "target": "dvwa",
+  "source": "DVWA project documentation — categories at security=low",
+  "vulns": [
+    {
+      "id": "dvwa-sqli",
+      "cwe": "CWE-89",
+      "title": "SQL injection (classic)",
+      "endpoint": "/vulnerabilities/sqli",
+      "title_keywords": ["sql injection", "sqli"]
+    },
+    {
+      "id": "dvwa-sqli-blind",
+      "cwe": "CWE-89",
+      "title": "Blind SQL injection",
+      "endpoint": "/vulnerabilities/sqli_blind",
+      "title_keywords": ["blind sqli", "blind sql"]
+    },
+    {
+      "id": "dvwa-xss-reflected",
+      "cwe": "CWE-79",
+      "title": "Reflected XSS",
+      "endpoint": "/vulnerabilities/xss_r",
+      "title_keywords": ["xss", "reflected"]
+    },
+    {
+      "id": "dvwa-xss-stored",
+      "cwe": "CWE-79",
+      "title": "Stored XSS",
+      "endpoint": "/vulnerabilities/xss_s",
+      "title_keywords": ["xss", "stored", "persistent"]
+    },
+    {
+      "id": "dvwa-xss-dom",
+      "cwe": "CWE-79",
+      "title": "DOM-based XSS",
+      "endpoint": "/vulnerabilities/xss_d",
+      "title_keywords": ["xss", "dom"]
+    },
+    {
+      "id": "dvwa-command-inj",
+      "cwe": "CWE-78",
+      "title": "Command injection",
+      "endpoint": "/vulnerabilities/exec",
+      "title_keywords": ["command injection", "os command", "exec"]
+    },
+    {
+      "id": "dvwa-file-inclusion",
+      "cwe": "CWE-22",
+      "title": "File inclusion (LFI / RFI)",
+      "endpoint": "/vulnerabilities/fi",
+      "title_keywords": ["file inclusion", "lfi", "rfi", "path traversal"]
+    },
+    {
+      "id": "dvwa-file-upload",
+      "cwe": "CWE-434",
+      "title": "Unrestricted file upload",
+      "endpoint": "/vulnerabilities/upload",
+      "title_keywords": ["file upload", "unrestricted upload", "arbitrary upload"]
+    },
+    {
+      "id": "dvwa-csrf",
+      "cwe": "CWE-352",
+      "title": "CSRF on password change",
+      "endpoint": "/vulnerabilities/csrf",
+      "title_keywords": ["csrf", "cross-site request forgery"]
+    },
+    {
+      "id": "dvwa-brute",
+      "cwe": "CWE-307",
+      "title": "Brute force (missing rate limit on login)",
+      "endpoint": "/vulnerabilities/brute",
+      "title_keywords": ["brute force", "rate limit", "missing throttle"]
+    }
+  ]
+}

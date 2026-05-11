@@ -1,0 +1,19 @@
+# IBM/HCL AppScan's public testbed — Altoro Mutual demo banking app.
+# Intentionally vulnerable. Documented at https://demo.testfire.net.
+# Stable public URL; safe to scan repeatedly.
+
+slug: altoro-mutual
+name: IBM Altoro Mutual
+url: https://demo.testfire.net
+target_type: web_application
+description: |
+  IBM/HCL's public intentionally-vulnerable demo banking app. Used
+  industry-wide as a baseline for DAST tools. ~20 publicly documented
+  vulnerabilities across SQLi, XSS, LFI, default-creds, info disclosure.
+scan_mode: standard
+max_cost_usd: 1.50
+instruction: |
+  External pentest evaluation against the IBM/HCL AppScan public
+  testbed (intentionally vulnerable, authorized). Standard methodology.
+ground_truth_file: ground_truth/altoro-mutual.json
+license: Public demo (IBM)

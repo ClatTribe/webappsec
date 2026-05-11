@@ -1,0 +1,62 @@
+# Weekly benchmark run — score TensorShield against public testbeds and
+# update BENCHMARKS.md.
+#
+# Trigger via workflow_dispatch for now (manual). When the orchestrate
+# path is hooked up to a dedicated benchmark org, flip the cron on.
+#
+# Required secrets:
+#   BENCH_SUPABASE_URL
+#   BENCH_SUPABASE_SERVICE_ROLE_KEY
+#   BENCH_ORG_ID            — the org that owns benchmark scans
+#   BENCH_USER_ID           — the user_id stamped on each scan
+
+name: benchmark
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 7 * * 1'   # Mondays 07:00 UTC
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: pip install pyyaml supabase
+
+      - name: Score every target with a stored findings file
+        env:
+          BENCH_SUPABASE_URL: ${{ secrets.BENCH_SUPABASE_URL }}
+          BENCH_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BENCH_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python bench/run.py --all --min-f1 0.5
+        # Fails the job when the lowest F1 falls below 0.5 — a regression
+        # gate. Tune as the scorer matures.
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: |
+            bench/results/BENCHMARKS.md
+            bench/results/BENCHMARKS.json
+
+      - name: Commit report on main
+        if: github.ref == 'refs/heads/main' && success()
+        run: |
+          cp bench/results/BENCHMARKS.md BENCHMARKS.md
+          if ! git diff --quiet BENCHMARKS.md; then
+            git config user.name 'tensorshield-bot'
+            git config user.email 'noreply@tensorshield.ai'
+            git add BENCHMARKS.md
+            git commit -m "chore(bench): refresh BENCHMARKS.md [skip ci]"
+            git push
+          fi
