@@ -7,29 +7,60 @@ Methodology + ground-truth in [`bench/`](bench/).
 
 | Target | Ground truth | Findings | TP | FN | Extras | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| altoro-mutual (run 2 · engine `4f3f93c` · Gemini Flash) | 15 | **0** | 0 | 15 | 0 | 0% | 0% | 0% |
+| altoro-mutual (run 4 · engine `4f3f93c` + Dockerfile fix · Gemini Flash) | 15 | **3** | **2** | 13 | 1 | **67%** | **13%** | **22%** |
 
-Still 0% — but the failure mode is **completely different** from the first run. The emission-starvation bug is fixed; a new under-scan behaviour took its place.
+**First non-zero recall.** Took 3 attempts to get here — each surfaced a real bug:
 
-### Two runs, two different reasons for 0%
+- Run 1 (May 6) — engine emission starvation, fixed upstream as strix#147 → 0%
+- Run 2 (this session, take 1) — `No module named 'strix.sca'` on every tool call → 0%
+- Run 3 (this session, take 2, one-line sca-only Dockerfile fix) — `No module named 'strix.threat_intel'` → 0%
+- Run 4 (this session, take 3, **wholesale `COPY strix/`**) — **3 findings**, $1.36, 25 min
 
-| | Run 1 (May 6) | Run 2 (May 11, **this run**) |
-|---|---|---|
-| Engine commit | `3b48809` (pre-fix) | `4f3f93c` (post emission-fix [#147](https://github.com/ClatTribe/strix/pull/147)) |
-| Model | `gemini-2.5-pro` | `gemini-2.5-flash` |
-| Agents spawned | 8 specialists | 1 lead only |
-| Tool executions | 38 browser + 20 terminal | 13 tool calls |
-| Duration | 45 min | 66 sec |
-| Cost | $2.61 (hit cap) | $0.10 |
-| Exit code | 3 (budget exceeded) | 0 (clean) |
-| `coverage.json.status` | `incomplete`, gaps={csrf,idor,open_redirect,sqli,ssrf,xss} | `incomplete`, gaps={csrf,idor,open_redirect,sqli,ssrf,xss} |
-| Root cause | Agents probed extensively but never converted findings into structured emissions before budget fired | Lead agent ran 12 LLM calls, decided the run was "done" with `scan_completed: true`, never dispatched specialists |
+The sandbox image was cherry-picking strix subdirectories into `/app/strix/`. As the strix package grew (Phase 6 SCA, Phase 9 threat-intel, Phase 11 IaC, etc.), every new subdir silently broke the sandbox because Python found `/app/strix/<subdir>/` empty before falling back to `.venv`. **Fix upstream: replace 7 cherry-pick COPYs with `COPY strix/ /app/strix/`.** Filed as a PR against ClatTribe/strix.
 
-Run 1 was the [emission-starvation incident](https://github.com/ClatTribe/strix/blob/main/docs/incidents/2026-05-06-finding-emission-starvation.md) — finding-evidence-was-found-but-not-emitted.
+### Run 4 — what got caught
 
-Run 2 is a new gap: **the lead agent under-dispatched.** With Gemini Flash as the reasoning model, the lead executed ~12 reconnaissance steps against `http://demo.testfire.net`, then emitted `finding.reviewed { scan_completed: true, vulnerability_count: 0 }` and exited — without ever spawning the planned XSS / SQLi / CSRF / IDOR / SSRF / open-redirect specialists. The `run.test_plan` event lists those categories as `planned`; `run.coverage_gap` at scan-end lists them all as unfulfilled.
+| Severity | Title | Endpoint | Match |
+|---|---|---|---|
+| high | Business Logic Flaw: Negative Amount Transfer | `/api/transfer` | **Extra** (real Altoro vuln, not in our 15-item ground truth) |
+| medium | Reflected XSS in Search Query Parameter | — | ✓ matches `altoro-xss-reflected` |
+| medium | Insecure Direct Object Reference (IDOR) in Account / Transaction APIs | `/api/account/{accountNo}` | ✓ matches `altoro-param-tampering` (CWE-639) |
 
-This is exactly the harness's job: surface that fresh-engine + Flash, on a textbook target with `gemini-2.5-flash`, didn't scan deeply enough to find anything. **Worth filing upstream** as a "lead-only-dispatch-when-Flash-is-the-reasoning-model" gap — Flash is the cost-optimal default per our cost-reduction PR (#94), but if it can't dispatch specialists for DAST-rich targets, it's a recall-vs-cost trade-off the wrapper needs to know about.
+The "extra" — negative-amount-transfer business-logic flaw — is a documented Altoro Mutual issue our ground truth list didn't include. By the strict scoring rule it counts against precision, but it's a real positive. The ground truth deserves a refresh.
+
+### Still uncovered (13 of 15)
+
+SQLi at `/bank/login.aspx` + `/search.aspx`, stored XSS in feedback, LFI via `content=`, default creds, missing headers (X-Frame-Options, CSP), HTTP TRACE, info-disclosure (`/comment.txt`, `/robots.txt`), server banner, CSRF on money-transfer, plaintext HTTP for banking. The engine ran 5 agents in this scan but didn't dispatch specialists for several categories. Probably worth running again with `STRIX_LLM=gemini/gemini-2.5-pro` to compare — Flash may be selecting fewer specialist branches than Pro would.
+
+### History of attempts (kept for the receipts)
+
+| Run | Engine | Sandbox bug | Model | Cost | Duration | Findings | Recall |
+|---|---|---|---|---:|---:|---:|---:|
+| 1 | `3b48809` | none (pre-strix#147) | Pro | $2.61 (capped) | 45 min | 0 | 0% |
+| 2 | `4f3f93c` | `strix.sca` missing | Flash | $0.10 | 66 s | 0 | 0% |
+| 3 | `4f3f93c` + 1-line fix | `strix.threat_intel` missing | Flash | $0.09 | 57 s | 0 | 0% |
+| **4** | **`4f3f93c` + wholesale COPY** | **none** | **Flash** | **$1.36** | **25 min** | **3** | **13%** |
+
+### How we found the Dockerfile bug
+
+Runs 2 and 3 looked identical on the surface — both exited cleanly in <90s with 0 findings and "scan_completed" status. That looked like a model-quality issue (Flash exiting too eagerly) until inspection of `events.jsonl` showed every `tool.execution.updated` returning:
+
+> `Sandbox execution error: Tool execution error: No module named 'strix.sca'`
+
+The lead agent dispatched tools correctly. The sandbox container didn't have the source. Looking at `containers/Dockerfile`:
+
+```Dockerfile
+COPY strix/__init__.py strix/
+COPY strix/config/ /app/strix/config/
+COPY strix/utils/ /app/strix/utils/
+COPY strix/telemetry/ /app/strix/telemetry/
+COPY strix/runtime/tool_server.py strix/runtime/__init__.py strix/runtime/runtime.py /app/strix/runtime/
+COPY strix/tools/ /app/strix/tools/
+```
+
+Just 7 subdirs / files — **none of the new ones**: agents, baselines, compliance, finding_chains, iac, llm, prompts, sast, **sca**, skills, **threat_intel**. `uv sync` installs the package into `.venv/lib/.../site-packages/strix/` but `/app/strix/` is earlier on `sys.path`, so Python finds the half-populated tree first.
+
+Fixed by replacing the cherry-picks with `COPY strix/ /app/strix/`. PR filed against ClatTribe/strix.
 
 ### Reproducing run 2
 

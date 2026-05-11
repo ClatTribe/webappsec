@@ -2,19 +2,21 @@
   {
     "target": "altoro-mutual",
     "total_ground_truth": 15,
-    "findings_count": 0,
-    "true_positives": 0,
-    "false_negatives": 15,
-    "matched_findings": 0,
-    "unmatched_findings": 0,
-    "precision_strict": 0.0,
-    "recall": 0.0,
-    "f1_strict": 0.0,
-    "covered": [],
+    "findings_count": 3,
+    "true_positives": 2,
+    "false_negatives": 13,
+    "matched_findings": 2,
+    "unmatched_findings": 1,
+    "precision_strict": 0.667,
+    "recall": 0.133,
+    "f1_strict": 0.222,
+    "covered": [
+      "altoro-xss-reflected",
+      "altoro-param-tampering"
+    ],
     "uncovered": [
       "altoro-sqli-login",
       "altoro-sqli-search",
-      "altoro-xss-reflected",
       "altoro-xss-stored",
       "altoro-lfi-content",
       "altoro-default-creds",
@@ -25,9 +27,10 @@
       "altoro-missing-x-frame",
       "altoro-missing-csp",
       "altoro-http-trace",
-      "altoro-param-tampering",
       "altoro-csrf-transfer"
     ],
-    "extras": []
+    "extras": [
+      "Business Logic Flaw: Negative Amount Transfer"
+    ]
   }
 ]
