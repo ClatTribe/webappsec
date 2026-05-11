@@ -32,7 +32,7 @@ export async function GET() {
       <pubDate>${pubDate}</pubDate>
       <description>${escapeXml(post.excerpt)}</description>
       ${post.tags.map((t) => `<category>${escapeXml(t)}</category>`).join('\n      ')}
-      <author>noreply@youraisecurityengineer.com (${escapeXml(post.author.name)})</author>
+      <author>noreply@tensorshield.ai (${escapeXml(post.author.name)})</author>
     </item>`;
     })
     .join('\n');

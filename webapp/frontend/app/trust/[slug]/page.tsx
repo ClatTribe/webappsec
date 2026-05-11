@@ -147,7 +147,7 @@ export default async function TrustPage({ params }: { params: { slug: string } }
           )}
           <div className="mt-6 flex flex-wrap items-center gap-4 text-xs text-neutral-400">
             <span className="inline-flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3" /> Maintained by Strix
+              <Sparkles className="h-3 w-3" /> Maintained by TensorShield
             </span>
             <span>·</span>
             <span>Monitoring for {monthsMonitored} {monthsMonitored === 1 ? 'month' : 'months'}</span>
@@ -264,7 +264,7 @@ export default async function TrustPage({ params }: { params: { slug: string } }
         </section>
 
         <footer className="pt-8 text-center text-[10px] text-neutral-600">
-          Maintained by Strix · This page does not collect cookies or trackers
+          Maintained by TensorShield · This page does not collect cookies or trackers
         </footer>
       </div>
     </main>

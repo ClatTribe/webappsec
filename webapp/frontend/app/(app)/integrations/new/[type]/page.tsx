@@ -34,8 +34,8 @@ function GitHubFlow() {
     <div className="max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold">Connect GitHub</h1>
       <p className="text-sm text-neutral-400">
-        We'll redirect you to GitHub to authorize Strix to access your repositories. The
-        access token is stored encrypted in Supabase Vault and only decrypted at scan time.
+        We'll redirect you to GitHub to authorize TensorShield to access your repositories. The
+        access token is stored encrypted in the vault and only decrypted at scan time.
       </p>
       <a
         href="/api/integrations/oauth/github/start"
@@ -84,8 +84,9 @@ function AwsForm() {
     <div className="max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold">Connect AWS (IAM Role)</h1>
       <p className="text-sm text-neutral-400">
-        Strix will assume this role at scan time and receive short-lived credentials. Configure
-        the trust policy in your AWS account to allow Strix's account principal with the External ID below.
+        TensorShield will assume this role at scan time and receive short-lived credentials.
+        Configure the trust policy in your AWS account to allow our service principal with the
+        External ID below.
       </p>
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Name" value={name} onChange={setName} placeholder="prod-readonly" />

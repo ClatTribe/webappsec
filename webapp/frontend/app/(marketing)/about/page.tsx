@@ -14,7 +14,7 @@ import { buildPageMetadata } from '@/lib/seo';
 export const metadata = buildPageMetadata({
   title: 'About',
   description:
-    'A small team building an AI security engineer with continuous memory of your decisions. The same false positive never lands twice.',
+    'A small team building TensorShield — the AI security engineer for vibe-coded apps, with continuous memory of your decisions. The same false positive never lands twice.',
   path: '/about',
 });
 
@@ -22,7 +22,7 @@ const PRINCIPLES: { Icon: LucideIcon; title: string; body: string }[] = [
   {
     Icon: Brain,
     title: 'Tell us once. We remember.',
-    body: 'Every dismissal becomes a per-org suppression rule with your reason on file. The next scan that would flag the same fingerprint? Suppressed before it hits your inbox — with a chat note citing the rule. The static-analyzer noise pattern dies forever, in your codebase.',
+    body: 'Every dismissal becomes a suppression rule in your workspace with your reason on file. The next scan that would flag the same fingerprint? Suppressed before it hits your inbox — with a chat note citing the rule. The static-analyzer noise pattern dies forever, in your codebase.',
   },
   {
     Icon: Eye,
@@ -32,12 +32,12 @@ const PRINCIPLES: { Icon: LucideIcon; title: string; body: string }[] = [
   {
     Icon: Lock,
     title: 'Your data is yours.',
-    body: 'Per-org RLS on every tenant-scoped table. Integration credentials live encrypted in a per-org vault, decrypt only in the scan sandbox, and get wiped at scan exit. Your agent\'s memory of your decisions stays in your tenant — we never share it, train on it, or look at it.',
+    body: 'Strict workspace isolation on every table. Integration credentials live encrypted in a vault, decrypt only inside the scan sandbox, and get wiped at scan exit. TensorShield\'s memory of your decisions stays in your workspace — we never share it, train a global model on it, or look at it.',
   },
   {
     Icon: Sparkles,
     title: 'A teammate, not a chatbot.',
-    body: 'No mascots, no "Hi! I\'m so excited to scan your code!". Strix has a name, a chat surface, and a memory of your stack — but the conversation is professional. They do the work; they don\'t perform.',
+    body: 'No mascots, no "Hi! I\'m so excited to scan your code!". TensorShield has a name, a chat surface, and a memory of your stack — but the conversation is professional. It does the work; it doesn\'t perform.',
   },
   {
     Icon: ShieldCheck,
@@ -47,7 +47,7 @@ const PRINCIPLES: { Icon: LucideIcon; title: string; body: string }[] = [
   {
     Icon: Heart,
     title: 'Continuous beats quarterly.',
-    body: 'Quarterly pentests show up six months after the bug shipped. Annual SOC 2 audits feel like a tax. Strix runs continuously against your registered assets, updates your compliance posture on every scan, and is on-call 24/7 with no PTO.',
+    body: 'Quarterly pentests show up six months after the bug shipped. Annual SOC 2 audits feel like a tax. TensorShield runs continuously against your registered assets, updates your compliance posture on every scan, and is on-call 24/7 with no PTO.',
   },
 ];
 
@@ -57,14 +57,15 @@ export default function AboutPage() {
       <header className="space-y-5">
         <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">About</p>
         <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-white sm:text-5xl">
-          The AI security engineer your team would hire if it could afford to.
+          The AI security engineer for your vibe-coded apps.
         </h1>
         <p className="max-w-2xl text-lg leading-relaxed text-neutral-300">
-          We&apos;re building youraisecurityengineer for the dev team that just got asked
-          &quot;are we SOC 2 ready?&quot; and doesn&apos;t yet have a CISO to ask. Or for the
-          security engineer who&apos;s tired of triaging static-analyzer noise. Or for the founder
-          who knows their app probably has bugs but isn&apos;t ready to pay $30K for a quarterly
-          pentest.
+          We&apos;re building <strong>TensorShield</strong> for the founder who shipped an app in a
+          weekend with Cursor and Lovable and isn&apos;t ready to pay $30K for a quarterly pentest.
+          For the dev team that just got asked &quot;are we SOC 2 ready?&quot; without a CISO to
+          ask. For the engineer who&apos;s tired of triaging static-analyzer noise. The teams who
+          need security tools the most — small, fast-moving, no dedicated appsec hire — get the
+          worst experience from existing tools. TensorShield is for them.
         </p>
       </header>
 
@@ -74,37 +75,36 @@ export default function AboutPage() {
           <p>
             Application security has had a signal-to-noise problem for two decades. SAST scanners
             print 300 findings, 285 of which are noise. Pentest reports show up six months after
-            the bug shipped. Compliance tooling collects screenshots once a quarter. The teams who
-            need security tools the most — small companies, startups, anyone without a dedicated
-            appsec hire — get the worst experience.
+            the bug shipped. Compliance tooling collects screenshots once a quarter. Vibe-coded
+            apps — shipped fast with AI tools, by founders who can&apos;t afford a security
+            engineer — get the worst version of all of this.
           </p>
           <p>
-            The bet behind <strong>youraisecurityengineer</strong> is that AI agents finally close
-            the gap. Not because models are magic, but because they can do the boring, expensive
-            work a senior security engineer would do if they had infinite time: read your code,
+            The bet behind <strong>TensorShield</strong> is that AI agents finally close the gap.
+            Not because models are magic, but because they can do the boring, expensive work a
+            senior security engineer would do if they had infinite time: read your code,
             hypothesize attack chains, actually try them, write up the report, and triage their
             own output before it reaches you.
           </p>
           <p>
             And then the harder bet: that the relationship can <em>persist</em>. Most security
             tools forget everything between scans. You dismiss the same false positive every
-            Monday. You re-explain the same exception every audit. Strix is built around a
-            different shape: a multi-tenant platform where each org gets a security engineer with
-            <em> continuous memory</em> — every dismissal becomes a per-org rule with your reason
-            on file, every scan updates your compliance posture, every interaction lives in a
-            conversation the engineer can refer back to.
+            Monday. You re-explain the same exception every audit. TensorShield is built around a
+            different shape — a security engineer with <em>continuous memory</em>. Every dismissal
+            becomes a rule with your reason on file. Every scan updates your compliance posture.
+            Every interaction lives in a conversation it can refer back to.
           </p>
           <p>
             Dismiss once with a reason. The next scan that would surface the same fingerprint
             doesn&apos;t — you get a chat note saying &quot;suppressed: your rule from 4 days ago
-            covers this&quot;. Ask &quot;how ready am I for SOC 2?&quot; — Strix answers from
-            your org&apos;s ledger, with citations. Tell Strix &quot;be more aggressive with
-            dep-CVEs&quot; — they adjust the autonomy slider, acknowledge, and act. The product
+            covers this&quot;. Ask &quot;how ready am I for SOC 2?&quot; — TensorShield answers
+            from your workspace, with citations. Tell it &quot;be more aggressive with
+            dep-CVEs&quot; — it adjusts the autonomy slider, acknowledges, and acts. The product
             isn&apos;t a dashboard you visit; it&apos;s a teammate who&apos;s been with you for
             two years.
           </p>
           <p>
-            We&apos;re a small team. We use the product on our own code, our own production
+            We&apos;re a small team. We use TensorShield on our own code, our own production
             URLs, and our own compliance posture. We don&apos;t have a sales department and
             we&apos;d like to keep it that way.
           </p>

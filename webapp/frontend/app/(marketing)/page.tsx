@@ -27,9 +27,9 @@ import type { LucideIcon } from 'lucide-react';
 import { buildPageMetadata } from '@/lib/seo';
 
 export const metadata = buildPageMetadata({
-  title: 'Hire an AI security engineer who never forgets',
+  title: 'TensorShield — AI security engineer for your vibe-coded apps',
   description:
-    "An AI security engineer that scans your code, watches your URLs, triages findings as you make decisions, and remembers everything. The same false positive never lands twice. Your SOC 2 evidence updates with every scan.",
+    "TensorShield is the AI security engineer for your vibe-coded apps. It scans your code, watches your URLs, triages findings as you make decisions, and remembers everything. The same false positive never lands twice.",
   path: '/',
   rawTitle: true,
 });
@@ -60,18 +60,19 @@ function Hero() {
         <div className="lg:col-span-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
             <Sparkles className="h-3 w-3" strokeWidth={2.5} />
-            AI security engineer · multi-tenant SaaS
+            AI security engineer for vibe-coded apps
           </div>
           <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl">
-            Hire an AI security engineer{' '}
+            Your AI security engineer.{' '}
             <span className="bg-gradient-to-br from-cyan-300 via-blue-300 to-violet-300 bg-clip-text text-transparent">
-              who never forgets.
+              Never forgets.
             </span>
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-neutral-300">
-            Strix scans your code, watches your URLs, and triages findings as you make decisions —
-            then remembers every dismissal, every fix, every exception. The same false positive
-            never lands twice. Your SOC 2 evidence updates with every scan.
+            You vibe-coded an app. You shipped it. Now you need someone to keep it secure.
+            TensorShield scans your code, watches your URLs, and triages findings as you make
+            decisions — then remembers every dismissal, every fix, every exception. The same
+            false positive never lands twice.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
@@ -130,7 +131,7 @@ function HeroChatMockup() {
             <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
           </div>
-          <span className="font-mono text-[10.5px] text-neutral-500">strix.io · getedunext workspace</span>
+          <span className="font-mono text-[10.5px] text-neutral-500">tensorshield.ai · your workspace</span>
           <div className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
             <span className="text-[10px] text-neutral-400">live</span>
@@ -181,15 +182,15 @@ function HeroChatMockup() {
         <div className="border-t border-neutral-800/60 bg-neutral-900/40 px-4 py-3">
           <div className="flex items-end gap-2">
             <div className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-500">
-              Ask Strix anything about your scans, findings, or assets…
+              Ask TensorShield anything about your scans, findings, or assets…
             </div>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20">
               <Send className="h-3.5 w-3.5" />
             </span>
           </div>
           <p className="mt-2 text-[10px] text-neutral-500">
-            Scoped to your org. Findings, scans, compliance evidence isolated to{' '}
-            <code className="font-mono">org acme-prod…</code>.
+            Your workspace · findings, scans, and compliance evidence stay private to your
+            account.
           </p>
         </div>
       </div>
@@ -309,15 +310,15 @@ function ClosedLoop() {
           The moat
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Tell Strix once.{' '}
+          Tell TensorShield once.{' '}
           <span className="bg-gradient-to-br from-violet-300 to-cyan-300 bg-clip-text text-transparent">
-            They&apos;ll never re-ask.
+            It&apos;ll never re-ask.
           </span>
         </h2>
         <p className="mt-4 text-base leading-relaxed text-neutral-400">
-          Every dismissal becomes a per-org rule with your reason on file. The next scan that
-          would&apos;ve flagged the same fingerprint? Suppressed before it hits your inbox — with a
-          chat note citing the rule.
+          Every dismissal becomes a rule with your reason on file. The next scan that would&apos;ve
+          flagged the same fingerprint? Suppressed before it hits your inbox — with a chat note
+          citing the rule.
         </p>
       </div>
 
@@ -325,7 +326,7 @@ function ClosedLoop() {
         <LoopStep
           n={1}
           tone="amber"
-          title="Strix finds it"
+          title="TensorShield finds it"
           chip="🟡 Low — Missing X-Frame-Options"
           quote="Found on /search, /about, /contact. [Dismiss] [Suggest fix]"
         />
@@ -335,7 +336,7 @@ function ClosedLoop() {
           tone="emerald"
           title="You dismiss with a reason"
           chip='"Behind Cloudflare WAF — header injected at the edge"'
-          quote="Strix records the rule (fingerprint + reason, confidence 0.75)."
+          quote="TensorShield records the rule (fingerprint + reason, confidence 0.75)."
         />
       </div>
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
@@ -355,8 +356,8 @@ function ClosedLoop() {
       </div>
 
       <p className="mx-auto mt-12 max-w-xl text-center text-sm text-neutral-500">
-        The dismissal episode lives in your org&apos;s memory. The suppression rule applies per-org
-        only — Acme&apos;s rule never affects Beta. Verifiable in every scan&apos;s audit trail.
+        Your dismissal lives in your workspace. Rules apply only to your assets and are verifiable
+        in every scan&apos;s audit trail.
       </p>
     </section>
   );
@@ -429,42 +430,42 @@ function Capabilities() {
       Icon: MessageSquare,
       title: 'In-app chat that knows your stack',
       body:
-        'Strix carries continuous memory of your repos, your team, your past decisions. Ask "what was the SSRF we found last quarter?" — they remember.',
+        'TensorShield carries continuous memory of your repos, your decisions, your past triages. Ask "what was the SSRF we found last quarter?" — it remembers.',
       tone: 'cyan',
     },
     {
       Icon: Hash,
       title: 'Slack #security as a second home',
       body:
-        'Findings, dismissal confirmations, and compliance posture updates land in your team\'s channel automatically. Opt-in per org.',
+        'Findings, dismissal confirmations, and compliance posture updates land in your team\'s channel automatically. Opt-in.',
       tone: 'violet',
     },
     {
       Icon: Activity,
       title: 'Continuous scanning, not on-demand',
       body:
-        'Register an asset with a cadence. Strix scans daily, weekly, or on-push without you touching the dashboard. Drift gets flagged the moment it lands.',
+        'Register an asset with a cadence. TensorShield scans daily, weekly, or on-push without you touching the dashboard. Drift gets flagged the moment it lands.',
       tone: 'blue',
     },
     {
       Icon: Repeat,
       title: 'Closed-loop suppression learning',
       body:
-        'Dismiss once with a reason. The pattern is suppressed on the next scan with a chat note citing your rule. Per-org, fingerprint-precise, fully auditable.',
+        'Dismiss once with a reason. The pattern is suppressed on the next scan with a chat note citing your rule. Fingerprint-precise, fully auditable.',
       tone: 'emerald',
     },
     {
       Icon: FileLock,
       title: 'Compliance as a living document',
       body:
-        'SOC 2 / ISO 27001 evidence collected from every scan. Public Trust Page at trust.<your-domain> for prospects + auditors. Updates in real time.',
+        'SOC 2 / ISO 27001 evidence collected from every scan. A public Trust Page for prospects and auditors. Updates in real time.',
       tone: 'amber',
     },
     {
       Icon: Workflow,
       title: 'Autonomy slider per category',
       body:
-        '"Auto-fix critical dep-CVEs but ask me on medium" — tell Strix in chat. The slider scales with your trust; no need to click "Apply Fix" 47 times.',
+        '"Auto-fix critical dep-CVEs but ask me on medium" — tell TensorShield in chat. The slider scales with your trust; no need to click "Apply Fix" 47 times.',
       tone: 'rose',
     },
   ];
@@ -476,7 +477,7 @@ function Capabilities() {
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
           One AI security engineer.{' '}
-          <span className="text-neutral-400">Five surfaces. Per-org isolation throughout.</span>
+          <span className="text-neutral-400">Five surfaces. One memory.</span>
         </h2>
       </div>
       <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -545,7 +546,7 @@ function Personas() {
           title="You shipped a SaaS. The security team is &ldquo;future you.&rdquo;"
           bullets={[
             'Install the GitHub App on one repo',
-            "Paste your prod URL — Strix DAST's it daily",
+            "Paste your prod URL — TensorShield scans it daily",
             'Findings land as PR comments + chat — no separate dashboard to refresh',
             'Auto-fix dep-CVEs once you trust the slider',
           ]}
@@ -634,9 +635,9 @@ function HowItWorks() {
   const steps: { n: number; title: string; body: string; Icon: LucideIcon }[] = [
     {
       n: 1,
-      title: 'Create your org workspace',
+      title: 'Create your workspace',
       body:
-        '30 seconds. You get a per-org partition: isolated sandbox containers, an encrypted vault for credentials, an evidence chain signed with your org\'s key.',
+        '30 seconds. Your workspace gives you an isolated scan sandbox, an encrypted vault for credentials, and an evidence chain signed with your own key.',
       Icon: Lock,
     },
     {
@@ -650,14 +651,14 @@ function HowItWorks() {
       n: 3,
       title: 'First scan kicks off',
       body:
-        'Strix runs in an isolated sandbox per scan. Findings stream live into your chat. PR comments land within the GitHub App\'s scope.',
+        'TensorShield runs in an isolated sandbox per scan. Findings stream live into your chat. PR comments land within the GitHub App\'s scope.',
       Icon: Activity,
     },
     {
       n: 4,
-      title: 'Triage in chat — Strix remembers',
+      title: 'Triage in chat — TensorShield remembers',
       body:
-        'Dismiss with a reason. "Fix the critical." "What\'s open?" "How ready am I for SOC 2?" — Strix answers from your org\'s ledger. Continuous scans take over from here.',
+        'Dismiss with a reason. "Fix the critical." "What\'s open?" "How ready am I for SOC 2?" — TensorShield answers from your workspace. Continuous scans take over from here.',
       Icon: Brain,
     },
   ];
@@ -695,7 +696,7 @@ function HowItWorks() {
 }
 
 // ============================================================================
-// COMPARISON — vs the categories Strix replaces
+// COMPARISON — vs the categories TensorShield replaces
 // ============================================================================
 
 function ComparisonTable() {
@@ -703,50 +704,50 @@ function ComparisonTable() {
     label: string;
     Icon: LucideIcon;
     others: string;
-    strix: string;
+    tensorshield: string;
   };
   const rows: Row[] = [
     {
       label: 'Signal shape',
       Icon: AlertTriangle,
       others: '300 findings, 285 noise',
-      strix: 'The 2 that matter today, surfaced in chat',
+      tensorshield: 'The 2 that matter today, surfaced in chat',
     },
     {
       label: 'Continuity',
       Icon: Clock,
       others: 'Quarterly pentests; stale on arrival',
-      strix: 'Continuous per-asset scans, every day',
+      tensorshield: 'Continuous per-asset scans, every day',
     },
     {
       label: 'Learning',
       Icon: Brain,
       others: 'Same false positive re-flagged every scan',
-      strix: 'Dismiss once → rule with your reason on file',
+      tensorshield: 'Dismiss once → rule with your reason on file',
     },
     {
       label: 'Where it lives',
       Icon: MessageSquare,
       others: 'A dashboard you have to refresh',
-      strix: 'Chat, PR comments, Slack — wherever your team works',
+      tensorshield: 'Chat, PR comments, Slack — wherever your team works',
     },
     {
       label: 'Compliance evidence',
       Icon: FileLock,
       others: 'Vanta-style screenshot collection',
-      strix: 'Auto-collected per scan, live Trust Page',
+      tensorshield: 'Auto-collected per scan, live Trust Page',
     },
     {
       label: 'Autonomy',
       Icon: Zap,
       others: 'Click "Apply Fix" once at a time',
-      strix: 'Per-category slider: co-pilot ↔ autopilot',
+      tensorshield: 'Per-category slider: co-pilot ↔ autopilot',
     },
     {
-      label: 'Tenancy',
+      label: 'Your data',
       Icon: Lock,
-      others: 'Single-tenant tools; per-org reinvention',
-      strix: 'Multi-tenant from day 1, RLS everywhere',
+      others: 'Pooled training, generic suppression heuristics',
+      tensorshield: 'Your dismissals + decisions stay in your workspace',
     },
   ];
 
@@ -760,15 +761,16 @@ function ComparisonTable() {
           A different category than scanners or pentest tools.
         </h2>
         <p className="mt-3 text-base text-neutral-400">
-          We&apos;re not a better Aikido or a smarter Snyk. We&apos;re what you&apos;d hire if
-          security engineers worked 24/7, never forgot, and lived inside your team&apos;s tools.
+          We&apos;re not a better Aikido or a smarter Snyk. TensorShield is what you&apos;d hire
+          if a security engineer worked 24/7, never forgot, and lived inside your team&apos;s
+          tools.
         </p>
       </div>
       <div className="mt-12 overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-900/30">
         <div className="grid grid-cols-[1.2fr_1.4fr_1.4fr] border-b border-neutral-800/80 bg-neutral-950/40 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
           <div></div>
           <div>Traditional tools</div>
-          <div className="text-cyan-300">Strix</div>
+          <div className="text-cyan-300">TensorShield</div>
         </div>
         {rows.map((r, i) => (
           <div
@@ -782,7 +784,7 @@ function ComparisonTable() {
               {r.label}
             </div>
             <div className="text-neutral-400">{r.others}</div>
-            <div className="font-medium text-neutral-100">{r.strix}</div>
+            <div className="font-medium text-neutral-100">{r.tensorshield}</div>
           </div>
         ))}
       </div>
@@ -809,7 +811,7 @@ function FinalCta() {
         <div className="relative">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
             <Sparkles className="h-3 w-3" strokeWidth={2.5} />
-            Hire your AI security engineer
+            Hire TensorShield
           </div>
           <h2 className="mx-auto mt-5 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
             Sign up. Register your first asset.{' '}
@@ -818,7 +820,7 @@ function FinalCta() {
             </span>
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-base text-neutral-300">
-            5 free scans per month. Per-org isolation included. No credit card. Conversations
+            5 free scans per month. Your workspace stays private. No credit card. Conversations
             you&apos;ll wish your real security engineer remembered.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">

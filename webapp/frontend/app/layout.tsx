@@ -29,6 +29,8 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   keywords: [
     'AI security engineer',
+    'TensorShield',
+    'security for vibe-coded apps',
     'application security',
     'continuous security monitoring',
     'penetration testing automation',
@@ -37,7 +39,6 @@ export const metadata: Metadata = {
     'SOC 2 evidence automation',
     'security compliance posture',
     'trust page',
-    'multi-tenant SaaS security',
     'agentic security',
   ],
   authors: [{ name: SITE_NAME }],
