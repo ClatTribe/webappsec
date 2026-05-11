@@ -33,6 +33,11 @@ const PUBLIC_PREFIXES = [
   // prefix, /trust/<slug> would be redirected to /login and the page
   // would never reach an unauthenticated visitor.
   '/trust',
+  // Auditor share-links (migration 054). /audit/<token> — the token is
+  // the access control; the SECURITY DEFINER lookup function rejects
+  // unknown / revoked / expired tokens. Same allowlist pattern as
+  // /trust above.
+  '/audit',
 ];
 
 export async function middleware(request: NextRequest) {

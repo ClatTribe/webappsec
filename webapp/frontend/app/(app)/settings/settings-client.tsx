@@ -17,6 +17,7 @@ import {
   Bell,
   ShieldCheck,
   ExternalLink,
+  FileLock,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -137,6 +138,13 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
           publishedAt={org.trust_page_published_at ?? null}
           onSaved={() => router.refresh()}
         />
+      )}
+
+      {/* Auditor share-links (migration 054). Admin-only. Time-bounded
+          anonymous URLs into the deeper evidence than the public trust
+          page. */}
+      {org && (orgRole === 'owner' || orgRole === 'admin') && (
+        <AuditLinksSection orgId={org.id} />
       )}
     </div>
   );
@@ -1608,5 +1616,298 @@ function TrustPageSection({
         )}
       </div>
     </Section>
+  );
+}
+
+// ============== AUDIT SHARE-LINKS ==============
+// Admin-only manager for time-bounded auditor URLs (migration 054).
+// Token is returned exactly once at creation — never re-exposed on
+// subsequent reads. Listed links show prefix + expiry + access count
+// so the admin can identify and revoke each one.
+
+interface AuditLink {
+  id: string;
+  label: string | null;
+  token_preview: string;
+  expires_at: string;
+  revoked_at: string | null;
+  access_count: number;
+  last_accessed_at: string | null;
+  created_at: string;
+}
+
+interface NewLinkResult {
+  id: string;
+  token: string;
+  label: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+function AuditLinksSection({ orgId }: { orgId: string }) {
+  const [links, setLinks] = useState<AuditLink[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [newLink, setNewLink] = useState<NewLinkResult | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [label, setLabel] = useState('');
+  const [ttlDays, setTtlDays] = useState<number>(30);
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/orgs/${orgId}/audit-links`);
+      if (res.ok) {
+        const body = (await res.json()) as { links: AuditLink[] };
+        setLinks(body.links);
+      } else {
+        setLinks([]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function create() {
+    setBusy(true);
+    setFeedback(null);
+    setNewLink(null);
+    const res = await fetch(`/api/orgs/${orgId}/audit-links`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: label || null, ttl_days: ttlDays }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Create failed' });
+      return;
+    }
+    const body = (await res.json()) as NewLinkResult;
+    setNewLink(body);
+    setLabel('');
+    setShowCreate(false);
+    void refresh();
+  }
+
+  async function revoke(id: string) {
+    if (!confirm('Revoke this auditor link? Anyone holding the URL will get a 404 immediately.')) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/orgs/${orgId}/audit-links?id=${id}`, { method: 'DELETE' });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Revoke failed' });
+      return;
+    }
+    void refresh();
+  }
+
+  async function copyNewLink() {
+    if (!newLink) return;
+    const url = `${window.location.origin}/audit/${newLink.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setFeedback({ kind: 'success', text: 'URL copied.' });
+    } catch {
+      setFeedback({ kind: 'error', text: 'Copy failed — long-press to copy.' });
+    }
+  }
+
+  const active = (links ?? []).filter((l) => !l.revoked_at && new Date(l.expires_at) > new Date());
+  const inactive = (links ?? []).filter((l) => l.revoked_at || new Date(l.expires_at) <= new Date());
+
+  return (
+    <Section
+      title="Auditor share-links"
+      Icon={FileLock}
+      hint={
+        'Time-bounded anonymous URLs into deeper compliance evidence than '
+        + 'the public trust page (raw control verdicts, recent findings, '
+        + 'signed evidence chain). Auditors use these during a SOC 2 / '
+        + 'ISO 27001 review. Each access is logged.'
+      }
+    >
+      {/* Just-created link banner — token is the secret, shown ONCE. */}
+      {newLink && (
+        <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-emerald-200">
+            <Check className="h-4 w-4" strokeWidth={2.5} />
+            Link created — copy this URL now. We can&apos;t show it again.
+          </div>
+          <code className="mt-3 block break-all rounded-md border border-emerald-500/30 bg-neutral-950 px-3 py-2 font-mono text-xs text-emerald-200">
+            {typeof window !== 'undefined' ? window.location.origin : ''}
+            /audit/{newLink.token}
+          </code>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={copyNewLink}
+              className="rounded-md bg-gradient-to-b from-white to-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-950 shadow-sm hover:shadow-md"
+            >
+              Copy URL
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewLink(null)}
+              className="rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create form */}
+      {!showCreate ? (
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="mb-4 rounded-md bg-gradient-to-b from-white to-neutral-200 px-3.5 py-2 text-xs font-semibold text-neutral-950 shadow-sm hover:shadow-md"
+        >
+          Generate new link
+        </button>
+      ) : (
+        <div className="mb-4 space-y-3 rounded-lg border border-neutral-800 bg-neutral-900/30 p-4">
+          <Field label="Label (optional)" hint="Helps you remember which auditor this link is for.">
+            <input
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Acme Corp · SOC 2 Type 2 audit, May 2026"
+              maxLength={200}
+              className={INPUT_CLASS}
+            />
+          </Field>
+          <Field label="Expires in" hint="Auditors typically need ~30 days. Max 365.">
+            <select
+              value={ttlDays}
+              onChange={(e) => setTtlDays(parseInt(e.target.value, 10))}
+              className={INPUT_CLASS}
+            >
+              <option value={7}>7 days</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+              <option value={60}>60 days</option>
+              <option value={90}>90 days</option>
+              <option value={180}>180 days</option>
+            </select>
+          </Field>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCreate(false)}
+              className="rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={create}
+              disabled={busy}
+              className="rounded-md bg-gradient-to-b from-white to-neutral-200 px-3.5 py-1.5 text-xs font-semibold text-neutral-950 shadow-sm hover:shadow-md disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Create'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Active links */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+          Active links ({active.length})
+        </h3>
+        {loading && (
+          <p className="text-xs text-neutral-500">
+            <Loader2 className="inline h-3 w-3 animate-spin" /> Loading…
+          </p>
+        )}
+        {!loading && active.length === 0 && (
+          <p className="text-xs text-neutral-500">No active auditor links.</p>
+        )}
+        {active.map((l) => (
+          <LinkRow key={l.id} link={l} onRevoke={() => revoke(l.id)} />
+        ))}
+      </div>
+
+      {/* Inactive (revoked or expired) */}
+      {inactive.length > 0 && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-xs text-neutral-500 hover:text-neutral-300">
+            Revoked / expired ({inactive.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {inactive.map((l) => (
+              <LinkRow key={l.id} link={l} inactive />
+            ))}
+          </div>
+        </details>
+      )}
+
+      {feedback && (
+        <p
+          className={`mt-3 text-xs ${
+            feedback.kind === 'success' ? 'text-emerald-300' : 'text-rose-300'
+          }`}
+        >
+          {feedback.text}
+        </p>
+      )}
+    </Section>
+  );
+}
+
+function LinkRow({
+  link,
+  onRevoke,
+  inactive,
+}: {
+  link: AuditLink;
+  onRevoke?: () => void;
+  inactive?: boolean;
+}) {
+  const expires = new Date(link.expires_at);
+  const expired = expires <= new Date();
+  const revoked = Boolean(link.revoked_at);
+  return (
+    <div className="rounded-md border border-neutral-800 bg-neutral-900/30 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-neutral-100">{link.label || '(no label)'}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] text-neutral-500">
+            <code className="font-mono text-neutral-400">{link.token_preview}</code>
+            <span>
+              {revoked
+                ? `Revoked ${new Date(link.revoked_at!).toLocaleDateString()}`
+                : expired
+                ? 'Expired'
+                : `Expires ${expires.toLocaleDateString()}`}
+            </span>
+            <span>· {link.access_count} access{link.access_count === 1 ? '' : 'es'}</span>
+            {link.last_accessed_at && (
+              <span>· last {new Date(link.last_accessed_at).toLocaleDateString()}</span>
+            )}
+          </div>
+        </div>
+        {!inactive && onRevoke && (
+          <button
+            type="button"
+            onClick={onRevoke}
+            className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20"
+          >
+            Revoke
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
