@@ -1,0 +1,67 @@
+{
+  "target": "nodegoat",
+  "source": "OWASP NodeGoat project README — tutorial categories",
+  "vulns": [
+    {
+      "id": "ng-a1-injection",
+      "cwe": "CWE-89",
+      "title": "Server-side JavaScript / NoSQL injection",
+      "title_keywords": ["nosql injection", "mongodb injection", "ssji", "server-side javascript"]
+    },
+    {
+      "id": "ng-a2-auth",
+      "cwe": "CWE-287",
+      "title": "Broken authentication / weak session handling",
+      "endpoint": "/login",
+      "title_keywords": ["broken auth", "weak session", "session fixation"]
+    },
+    {
+      "id": "ng-a3-xss",
+      "cwe": "CWE-79",
+      "title": "XSS (reflected / stored)",
+      "title_keywords": ["xss", "cross-site scripting"]
+    },
+    {
+      "id": "ng-a4-idor",
+      "cwe": "CWE-639",
+      "title": "Insecure direct object reference",
+      "title_keywords": ["idor", "broken access control"]
+    },
+    {
+      "id": "ng-a5-misconfig",
+      "cwe": "CWE-693",
+      "title": "Security misconfiguration / missing headers",
+      "title_keywords": ["security misconfiguration", "missing header", "default config"]
+    },
+    {
+      "id": "ng-a6-data-exposure",
+      "cwe": "CWE-200",
+      "title": "Sensitive data exposure (weak crypto, plain-text password)",
+      "title_keywords": ["sensitive data", "weak crypto", "plaintext password"]
+    },
+    {
+      "id": "ng-a7-csrf",
+      "cwe": "CWE-352",
+      "title": "CSRF on state-changing endpoints",
+      "title_keywords": ["csrf", "cross-site request forgery"]
+    },
+    {
+      "id": "ng-a9-deps",
+      "cwe": "CWE-1104",
+      "title": "Components with known vulnerabilities (npm)",
+      "title_keywords": ["cve", "outdated dependency", "vulnerable component"]
+    },
+    {
+      "id": "ng-prototype-pollution",
+      "cwe": "CWE-1321",
+      "title": "Prototype pollution",
+      "title_keywords": ["prototype pollution"]
+    },
+    {
+      "id": "ng-ssrf",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery",
+      "title_keywords": ["ssrf", "server-side request forgery"]
+    }
+  ]
+}

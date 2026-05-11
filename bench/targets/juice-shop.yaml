@@ -1,0 +1,23 @@
+# OWASP Juice Shop — the most-popular intentionally-vulnerable web app.
+# Runs as a Docker container locally:
+#   docker run -p 3000:3000 bkimminich/juice-shop
+# Then point this YAML at http://host.docker.internal:3000 (or your LAN IP).
+
+slug: juice-shop
+name: OWASP Juice Shop
+url: http://localhost:3000
+target_type: web_application
+description: |
+  OWASP's flagship vulnerable web app. ~100 documented challenges
+  covering OWASP Top 10. Hosted locally via Docker; we use the public
+  ground-truth list from the project's challenges.yml.
+scan_mode: standard
+max_cost_usd: 2.50
+instruction: |
+  Authorised assessment against a local OWASP Juice Shop instance.
+  Cover the OWASP Top 10. Auth endpoints, IDOR, deserialization, JWT
+  flaws are all expected to be present.
+ground_truth_file: ground_truth/juice-shop.json
+license: MIT (project) / public ground-truth
+setup: |
+  docker run -d -p 3000:3000 bkimminich/juice-shop

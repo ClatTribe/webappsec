@@ -1,0 +1,24 @@
+# OWASP NodeGoat — Node.js-specific intentionally-vulnerable app.
+# Tests language-specific patterns (prototype pollution, SSJI, MongoDB
+# injection) that PHP-based DVWA / Juice Shop don't always exercise.
+
+slug: nodegoat
+name: OWASP NodeGoat
+url: http://localhost:4000
+target_type: web_application
+description: |
+  Node.js-flavoured intentionally-vulnerable app. Exercises Node-only
+  primitives: prototype pollution, server-side JS injection, NoSQL
+  (MongoDB) injection, weak crypto patterns.
+scan_mode: standard
+max_cost_usd: 1.50
+instruction: |
+  Authorised assessment against a local OWASP NodeGoat instance.
+  Cover Node.js / MongoDB-specific attack vectors in addition to
+  the OWASP Top 10.
+ground_truth_file: ground_truth/nodegoat.json
+license: Apache-2.0 (project)
+setup: |
+  git clone https://github.com/OWASP/NodeGoat.git && cd NodeGoat
+  docker-compose -f docker-compose-mongo.yml up -d
+  # NodeGoat at http://localhost:4000

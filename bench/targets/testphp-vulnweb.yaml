@@ -1,0 +1,18 @@
+# Acunetix's public PHP testbed. Stable public URL like Altoro Mutual,
+# but PHP-flavoured. Used industry-wide as a DAST baseline.
+
+slug: testphp-vulnweb
+name: Acunetix testphp.vulnweb.com
+url: http://testphp.vulnweb.com
+target_type: web_application
+description: |
+  Acunetix's public intentionally-vulnerable PHP testbed. Stable URL,
+  no auth required. Contains SQLi, XSS, file inclusion, and dir-listing
+  vulnerabilities.
+scan_mode: standard
+max_cost_usd: 1.50
+instruction: |
+  Authorised external assessment against Acunetix's public PHP testbed.
+  Standard methodology.
+ground_truth_file: ground_truth/testphp-vulnweb.json
+license: Public demo (Acunetix)
