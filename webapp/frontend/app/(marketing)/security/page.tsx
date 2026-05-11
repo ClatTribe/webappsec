@@ -94,11 +94,11 @@ const PROCESS: { title: string; body: string }[] = [
   },
   {
     title: 'We scan ourselves',
-    body: 'We point our own AI security engineer at our own codebase regularly. Two real bugs in our service were caught and fixed by an internal scan; you can read about them in the changelog.',
+    body: 'We point our own AI security engineer at our own codebase regularly. Two real bugs in our service were caught and fixed by an internal scan; the runs are in our own audit log.',
   },
   {
-    title: 'Per-tenant model isolation',
-    body: 'Your reinforcement-learning triage model lives in your tenant only. We never aggregate, share, or train a global model on your triage signal. Your private feedback loop stays private.',
+    title: 'Per-tenant memory + suppression rules',
+    body: 'Your agent\'s memory of your decisions — facts about your stack, dismissal rules with your reasons, autonomy preferences — lives in your tenant only, behind RLS keyed on org_id. We never aggregate, share, or train a global model on your signal. Acme\'s rules never affect Beta.',
   },
 ];
 

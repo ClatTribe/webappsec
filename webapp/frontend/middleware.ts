@@ -25,7 +25,6 @@ const PUBLIC_PREFIXES = [
   '/privacy',
   '/terms',
   '/contact',
-  '/changelog',
   '/blog',
   '/.well-known',
   // Public Living Trust Page (migration 047). Each org opts in via
