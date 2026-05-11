@@ -4,7 +4,6 @@ import { ArrowRight } from 'lucide-react';
 const NAV_LINKS = [
   { href: '/pricing', label: 'Pricing' },
   { href: '/blog', label: 'Blog' },
-  { href: '/changelog', label: 'Changelog' },
   { href: '/security', label: 'Security' },
   { href: '/about', label: 'About' },
 ];
@@ -83,15 +82,15 @@ export function MarketingFooter() {
               </span>
             </Link>
             <p className="mt-3 max-w-xs text-xs leading-relaxed text-neutral-500">
-              An AI security engineer that finds real vulnerabilities and learns from your triage to
-              eliminate false positives over time.
+              An AI security engineer that scans your code, watches your URLs, and remembers
+              every decision you make — so the same false positive never lands twice.
             </p>
           </div>
           <FooterColumn
             title="Product"
             links={[
               { href: '/pricing', label: 'Pricing' },
-              { href: '/changelog', label: 'Changelog' },
+              { href: '/blog', label: 'Blog' },
               { href: '/security', label: 'Security' },
               { href: '/signup', label: 'Get started' },
             ]}

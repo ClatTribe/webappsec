@@ -6,7 +6,7 @@ import {
   Sparkles,
   Zap,
   Building2,
-  Code2,
+  Repeat,
   HelpCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -15,7 +15,7 @@ import { buildPageMetadata } from '@/lib/seo';
 export const metadata = buildPageMetadata({
   title: 'Pricing',
   description:
-    'Free for personal projects. From $99/mo for teams. No per-finding fees. No surprise bills. Reinforcement-trained triage on every plan.',
+    'Free for personal projects. From $99/mo for teams. No per-finding fees. No surprise bills. Continuous scanning, chat surface, and closed-loop suppression learning on every plan.',
   path: '/pricing',
 });
 
@@ -41,7 +41,8 @@ const TIERS: Tier[] = [
     bullets: [
       '5 scans / month',
       'Public GitHub repos',
-      'Reinforcement-trained AI triage',
+      'In-app chat surface (with memory)',
+      'Closed-loop suppression learning',
       '1 user',
       'Community support',
     ],
@@ -50,17 +51,16 @@ const TIERS: Tier[] = [
     name: 'Team',
     price: '$99',
     cadence: '/ workspace / month',
-    tagline: 'For dev teams scanning their own code.',
+    tagline: 'For dev teams shipping continuously.',
     cta: { label: 'Start 14-day trial', href: '/signup' },
     highlight: true,
     Icon: Zap,
     bullets: [
-      '100 scans / month',
-      'Private repos · scheduled scans · all integrations',
-      'GitHub PR comments · Slack · webhooks',
-      'Up to 10 users',
-      'Email support',
-      'RL triage with reasoning + reachability',
+      '100 scans / month + continuous scheduled scans',
+      'Private repos · all integrations',
+      'GitHub PR comments · Slack #security bridge',
+      'Living Trust Page (per-org URL)',
+      'Up to 10 users · email support',
     ],
   },
   {
@@ -71,12 +71,11 @@ const TIERS: Tier[] = [
     cta: { label: 'Start 14-day trial', href: '/signup' },
     Icon: Building2,
     bullets: [
-      'Unlimited scans',
-      'SOC 2 evidence exports (SARIF, JSON, CSV)',
+      'Unlimited scans · highest concurrency cap',
+      'SOC 2 / ISO 27001 evidence chain (HMAC-signed)',
       'Compliance mapping (OWASP, CWE, PCI-DSS)',
       'Priority support · 24h response',
-      'Up to 25 users',
-      'Audit log retention controls',
+      'Up to 25 users · configurable retention',
     ],
   },
 ];
@@ -84,17 +83,20 @@ const TIERS: Tier[] = [
 const MATRIX: { label: string; values: [string | boolean, string | boolean, string | boolean] }[] = [
   { label: 'Scans per month', values: ['5', '100', 'Unlimited'] },
   { label: 'Users per workspace', values: ['1', '10', '25'] },
+  { label: 'In-app chat surface (with memory)', values: [true, true, true] },
+  { label: 'Closed-loop suppression learning', values: [true, true, true] },
   { label: 'Public GitHub repos', values: [true, true, true] },
   { label: 'Private repos', values: [false, true, true] },
-  { label: 'Scheduled scans (daily / weekly / monthly)', values: [false, true, true] },
-  { label: 'AI triage with reachability + reasoning', values: ['Basic', true, true] },
+  { label: 'Continuous scheduled scans (daily / weekly / monthly)', values: [false, true, true] },
+  { label: 'NL triage actions ("dismiss the lows")', values: [true, true, true] },
+  { label: 'Autonomy slider (co-pilot ↔ autopilot)', values: ['Co-pilot only', true, true] },
   { label: 'GitHub PR comments', values: [false, true, true] },
-  { label: 'Slack / webhook notifications', values: [false, true, true] },
-  { label: 'AWS / Azure / GCP / Kubernetes integrations', values: [false, true, true] },
+  { label: 'Slack #security bridge for chat messages', values: [false, true, true] },
+  { label: 'Living Trust Page (per-org URL)', values: [false, true, true] },
+  { label: 'Compliance evidence ingest (SOC 2 / ISO 27001 / PCI)', values: [false, true, true] },
+  { label: 'HMAC-signed evidence chain (auditor pack)', values: [false, false, true] },
   { label: 'SARIF / CSV / JSON export', values: [false, false, true] },
-  { label: 'Compliance mapping (OWASP / CWE / PCI)', values: [false, false, true] },
-  { label: 'Audit log retention controls', values: ['30 days', '90 days', 'Configurable'] },
-  { label: 'Reinforcement-trained triage', values: [true, true, true] },
+  { label: 'Audit log retention', values: ['30 days', '90 days', 'Configurable'] },
   { label: 'Priority support', values: [false, false, true] },
 ];
 
@@ -116,8 +118,8 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
     a: 'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time. When set, your key replaces ours and your scans are billed to your provider, not us.',
   },
   {
-    q: 'How does the AI actually reduce false positives?',
-    a: "Every finding goes through a reinforcement-trained reviewer that rates reachability, exploitability, and false-positive likelihood. Each time you triage (mark fixed / false positive / won't fix), the model that ranks the next finding gets better at understanding your codebase. After ~30 days of feedback, FP rate drops below 1% on most teams.",
+    q: 'How does Strix actually reduce false positives?',
+    a: "When you dismiss a finding with a reason (\"behind Cloudflare WAF — header injected at the edge\"), Strix records that as a per-org suppression rule keyed on the finding's fingerprint. The next scan that would surface the same pattern doesn't — instead, a chat note says \"Suppressed: your rule from 4 days ago covers this.\" Per-org, per-fingerprint, fully auditable. Dismiss once, never re-asked.",
   },
   {
     q: 'Do you offer annual billing?',
@@ -128,14 +130,11 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
     a: 'Per workspace, not per user. Add users mid-month at no charge until you hit the seat cap. Need more seats? Bump to Business or contact us — we have flexible expansion pricing.',
   },
   {
-    q: 'What about enterprise needs (SSO, SCIM, on-prem)?',
+    q: 'What about enterprise needs (SSO, SCIM, custom domain, on-prem)?',
     a: (
       <>
-        Coming. SSO and SCIM are on our{' '}
-        <Link href="/changelog" className="text-cyan-300 hover:underline">
-          roadmap
-        </Link>
-        . Need them today?{' '}
+        On the way. SSO (WorkOS), SCIM, custom-domain trust pages, and per-team sub-scopes are in
+        the pipeline. Need them today?{' '}
         <Link href="/contact" className="text-cyan-300 hover:underline">
           Get in touch
         </Link>{' '}
@@ -161,14 +160,14 @@ const FAQ_PLAIN_ANSWERS: Record<string, string> = {
     'New scans are blocked at the limit with a clear in-app message. We never auto-charge overage. Bump your plan or wait for the monthly reset.',
   'Can I bring my own LLM key?':
     'Yes — every plan supports BYO LLM keys (OpenAI, Anthropic, Gemini, Bedrock, Ollama, anything LiteLLM speaks). Stored encrypted in Supabase Vault, decrypted only at scan time.',
-  'How does the AI actually reduce false positives?':
-    'Every finding goes through a reinforcement-trained reviewer that rates reachability, exploitability, and false-positive likelihood. Each time you triage, the model gets better at your codebase. After ~30 days of feedback, FP rate drops below 1% on most teams.',
+  'How does Strix actually reduce false positives?':
+    'When you dismiss a finding with a reason, Strix records it as a per-org suppression rule keyed on the finding fingerprint. The next scan that would surface the same pattern doesn\'t — instead you get a chat note citing your rule. Per-org, per-fingerprint, fully auditable.',
   'Do you offer annual billing?':
     'Yes — 20% off when paid annually. Available at signup or any time from your billing dashboard.',
   'How do you bill if my team grows?':
     'Per workspace, not per user. Add users mid-month at no charge until you hit the seat cap. Need more seats? Bump to Business or contact us.',
-  'What about enterprise needs (SSO, SCIM, on-prem)?':
-    'SSO and SCIM are on our roadmap. Need them today? Get in touch — we can prioritize for design partners and offer custom deployment options.',
+  'What about enterprise needs (SSO, SCIM, custom domain, on-prem)?':
+    'On the way. SSO (WorkOS), SCIM, custom-domain trust pages, and per-team sub-scopes are in the pipeline. Need them today? Get in touch — we can prioritize for design partners and offer custom deployment options.',
   'How do refunds work?':
     "Cancel any time, no questions. We don't pro-rate mid-cycle, but we don't charge for the next cycle either. If you've been billed for a service that didn't work for you, email us and we'll make it right.",
 };
@@ -216,23 +215,24 @@ export default function PricingPage() {
       <section className="mt-12 rounded-2xl border border-violet-500/30 bg-gradient-to-br from-violet-500/10 to-cyan-500/5 p-6 lg:p-10">
         <div className="grid items-center gap-6 lg:grid-cols-[auto_1fr_auto]">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/20 text-violet-200 ring-1 ring-inset ring-white/5">
-            <Code2 className="h-5 w-5" strokeWidth={2} />
+            <Repeat className="h-5 w-5" strokeWidth={2} />
           </div>
           <div>
             <h2 className="text-xl font-semibold text-white">
-              Reinforcement-trained on every plan.
+              Closed-loop suppression on every plan.
             </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-300">
-              Every triage you make trains the model that ranks the next finding. Your private
-              feedback loop, your data, your sharper signal. Free, Team, and Business tiers all
-              include the full RL triage layer.
+              Dismiss a finding once with your reason. Strix records a per-org rule keyed on the
+              finding fingerprint. The next scan that would surface the same pattern doesn&apos;t —
+              you get a chat note citing your rule instead. Free, Team, and Business tiers all
+              include the full closed loop.
             </p>
           </div>
           <Link
-            href="/blog/ai-triage-explained"
+            href="/signup"
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900/40 px-4 py-2 text-sm font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900/60"
           >
-            How it works
+            Try it
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
           </Link>
         </div>
