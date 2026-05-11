@@ -14,7 +14,7 @@ export const SITE_NAME = 'your AI security engineer';
 
 // Used as the description fallback on pages that don't override it.
 export const DEFAULT_DESCRIPTION =
-  'An AI security engineer that finds real vulnerabilities in your apps. Reinforcement-trained to eliminate false positives.';
+  'An AI security engineer that scans your code, watches your URLs, and remembers every decision you make — so the same false positive never lands twice. Continuous monitoring, closed-loop suppression, and a living compliance posture, per-org isolated.';
 
 interface PageSeoArgs {
   /** The bare page title — no site suffix. The root layout's title template

@@ -1,29 +1,35 @@
 import Link from 'next/link';
 import {
   ArrowRight,
-  Zap,
-  Target,
   Sparkles,
-  Activity,
   Lock,
   CheckCircle2,
-  Bot,
-  Eye,
-  Ban,
-  AlertTriangle,
-  Flame,
-  Brain,
-  TrendingDown,
+  MessageSquare,
   ShieldCheck,
   Workflow,
+  Brain,
+  Eye,
+  AlertTriangle,
+  Bot,
+  GitBranch,
+  User,
+  Send,
+  Hash,
+  Activity,
+  FileLock,
+  Repeat,
+  Target as TargetIcon,
+  Zap,
+  Clock,
+  GitPullRequest,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { buildPageMetadata } from '@/lib/seo';
 
 export const metadata = buildPageMetadata({
-  title: 'AI security engineer — find real vulnerabilities, zero false positives',
+  title: 'Hire an AI security engineer who never forgets',
   description:
-    "Most security tools cry wolf. We don't. Our AI security engineer scans your code, exploits real bugs end-to-end, and learns from every triage you do — so you never see the same false positive twice. 5 free scans / month.",
+    "An AI security engineer that scans your code, watches your URLs, triages findings as you make decisions, and remembers everything. The same false positive never lands twice. Your SOC 2 evidence updates with every scan.",
   path: '/',
   rawTitle: true,
 });
@@ -33,37 +39,39 @@ export default function LandingPage() {
     <>
       <Hero />
       <ProofStrip />
-      <PainPoints />
-      <Features />
-      <RlSpotlight />
+      <ClosedLoop />
+      <Capabilities />
+      <Personas />
       <HowItWorks />
+      <ComparisonTable />
       <FinalCta />
     </>
   );
 }
 
-// ============== HERO ==============
+// ============================================================================
+// HERO — chat mockup as the centerpiece. The product is the conversation.
+// ============================================================================
 
 function Hero() {
   return (
     <section className="mx-auto max-w-6xl px-6 pt-20 pb-16 lg:pt-28 lg:pb-24">
       <div className="grid items-center gap-12 lg:grid-cols-12">
-        <div className="lg:col-span-7">
+        <div className="lg:col-span-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
-            <Brain className="h-3 w-3" strokeWidth={2.5} />
-            Reinforcement-trained · Zero false positives by design
+            <Sparkles className="h-3 w-3" strokeWidth={2.5} />
+            AI security engineer · multi-tenant SaaS
           </div>
           <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl">
-            An AI hacker that finds{' '}
+            Hire an AI security engineer{' '}
             <span className="bg-gradient-to-br from-cyan-300 via-blue-300 to-violet-300 bg-clip-text text-transparent">
-              real
-            </span>{' '}
-            vulnerabilities. Without the noise.
+              who never forgets.
+            </span>
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-neutral-300">
-            Most security tools cry wolf. We don&apos;t. Our AI security engineer scans your code,
-            exploits real bugs end-to-end, and learns from every triage you do — so you never see
-            the same false positive twice.
+            Strix scans your code, watches your URLs, and triages findings as you make decisions —
+            then remembers every dismissal, every fix, every exception. The same false positive
+            never lands twice. Your SOC 2 evidence updates with every scan.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
@@ -94,20 +102,20 @@ function Hero() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" strokeWidth={2.5} />
-              Live findings in under 10 minutes
+              First finding in &lt; 10 min
             </span>
           </div>
         </div>
 
-        <div className="lg:col-span-5">
-          <HeroVisual />
+        <div className="lg:col-span-6">
+          <HeroChatMockup />
         </div>
       </div>
     </section>
   );
 }
 
-function HeroVisual() {
+function HeroChatMockup() {
   return (
     <div className="relative">
       <div
@@ -115,122 +123,159 @@ function HeroVisual() {
         className="absolute -inset-6 rounded-3xl bg-gradient-to-br from-cyan-500/20 via-blue-500/10 to-violet-500/20 blur-2xl"
       />
       <div className="relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-950/80 shadow-2xl shadow-black/50 backdrop-blur">
-        <div className="flex items-center gap-1.5 border-b border-neutral-800/80 bg-neutral-900/60 px-4 py-2.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
-          <span className="ml-3 font-mono text-[10.5px] text-neutral-500">live · agent attacking</span>
+        {/* Window chrome */}
+        <div className="flex items-center justify-between border-b border-neutral-800/80 bg-neutral-900/60 px-4 py-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+          </div>
+          <span className="font-mono text-[10.5px] text-neutral-500">strix.io · getedunext workspace</span>
+          <div className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="text-[10px] text-neutral-400">live</span>
+          </div>
         </div>
 
-        <div className="space-y-3 p-5">
-          <div className="flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
-            <span className="font-semibold text-blue-200">EXPLOITING</span>
-            <span className="text-blue-300">·</span>
-            <span className="text-neutral-300">7 agents · 96 tool calls</span>
-          </div>
+        {/* Chat thread */}
+        <div className="space-y-4 p-5">
+          <ChatMessage role="agent" timeAgo="9:02 AM">
+            <p className="text-sm leading-relaxed text-neutral-100">
+              🛑 <span className="font-semibold">Critical</span> — SQL injection at{' '}
+              <code className="rounded bg-neutral-800/60 px-1 py-0.5 font-mono text-[11px]">
+                /api/login
+              </code>
+            </p>
+            <p className="mt-1.5 text-xs text-neutral-400">
+              Found in <code className="font-mono">getedunext-api</code>. I verified it&apos;s
+              reachable from production right now and drafted a fix PR.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <Pill cyan>See diff</Pill>
+              <Pill>Apply fix</Pill>
+              <Pill>Dismiss</Pill>
+            </div>
+          </ChatMessage>
 
-          <MockFinding
-            severity="CRITICAL"
-            stripe="from-red-500 to-rose-700"
-            badge="bg-red-600/20 text-red-200 ring-red-500/40"
-            urgencyBadge={{
-              label: 'AI · FIX NOW',
-              color: 'bg-red-600/20 text-red-200 ring-red-500/40',
-            }}
-            Icon={Flame}
-            iconColor="text-red-300"
-            title="SSRF — authenticated attacker can reach internal services"
-            cwe="CWE-918"
-            cvss="8.5"
-          />
-          <MockFinding
-            severity="MEDIUM"
-            stripe="from-yellow-500 to-amber-500"
-            badge="bg-yellow-500/15 text-yellow-200 ring-yellow-400/40"
-            urgencyBadge={{
-              label: 'AI · DISMISSED',
-              color: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
-            }}
-            Icon={Ban}
-            iconColor="text-neutral-400"
-            title="Dev-only config flag — already neutralized in production"
-            cwe="CWE-1188"
-            cvss="—"
-            dimmed
-          />
+          <ChatMessage role="user" timeAgo="9:03 AM">
+            <p className="text-sm text-neutral-100">apply the fix</p>
+          </ChatMessage>
+
+          <ChatMessage role="agent" timeAgo="9:03 AM">
+            <p className="text-sm leading-relaxed text-neutral-100">
+              ✓ Merged{' '}
+              <span className="text-cyan-300">PR #289</span> with a regression test.
+            </p>
+            <p className="mt-1.5 text-xs text-neutral-400">
+              The 3 lodash dep-CVEs from this morning are the same fix pattern as last week. Want
+              me to bump them too?
+            </p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <Pill cyan>Yes, bump them</Pill>
+              <Pill>Show me first</Pill>
+            </div>
+          </ChatMessage>
+        </div>
+
+        {/* Composer */}
+        <div className="border-t border-neutral-800/60 bg-neutral-900/40 px-4 py-3">
+          <div className="flex items-end gap-2">
+            <div className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-500">
+              Ask Strix anything about your scans, findings, or assets…
+            </div>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20">
+              <Send className="h-3.5 w-3.5" />
+            </span>
+          </div>
+          <p className="mt-2 text-[10px] text-neutral-500">
+            Scoped to your org. Findings, scans, compliance evidence isolated to{' '}
+            <code className="font-mono">org acme-prod…</code>.
+          </p>
         </div>
       </div>
     </div>
   );
 }
 
-function MockFinding({
-  severity,
-  stripe,
-  badge,
-  urgencyBadge,
-  Icon,
-  iconColor,
-  title,
-  cwe,
-  cvss,
-  dimmed,
+function ChatMessage({
+  role,
+  timeAgo,
+  children,
 }: {
-  severity: string;
-  stripe: string;
-  badge: string;
-  urgencyBadge: { label: string; color: string };
-  Icon: LucideIcon;
-  iconColor: string;
-  title: string;
-  cwe: string;
-  cvss: string;
-  dimmed?: boolean;
+  role: 'agent' | 'user';
+  timeAgo: string;
+  children: React.ReactNode;
 }) {
+  const isUser = role === 'user';
   return (
-    <div
-      className={`overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/40 ${dimmed ? 'opacity-70 saturate-50' : ''}`}
-    >
-      <div className={`h-[2px] bg-gradient-to-r ${stripe}`} />
-      <div className="flex items-start gap-2.5 p-3">
-        <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${iconColor}`} strokeWidth={2} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1">
-            <span
-              className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${urgencyBadge.color}`}
-            >
-              {urgencyBadge.label}
-            </span>
-            <span
-              className={`rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider ring-1 ${badge}`}
-            >
-              {severity}
-            </span>
-            <span className="rounded bg-neutral-900/60 px-1.5 py-0.5 font-mono text-[8.5px] text-neutral-400 ring-1 ring-neutral-800">
-              CVSS {cvss}
-            </span>
-            <span className="rounded bg-neutral-900/60 px-1.5 py-0.5 font-mono text-[8.5px] text-neutral-400 ring-1 ring-neutral-800">
-              {cwe}
-            </span>
+    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+      <div className="flex-shrink-0 pt-0.5">
+        {isUser ? (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-700 text-neutral-300">
+            <User className="h-3.5 w-3.5" />
           </div>
-          <div className="mt-1.5 text-[12px] font-semibold leading-tight text-neutral-100">
-            {title}
+        ) : (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 shadow-md shadow-cyan-500/20">
+            <Sparkles className="h-3.5 w-3.5 text-white" />
           </div>
+        )}
+      </div>
+      <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+        <div
+          className={`rounded-2xl px-4 py-3 ${
+            isUser ? 'bg-cyan-500/15 text-neutral-100' : 'bg-neutral-900/60 text-neutral-100'
+          }`}
+        >
+          {children}
+        </div>
+        <div className={`mt-1 text-[9px] text-neutral-600 ${isUser ? 'text-right' : 'text-left'}`}>
+          {timeAgo}
         </div>
       </div>
     </div>
   );
 }
 
-// ============== PROOF STRIP ==============
+function Pill({
+  children,
+  cyan,
+  emerald,
+}: {
+  children: React.ReactNode;
+  cyan?: boolean;
+  emerald?: boolean;
+}) {
+  if (cyan) {
+    return (
+      <span className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 text-[10.5px] font-medium text-cyan-200">
+        {children}
+      </span>
+    );
+  }
+  if (emerald) {
+    return (
+      <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10.5px] font-medium text-emerald-200">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 py-1 text-[10.5px] text-neutral-200">
+      {children}
+    </span>
+  );
+}
+
+// ============================================================================
+// PROOF STRIP — numbers that reflect the product reality, not generic puffery
+// ============================================================================
 
 function ProofStrip() {
   const stats: { value: string; label: string }[] = [
-    { value: '< 0.5%', label: 'False positive rate after 30 days of feedback' },
-    { value: '7→2', label: 'Typical findings worth your time, per scan' },
+    { value: '0', label: 'Re-flagging of a dismissed pattern, ever' },
+    { value: '24/7', label: 'Continuous monitoring across registered assets' },
     { value: '< 10 min', label: 'From signup to first triaged finding' },
-    { value: '24/7', label: 'On-call. No timezones, no PTO' },
+    { value: '5+', label: 'Surfaces: chat, PR, Slack, trust page, API' },
   ];
   return (
     <section className="border-y border-neutral-900/60 bg-neutral-950/30 py-10">
@@ -238,7 +283,7 @@ function ProofStrip() {
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           {stats.map((s) => (
             <div key={s.label} className="text-center">
-              <div className="text-3xl font-semibold tracking-tight bg-gradient-to-br from-cyan-300 to-blue-300 bg-clip-text text-transparent">
+              <div className="bg-gradient-to-br from-cyan-300 to-blue-300 bg-clip-text text-3xl font-semibold tracking-tight text-transparent">
                 {s.value}
               </div>
               <div className="mt-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
@@ -252,100 +297,174 @@ function ProofStrip() {
   );
 }
 
-// ============== PAIN POINTS ==============
+// ============================================================================
+// CLOSED LOOP — the moat. Show the 3-step learning loop visually.
+// ============================================================================
 
-function PainPoints() {
-  const items: { Icon: LucideIcon; title: string; body: string }[] = [
-    {
-      Icon: AlertTriangle,
-      title: 'Static scanners cry wolf',
-      body: '300 findings, 285 noise. Your team learns to ignore the tool. The next real bug ships unnoticed.',
-    },
-    {
-      Icon: Eye,
-      title: 'Manual pentests are stale on arrival',
-      body: 'Quarterly reports show up six months after the bug shipped. Your dev velocity outpaces the report cycle.',
-    },
-    {
-      Icon: Bot,
-      title: 'Naive AI agents amplify the problem',
-      body: 'An unsupervised agent that finds maybe-bugs and writes confident-sounding reports just shifts the noise problem onto your team.',
-    },
-  ];
+function ClosedLoop() {
   return (
-    <section className="mx-auto max-w-6xl px-6 py-20">
+    <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">The problem</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-violet-300/80">
+          The moat
+        </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Security tooling has a signal-to-noise problem.
+          Tell Strix once.{' '}
+          <span className="bg-gradient-to-br from-violet-300 to-cyan-300 bg-clip-text text-transparent">
+            They&apos;ll never re-ask.
+          </span>
         </h2>
-        <p className="mt-3 text-base text-neutral-400">
-          Every team we talk to spends more time triaging tools than fixing real bugs. We rebuilt
-          the workflow around &quot;what actually needs your attention&quot;, not &quot;what the
-          scanner can flag&quot;.
+        <p className="mt-4 text-base leading-relaxed text-neutral-400">
+          Every dismissal becomes a per-org rule with your reason on file. The next scan that
+          would&apos;ve flagged the same fingerprint? Suppressed before it hits your inbox — with a
+          chat note citing the rule.
         </p>
       </div>
-      <div className="mt-12 grid gap-4 sm:grid-cols-3">
-        {items.map((it) => (
-          <div
-            key={it.title}
-            className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-5 transition-colors hover:border-neutral-700"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-neutral-400 ring-1 ring-inset ring-white/5">
-              <it.Icon className="h-4 w-4" strokeWidth={2} />
-            </div>
-            <h3 className="mt-3 text-base font-semibold text-neutral-100">{it.title}</h3>
-            <p className="mt-1.5 text-sm leading-relaxed text-neutral-400">{it.body}</p>
-          </div>
-        ))}
+
+      <div className="mt-14 grid items-start gap-4 lg:grid-cols-3">
+        <LoopStep
+          n={1}
+          tone="amber"
+          title="Strix finds it"
+          chip="🟡 Low — Missing X-Frame-Options"
+          quote="Found on /search, /about, /contact. [Dismiss] [Suggest fix]"
+        />
+        <LoopArrow />
+        <LoopStep
+          n={2}
+          tone="emerald"
+          title="You dismiss with a reason"
+          chip='"Behind Cloudflare WAF — header injected at the edge"'
+          quote="Strix records the rule (fingerprint + reason, confidence 0.75)."
+        />
       </div>
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
+        <div className="hidden lg:block" />
+        <LoopArrow down />
+        <div className="hidden lg:block" />
+      </div>
+      <div className="mt-4 flex justify-center">
+        <LoopStep
+          n={3}
+          tone="violet"
+          wide
+          title="Next scan: suppressed before you see it"
+          chip="🤐 Suppressed: Missing X-Frame-Options on /pricing"
+          quote='Your rule from 4 days ago covers this (dismissed 3 times, "Behind Cloudflare WAF").'
+        />
+      </div>
+
+      <p className="mx-auto mt-12 max-w-xl text-center text-sm text-neutral-500">
+        The dismissal episode lives in your org&apos;s memory. The suppression rule applies per-org
+        only — Acme&apos;s rule never affects Beta. Verifiable in every scan&apos;s audit trail.
+      </p>
     </section>
   );
 }
 
-// ============== FEATURES ==============
+function LoopStep({
+  n,
+  tone,
+  title,
+  chip,
+  quote,
+  wide,
+}: {
+  n: number;
+  tone: 'amber' | 'emerald' | 'violet';
+  title: string;
+  chip: string;
+  quote: string;
+  wide?: boolean;
+}) {
+  const toneClass = {
+    amber: { ring: 'ring-amber-500/30', text: 'text-amber-300', bg: 'from-amber-500/8' },
+    emerald: { ring: 'ring-emerald-500/30', text: 'text-emerald-300', bg: 'from-emerald-500/8' },
+    violet: { ring: 'ring-violet-500/30', text: 'text-violet-300', bg: 'from-violet-500/8' },
+  }[tone];
+  return (
+    <div
+      className={`rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${toneClass.bg} to-transparent p-5 ring-1 ${toneClass.ring} ${wide ? 'max-w-md' : ''}`}
+    >
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-neutral-500">
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-full bg-neutral-900 font-mono font-semibold ${toneClass.text}`}
+        >
+          {n}
+        </span>
+        Step {n}
+      </div>
+      <h3 className="mt-3 text-base font-semibold text-white">{title}</h3>
+      <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] text-neutral-200">
+        {chip}
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-neutral-400">{quote}</p>
+    </div>
+  );
+}
 
-function Features() {
+function LoopArrow({ down }: { down?: boolean }) {
+  return (
+    <div className="flex items-center justify-center py-4 text-neutral-700">
+      <ArrowRight
+        className={`h-5 w-5 ${down ? 'rotate-90' : ''}`}
+        strokeWidth={2}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// CAPABILITIES — the actual feature surface area
+// ============================================================================
+
+function Capabilities() {
   const items: {
     Icon: LucideIcon;
     title: string;
     body: string;
-    tone: 'cyan' | 'violet' | 'amber' | 'emerald' | 'blue' | 'rose';
+    tone: 'cyan' | 'violet' | 'emerald' | 'amber' | 'blue' | 'rose';
   }[] = [
     {
-      Icon: Bot,
-      title: 'Multi-agent attack surface mapping',
-      body: 'Specialized agents for auth, business logic, IDOR, SQLi, SSRF — running concurrently in an isolated sandbox. They coordinate; they don\'t step on each other.',
+      Icon: MessageSquare,
+      title: 'In-app chat that knows your stack',
+      body:
+        'Strix carries continuous memory of your repos, your team, your past decisions. Ask "what was the SSRF we found last quarter?" — they remember.',
       tone: 'cyan',
     },
     {
-      Icon: Brain,
-      title: 'Reinforcement-trained triage',
-      body: 'Every triage you make — fixed, false positive, won\'t fix — feeds back into the model that ranks the next finding. Precision compounds with use.',
+      Icon: Hash,
+      title: 'Slack #security as a second home',
+      body:
+        'Findings, dismissal confirmations, and compliance posture updates land in your team\'s channel automatically. Opt-in per org.',
       tone: 'violet',
     },
     {
       Icon: Activity,
-      title: 'Live exploit narration',
-      body: 'Watch the agent reason, send requests, and chain the attack in real time. No black-box "scan in progress" timer.',
+      title: 'Continuous scanning, not on-demand',
+      body:
+        'Register an asset with a cadence. Strix scans daily, weekly, or on-push without you touching the dashboard. Drift gets flagged the moment it lands.',
       tone: 'blue',
     },
     {
-      Icon: Target,
-      title: 'Targets are first-class assets',
-      body: 'Add a repo, app, or domain once. Schedule scans, see history, watch findings dedup automatically across runs. Built for teams that scan repeatedly.',
+      Icon: Repeat,
+      title: 'Closed-loop suppression learning',
+      body:
+        'Dismiss once with a reason. The pattern is suppressed on the next scan with a chat note citing your rule. Per-org, fingerprint-precise, fully auditable.',
       tone: 'emerald',
     },
     {
-      Icon: Lock,
-      title: 'Multi-tenant by design',
-      body: 'Your code, scan history, and integration credentials live behind row-level isolation in an encrypted vault. Decrypted only at scan time, in worker memory.',
+      Icon: FileLock,
+      title: 'Compliance as a living document',
+      body:
+        'SOC 2 / ISO 27001 evidence collected from every scan. Public Trust Page at trust.<your-domain> for prospects + auditors. Updates in real time.',
       tone: 'amber',
     },
     {
       Icon: Workflow,
-      title: 'Plugs into your dev workflow',
-      body: 'GitHub for white-box scans. AWS via STS-AssumeRole. Kubernetes via kubeconfig. Slack and PR-comment notifications coming next.',
+      title: 'Autonomy slider per category',
+      body:
+        '"Auto-fix critical dep-CVEs but ask me on medium" — tell Strix in chat. The slider scales with your trust; no need to click "Apply Fix" 47 times.',
       tone: 'rose',
     },
   ];
@@ -356,13 +475,13 @@ function Features() {
           What you get
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          A scanner that thinks like an attacker.{' '}
-          <span className="text-neutral-400">Triage that thinks like an engineer.</span>
+          One AI security engineer.{' '}
+          <span className="text-neutral-400">Five surfaces. Per-org isolation throughout.</span>
         </h2>
       </div>
       <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {items.map((it) => (
-          <FeatureCard key={it.title} {...it} />
+          <CapabilityCard key={it.title} {...it} />
         ))}
       </div>
     </section>
@@ -378,7 +497,7 @@ const TONE_CARD: Record<string, { ring: string; bg: string; iconBg: string; icon
   rose: { ring: 'ring-rose-500/20', bg: 'from-rose-500/8', iconBg: 'bg-rose-500/15', iconText: 'text-rose-200' },
 };
 
-function FeatureCard({
+function CapabilityCard({
   Icon,
   title,
   body,
@@ -405,162 +524,141 @@ function FeatureCard({
   );
 }
 
-// ============== RL SPOTLIGHT ==============
+// ============================================================================
+// PERSONAS — three concrete user shapes the product was built for
+// ============================================================================
 
-function RlSpotlight() {
+function Personas() {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
-      <div className="overflow-hidden rounded-3xl border border-neutral-800/80 bg-gradient-to-br from-violet-500/10 via-neutral-950 to-cyan-500/10 p-8 lg:p-12">
-        <div className="grid items-center gap-12 lg:grid-cols-2">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-[11px] font-medium text-violet-200">
-              <Brain className="h-3 w-3" strokeWidth={2.5} />
-              The differentiator
-            </div>
-            <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              Zero false positives.{' '}
-              <span className="bg-gradient-to-br from-violet-300 to-cyan-300 bg-clip-text text-transparent">
-                Reinforcement-trained
-              </span>{' '}
-              on every triage.
-            </h2>
-            <p className="mt-4 text-base leading-relaxed text-neutral-300">
-              Every time you mark a finding fixed, false positive, or won&apos;t-fix, the model
-              that ranks the next finding gets sharper. Precision compounds with use. After a few
-              weeks, your default view contains only what&apos;s worth your time.
-            </p>
-            <ul className="mt-6 space-y-2.5 text-sm text-neutral-300">
-              <li className="flex items-center gap-2">
-                <TrendingDown className="h-4 w-4 flex-shrink-0 text-emerald-300" strokeWidth={2.25} />
-                <span>Week 1: ~7% FP rate. Week 4: under 1%.</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <Eye className="h-4 w-4 flex-shrink-0 text-cyan-300" strokeWidth={2.25} />
-                <span>Reachability + exploitability assessed per finding, per codebase.</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 flex-shrink-0 text-violet-300" strokeWidth={2.25} />
-                <span>
-                  Your triage is signal — not telemetry. We never share your model with anyone else.
-                </span>
-              </li>
-            </ul>
-            <Link
-              href="/signup"
-              className="mt-7 inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-950 shadow-lg shadow-white/15 transition-all hover:shadow-xl"
-            >
-              Try the free tier
-              <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
-            </Link>
-          </div>
-          <div className="relative">
-            <div
-              aria-hidden
-              className="absolute -inset-3 rounded-2xl bg-gradient-to-br from-violet-500/30 to-cyan-500/20 blur-2xl"
-            />
-            <div className="relative space-y-2 rounded-xl border border-neutral-800/80 bg-neutral-950/70 p-4 backdrop-blur">
-              <TriageRow
-                Icon={Zap}
-                color="text-red-300"
-                pill="bg-red-500/15 text-red-200 ring-red-500/40"
-                tag="FIX NOW"
-                title="SSRF in target validator"
-                reasoning="Externally reachable to authenticated users. Concrete exploit chain to internal services."
-              />
-              <TriageRow
-                Icon={Eye}
-                color="text-amber-300"
-                pill="bg-amber-500/15 text-amber-200 ring-amber-400/40"
-                tag="MONITOR"
-                title="Possible RCE via instruction text"
-                reasoning="Real concern but mitigation requires upstream change. Flagged for next review cycle."
-              />
-              <TriageRow
-                Icon={Ban}
-                color="text-neutral-400"
-                pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40"
-                tag="DISMISS"
-                title="Hardcoded credentials in example file"
-                reasoning="Placeholder values in a template. Not a real secret. Auto-dismissed by RL model."
-                dim
-              />
-              <TriageRow
-                Icon={Ban}
-                color="text-neutral-400"
-                pill="bg-neutral-700/40 text-neutral-300 ring-neutral-600/40"
-                tag="DISMISS"
-                title="Email confirmation off in dev config"
-                reasoning="Codebase pattern: this flag flips on at deploy. Dismissed."
-                dim
-              />
-            </div>
-          </div>
-        </div>
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">For who</p>
+        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+          Built for teams that ship fast.{' '}
+          <span className="text-neutral-400">Used by companies that need the receipts.</span>
+        </h2>
+      </div>
+      <div className="mt-12 grid gap-4 lg:grid-cols-3">
+        <PersonaCard
+          Icon={GitBranch}
+          chip="Vibe-coded founder"
+          title="You shipped a SaaS. The security team is &ldquo;future you.&rdquo;"
+          bullets={[
+            'Install the GitHub App on one repo',
+            "Paste your prod URL — Strix DAST's it daily",
+            'Findings land as PR comments + chat — no separate dashboard to refresh',
+            'Auto-fix dep-CVEs once you trust the slider',
+          ]}
+          cta="Start free"
+        />
+        <PersonaCard
+          Icon={ShieldCheck}
+          chip="AppSec engineer"
+          title="50-200 person company. You can&apos;t scan 30 repos manually."
+          bullets={[
+            'Register every asset once — cadence-driven scans run themselves',
+            'Closed-loop suppression cuts your inbox by 80% within 2 weeks',
+            'Per-team scopes (coming) keep noise out of the wrong channels',
+            'Audit log + signed evidence chain for every scan',
+          ]}
+          cta="See pricing"
+          ctaHref="/pricing"
+        />
+        <PersonaCard
+          Icon={FileLock}
+          chip="Compliance lead"
+          title="Your auditor is asking. You don&apos;t want to update spreadsheets."
+          bullets={[
+            'Per-control verdicts ingested from every scan',
+            'Living Trust Page replaces the static SOC 2 PDF',
+            'Sharable evidence chain (HMAC-signed) for auditors',
+            'Drop-in for the security-finding half of Vanta / Drata',
+          ]}
+          cta="Talk to us"
+          ctaHref="/contact"
+        />
       </div>
     </section>
   );
 }
 
-function TriageRow({
+function PersonaCard({
   Icon,
-  color,
-  pill,
-  tag,
+  chip,
   title,
-  reasoning,
-  dim,
+  bullets,
+  cta,
+  ctaHref = '/signup',
 }: {
   Icon: LucideIcon;
-  color: string;
-  pill: string;
-  tag: string;
+  chip: string;
   title: string;
-  reasoning: string;
-  dim?: boolean;
+  bullets: string[];
+  cta: string;
+  ctaHref?: string;
 }) {
   return (
-    <div
-      className={`rounded-lg border border-neutral-800/80 bg-neutral-900/40 p-3 ${dim ? 'opacity-70 saturate-50' : ''}`}
-    >
-      <div className="flex items-start gap-2.5">
-        <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${color}`} strokeWidth={2.25} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${pill}`}
-            >
-              {tag}
-            </span>
-            <span className="truncate text-[12.5px] font-medium text-neutral-100">{title}</span>
-          </div>
-          <p className="mt-1 text-[11.5px] leading-relaxed text-neutral-400">{reasoning}</p>
-        </div>
+    <div className="flex h-full flex-col rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-6">
+      <div className="inline-flex items-center gap-2 self-start rounded-full border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-[10.5px] font-medium text-neutral-300">
+        <Icon className="h-3 w-3" strokeWidth={2.5} />
+        {chip}
       </div>
+      <h3
+        className="mt-4 text-lg font-semibold leading-snug text-white"
+        dangerouslySetInnerHTML={{ __html: title }}
+      />
+      <ul className="mt-4 flex-1 space-y-2 text-sm text-neutral-300">
+        {bullets.map((b, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-300" strokeWidth={2.25} />
+            <span>{b}</span>
+          </li>
+        ))}
+      </ul>
+      <Link
+        href={ctaHref}
+        className="mt-6 inline-flex items-center gap-1.5 self-start rounded-lg border border-neutral-800 bg-neutral-950/60 px-3.5 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900"
+      >
+        {cta}
+        <ArrowRight className="h-3 w-3" strokeWidth={2.5} />
+      </Link>
     </div>
   );
 }
 
-// ============== HOW IT WORKS ==============
+// ============================================================================
+// HOW IT WORKS — what happens in your first week
+// ============================================================================
 
 function HowItWorks() {
-  const steps = [
+  const steps: { n: number; title: string; body: string; Icon: LucideIcon }[] = [
     {
       n: 1,
-      title: 'Add a target',
-      body: 'Connect a GitHub repo, point at a deployed URL, or paste a domain. Targets are first-class — every scan rolls up here.',
-      Icon: Target,
+      title: 'Create your org workspace',
+      body:
+        '30 seconds. You get a per-org partition: isolated sandbox containers, an encrypted vault for credentials, an evidence chain signed with your org\'s key.',
+      Icon: Lock,
     },
     {
       n: 2,
-      title: 'Run a scan',
-      body: 'Pick quick / standard / deep. The agent clones the codebase into a sandbox, plans the attack surface, and goes to work — with live narration.',
-      Icon: Activity,
+      title: 'Register assets',
+      body:
+        'Install the GitHub App on the repos that matter. Paste the production URL. Add domains for surface mapping. Each registered asset gets its own cadence.',
+      Icon: TargetIcon,
     },
     {
       n: 3,
-      title: 'Triage and fix',
-      body: 'Findings stream in live, AI-triaged for urgency and reachability. Every triage trains the model. Re-runs dedup automatically.',
-      Icon: ShieldCheck,
+      title: 'First scan kicks off',
+      body:
+        'Strix runs in an isolated sandbox per scan. Findings stream live into your chat. PR comments land within the GitHub App\'s scope.',
+      Icon: Activity,
+    },
+    {
+      n: 4,
+      title: 'Triage in chat — Strix remembers',
+      body:
+        'Dismiss with a reason. "Fix the critical." "What\'s open?" "How ready am I for SOC 2?" — Strix answers from your org\'s ledger. Continuous scans take over from here.',
+      Icon: Brain,
     },
   ];
   return (
@@ -570,34 +668,131 @@ function HowItWorks() {
           How it works
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Three steps from connected to triaged.
+          From signup to continuous monitoring in one sitting.
         </h2>
       </div>
-      <div className="mt-12 grid gap-4 md:grid-cols-3">
-        {steps.map((s) => {
-          const Icon = s.Icon;
-          return (
-            <div
-              key={s.n}
-              className="relative rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-6"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-200 ring-1 ring-inset ring-white/5">
-                  <Icon className="h-4 w-4" strokeWidth={2.25} />
-                </div>
-                <span className="font-mono text-xs text-neutral-500">step {s.n}</span>
+      <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s) => (
+          <div
+            key={s.n}
+            className="relative rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-5"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-200 ring-1 ring-inset ring-white/5">
+                <s.Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
               </div>
-              <h3 className="mt-4 text-lg font-semibold text-white">{s.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-neutral-400">{s.body}</p>
+              <span className="font-mono text-[10px] uppercase tracking-wider text-neutral-500">
+                step {s.n}
+              </span>
             </div>
-          );
-        })}
+            <h3 className="mt-3.5 text-base font-semibold text-white">{s.title}</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-neutral-400">{s.body}</p>
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-// ============== FINAL CTA ==============
+// ============================================================================
+// COMPARISON — vs the categories Strix replaces
+// ============================================================================
+
+function ComparisonTable() {
+  type Row = {
+    label: string;
+    Icon: LucideIcon;
+    others: string;
+    strix: string;
+  };
+  const rows: Row[] = [
+    {
+      label: 'Signal shape',
+      Icon: AlertTriangle,
+      others: '300 findings, 285 noise',
+      strix: 'The 2 that matter today, surfaced in chat',
+    },
+    {
+      label: 'Continuity',
+      Icon: Clock,
+      others: 'Quarterly pentests; stale on arrival',
+      strix: 'Continuous per-asset scans, every day',
+    },
+    {
+      label: 'Learning',
+      Icon: Brain,
+      others: 'Same false positive re-flagged every scan',
+      strix: 'Dismiss once → rule with your reason on file',
+    },
+    {
+      label: 'Where it lives',
+      Icon: MessageSquare,
+      others: 'A dashboard you have to refresh',
+      strix: 'Chat, PR comments, Slack — wherever your team works',
+    },
+    {
+      label: 'Compliance evidence',
+      Icon: FileLock,
+      others: 'Vanta-style screenshot collection',
+      strix: 'Auto-collected per scan, live Trust Page',
+    },
+    {
+      label: 'Autonomy',
+      Icon: Zap,
+      others: 'Click "Apply Fix" once at a time',
+      strix: 'Per-category slider: co-pilot ↔ autopilot',
+    },
+    {
+      label: 'Tenancy',
+      Icon: Lock,
+      others: 'Single-tenant tools; per-org reinvention',
+      strix: 'Multi-tenant from day 1, RLS everywhere',
+    },
+  ];
+
+  return (
+    <section className="mx-auto max-w-6xl px-6 py-24">
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300/80">
+          The shape of the product
+        </p>
+        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+          A different category than scanners or pentest tools.
+        </h2>
+        <p className="mt-3 text-base text-neutral-400">
+          We&apos;re not a better Aikido or a smarter Snyk. We&apos;re what you&apos;d hire if
+          security engineers worked 24/7, never forgot, and lived inside your team&apos;s tools.
+        </p>
+      </div>
+      <div className="mt-12 overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-900/30">
+        <div className="grid grid-cols-[1.2fr_1.4fr_1.4fr] border-b border-neutral-800/80 bg-neutral-950/40 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+          <div></div>
+          <div>Traditional tools</div>
+          <div className="text-cyan-300">Strix</div>
+        </div>
+        {rows.map((r, i) => (
+          <div
+            key={r.label}
+            className={`grid grid-cols-[1.2fr_1.4fr_1.4fr] items-center gap-4 px-5 py-4 text-sm ${
+              i % 2 === 0 ? 'bg-neutral-950/20' : ''
+            } ${i < rows.length - 1 ? 'border-b border-neutral-800/40' : ''}`}
+          >
+            <div className="flex items-center gap-2.5 text-neutral-300">
+              <r.Icon className="h-4 w-4 text-neutral-500" strokeWidth={2} />
+              {r.label}
+            </div>
+            <div className="text-neutral-400">{r.others}</div>
+            <div className="font-medium text-neutral-100">{r.strix}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================================
+// FINAL CTA
+// ============================================================================
 
 function FinalCta() {
   return (
@@ -612,12 +807,19 @@ function FinalCta() {
           }}
         />
         <div className="relative">
-          <h2 className="mx-auto max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            Hire your AI security engineer today.
+          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
+            <Sparkles className="h-3 w-3" strokeWidth={2.5} />
+            Hire your AI security engineer
+          </div>
+          <h2 className="mx-auto mt-5 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+            Sign up. Register your first asset.{' '}
+            <span className="bg-gradient-to-br from-cyan-300 to-violet-300 bg-clip-text text-transparent">
+              Have a finding in 10 minutes.
+            </span>
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-base text-neutral-300">
-            Spin up an organization in 30 seconds. First triaged finding in under 10 minutes. No
-            credit card.
+            5 free scans per month. Per-org isolation included. No credit card. Conversations
+            you&apos;ll wish your real security engineer remembered.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
@@ -634,8 +836,30 @@ function FinalCta() {
               href="/contact"
               className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-6 py-3 text-base font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900/60"
             >
+              <GitPullRequest className="h-4 w-4" strokeWidth={2} />
               Talk to us
             </Link>
+          </div>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-neutral-500">
+            <span className="inline-flex items-center gap-1.5">
+              <Bot className="h-3.5 w-3.5" strokeWidth={2.5} />
+              In-app chat
+            </span>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Hash className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Slack bridge
+            </span>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Eye className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Public trust page
+            </span>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Repeat className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Continuous scanning
+            </span>
           </div>
         </div>
       </div>

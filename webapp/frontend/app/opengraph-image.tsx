@@ -75,7 +75,7 @@ export default function Image() {
               gap: '0 18px',
             }}
           >
-            <span>An AI hacker that finds</span>
+            <span>An AI security engineer</span>
             <span
               style={{
                 background:
@@ -84,9 +84,9 @@ export default function Image() {
                 color: 'transparent',
               }}
             >
-              real
+              who never
             </span>
-            <span>vulnerabilities.</span>
+            <span>forgets.</span>
           </div>
           <div
             style={{
