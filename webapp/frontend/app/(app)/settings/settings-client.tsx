@@ -40,12 +40,18 @@ interface Props {
   orgRole: string | null;
 }
 
+// Ordered cheapest → most expensive. The first entry is the default
+// when an org doesn't set a model. Gemini Flash is ~10× cheaper per
+// input token than GPT-5.4 or Claude Sonnet and produces good-enough
+// reasoning for the scan agent's typical workload. Power users can
+// switch to a heavier model in this dropdown — but defaults matter:
+// every free-tier scan runs against the first entry.
 const POPULAR_MODELS = [
-  { value: 'gemini/gemini-2.5-flash', label: 'Gemini 2.5 Flash (cheap, fast)' },
-  { value: 'gemini/gemini-2.5-pro', label: 'Gemini 2.5 Pro (recommended for deep scans)' },
-  { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4 (TensorShield recommended)' },
-  { value: 'anthropic/claude-sonnet-4-6', label: 'Anthropic Claude Sonnet 4.6 (TensorShield recommended)' },
-  { value: 'deepseek/deepseek-chat', label: 'DeepSeek (cheap, OSS-friendly)' },
+  { value: 'gemini/gemini-2.5-flash', label: 'Gemini 2.5 Flash — default, cheapest' },
+  { value: 'deepseek/deepseek-chat', label: 'DeepSeek — cheap, OSS-friendly' },
+  { value: 'gemini/gemini-2.5-pro', label: 'Gemini 2.5 Pro — for deep scans' },
+  { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4 — premium' },
+  { value: 'anthropic/claude-sonnet-4-6', label: 'Anthropic Claude Sonnet 4.6 — premium' },
 ];
 
 export default function SettingsClient({ userEmail, profile, org, orgRole }: Props) {
