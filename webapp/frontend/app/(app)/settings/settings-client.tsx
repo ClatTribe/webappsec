@@ -15,6 +15,8 @@ import {
   Brain,
   RotateCcw,
   Bell,
+  ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -30,6 +32,9 @@ interface Props {
     llm_provider: string | null;
     llm_api_key_secret_id: string | null;
     slack_webhook_secret_id: string | null;
+    trust_page_enabled?: boolean;
+    trust_page_subtitle?: string | null;
+    trust_page_published_at?: string | null;
   } | null;
   orgRole: string | null;
 }
@@ -115,6 +120,21 @@ export default function SettingsClient({ userEmail, profile, org, orgRole }: Pro
         <SlackWebhookSection
           orgId={org.id}
           initiallySet={Boolean(org.slack_webhook_secret_id)}
+          onSaved={() => router.refresh()}
+        />
+      )}
+
+      {/* Public Trust Page (migration 047). Owner-only toggle —
+          prospect-facing URL with compliance posture + recent
+          improvements. The vibe-coded founder's answer to
+          "are you SOC 2 ready?". */}
+      {org && isOwner && (
+        <TrustPageSection
+          orgId={org.id}
+          orgSlug={org.slug}
+          initiallyEnabled={Boolean(org.trust_page_enabled)}
+          initialSubtitle={org.trust_page_subtitle ?? ''}
+          publishedAt={org.trust_page_published_at ?? null}
           onSaved={() => router.refresh()}
         />
       )}
@@ -1360,6 +1380,231 @@ function SlackWebhookSection({
           <div className="mt-2">
             <FeedbackPill feedback={feedback} />
           </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// ============== TRUST PAGE ==============
+// Owner-only opt-in for the public /trust/<slug> route (migration 047).
+// Flips organizations.trust_page_enabled and stores an optional
+// public-facing tagline. The page itself is gated by get_trust_page_payload
+// — the function returns null for unknown slugs or orgs with the flag
+// off, so this toggle is the security boundary, not the URL pattern.
+
+function TrustPageSection({
+  orgId,
+  orgSlug,
+  initiallyEnabled,
+  initialSubtitle,
+  publishedAt,
+  onSaved,
+}: {
+  orgId: string;
+  orgSlug: string;
+  initiallyEnabled: boolean;
+  initialSubtitle: string;
+  publishedAt: string | null;
+  onSaved: () => void;
+}) {
+  const [enabled, setEnabled] = useState(initiallyEnabled);
+  const [subtitle, setSubtitle] = useState(initialSubtitle);
+  const [savedSubtitle, setSavedSubtitle] = useState(initialSubtitle);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+
+  const subtitleDirty = subtitle.trim() !== (savedSubtitle ?? '').trim();
+  const subtitleTooLong = subtitle.length > 280;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const trustUrl = `${origin}/trust/${orgSlug}`;
+
+  async function toggleEnabled(next: boolean) {
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/trust-page`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: next }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Save failed' });
+      return;
+    }
+    setEnabled(next);
+    setFeedback({
+      kind: 'success',
+      text: next ? 'Trust page is live.' : 'Trust page disabled.',
+    });
+    onSaved();
+  }
+
+  async function saveSubtitle() {
+    if (!subtitleDirty || subtitleTooLong) return;
+    setBusy(true);
+    setFeedback(null);
+    const res = await fetch(`/api/orgs/${orgId}/trust-page`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtitle: subtitle.trim() || null }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setFeedback({ kind: 'error', text: body.error ?? 'Save failed' });
+      return;
+    }
+    setSavedSubtitle(subtitle.trim());
+    setFeedback({ kind: 'success', text: 'Tagline saved.' });
+    onSaved();
+  }
+
+  async function copyUrl() {
+    try {
+      await navigator.clipboard.writeText(trustUrl);
+      setFeedback({ kind: 'success', text: 'URL copied.' });
+    } catch {
+      setFeedback({ kind: 'error', text: 'Copy failed — long-press to copy.' });
+    }
+  }
+
+  return (
+    <Section
+      title="Public Trust Page"
+      Icon={ShieldCheck}
+      hint={
+        'A public URL prospects and auditors can bookmark. Renders your '
+        + 'compliance posture, recent improvements, and the signed '
+        + 'evidence chain. Updates after every scan. The page is gated by '
+        + 'this toggle — disabled means the URL returns 404.'
+      }
+    >
+      <div className="space-y-4">
+        {/* Enable toggle */}
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-neutral-100">
+                  Trust page status
+                </span>
+                {enabled ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-emerald-200 ring-1 ring-emerald-400/30">
+                    <Check className="h-3 w-3" strokeWidth={2.5} />
+                    Live
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-neutral-800/60 px-1.5 py-0.5 text-[10.5px] font-medium text-neutral-400 ring-1 ring-neutral-700/40">
+                    Off
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-neutral-500">
+                {enabled
+                  ? 'Anyone with the URL can view your compliance posture and recent improvements. Disable to take it offline.'
+                  : 'Page is private. Enable to share the URL with a prospect or auditor.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleEnabled(!enabled)}
+              disabled={busy}
+              className={`flex-shrink-0 rounded-lg px-3.5 py-2 text-xs font-semibold transition-all disabled:opacity-50 ${
+                enabled
+                  ? 'border border-neutral-700 bg-neutral-800 text-neutral-200 hover:bg-neutral-700'
+                  : 'bg-gradient-to-b from-white to-neutral-200 text-neutral-950 shadow-md shadow-white/10 hover:shadow-lg'
+              }`}
+            >
+              {busy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : enabled ? (
+                'Disable'
+              ) : (
+                'Enable'
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* URL row */}
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-4">
+          <div className="text-sm font-medium text-neutral-100">Your URL</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <code className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-[12.5px] text-cyan-300 break-all">
+              {trustUrl}
+            </code>
+            <button
+              type="button"
+              onClick={copyUrl}
+              className="rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              Copy
+            </button>
+            {enabled && (
+              <a
+                href={trustUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/20"
+              >
+                Open
+                <ExternalLink className="h-3 w-3" strokeWidth={2.5} />
+              </a>
+            )}
+          </div>
+          {publishedAt && (
+            <p className="mt-2 text-[10.5px] text-neutral-500">
+              First enabled {new Date(publishedAt).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+
+        {/* Subtitle */}
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-4">
+          <label className="text-sm font-medium text-neutral-100">
+            Tagline (optional)
+          </label>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-neutral-500">
+            One line rendered under your org name on the trust page.
+            E.g. &quot;A SaaS for college applications · SOC 2 in progress&quot;.
+          </p>
+          <textarea
+            value={subtitle}
+            onChange={(e) => setSubtitle(e.target.value)}
+            rows={2}
+            maxLength={320}
+            placeholder="A short, prospect-friendly line about what your company does."
+            className="mt-2 w-full resize-none rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-600"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <span
+              className={`text-[10.5px] ${
+                subtitleTooLong ? 'text-rose-300' : 'text-neutral-500'
+              }`}
+            >
+              {subtitle.length}/280
+            </span>
+            <button
+              type="button"
+              onClick={saveSubtitle}
+              disabled={busy || !subtitleDirty || subtitleTooLong}
+              className="rounded-md bg-gradient-to-b from-white to-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-950 shadow-sm transition-opacity disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save tagline'}
+            </button>
+          </div>
+        </div>
+
+        {feedback && (
+          <p
+            className={`text-xs ${
+              feedback.kind === 'success' ? 'text-emerald-300' : 'text-rose-300'
+            }`}
+          >
+            {feedback.text}
+          </p>
         )}
       </div>
     </Section>
