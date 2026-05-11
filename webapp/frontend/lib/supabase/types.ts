@@ -231,6 +231,14 @@ export interface Organization {
   plan: 'free' | 'pro' | 'enterprise';
   llm_provider: string | null;
   created_at: string;
+  // Public Trust Page (migration 047). Default false; flipped from
+  // settings UI or directly via the trust-page API route.
+  trust_page_enabled?: boolean;
+  trust_page_subtitle?: string | null;
+  trust_page_published_at?: string | null;
+  // Slack chat-bridge opt-in (migration 048). Forwards agent_messages
+  // to the org's configured Slack webhook.
+  slack_bridge_enabled?: boolean;
 }
 
 export interface OrgMember {
