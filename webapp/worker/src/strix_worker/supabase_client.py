@@ -6,11 +6,19 @@ accidentally use the anon key.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from supabase import Client, create_client
 
 from .config import WorkerConfig
+
+
+def _epoch_to_iso(t: float) -> str:
+    """Convert a unix epoch float (engine convention) to an ISO 8601
+    UTC string Supabase / PostgREST accepts for timestamptz columns.
+    """
+    return datetime.fromtimestamp(float(t), tz=timezone.utc).isoformat()
 
 
 class WorkerSupabase:
@@ -119,6 +127,104 @@ class WorkerSupabase:
             "worker_set_compliance_pack_uploaded", {"p_scan_id": scan_id}
         ).execute()
 
+    def insert_kg_nodes(self, rows: list[dict[str, Any]]) -> int:
+        """Bulk-insert engine-emitted KG nodes (migration 058).
+
+        Service-role bypasses RLS. Rows shape:
+          {org_id, scan_id, node_id, node_type, props}
+
+        Chunks to ~500 rows per request to stay under PostgREST's
+        default payload cap. Returns the number of rows actually
+        inserted (sum across chunks).
+        """
+        if not rows:
+            return 0
+        total = 0
+        chunk = 500
+        for i in range(0, len(rows), chunk):
+            batch = rows[i : i + chunk]
+            res = (
+                self.client.table("kg_nodes")
+                .insert(batch)
+                .execute()
+            )
+            total += len(res.data or [])
+        return total
+
+    def insert_kg_edges(self, rows: list[dict[str, Any]]) -> int:
+        """Bulk-insert engine-emitted KG edges (migration 058).
+
+        Same chunking strategy as insert_kg_nodes. Rows shape:
+          {org_id, scan_id, edge_id, edge_type,
+           source_node_id, target_node_id, props}
+        """
+        if not rows:
+            return 0
+        total = 0
+        chunk = 500
+        for i in range(0, len(rows), chunk):
+            batch = rows[i : i + chunk]
+            res = (
+                self.client.table("kg_edges")
+                .insert(batch)
+                .execute()
+            )
+            total += len(res.data or [])
+        return total
+
+    def attach_patches_to_findings(
+        self,
+        scan_id: str,
+        by_finding: dict[str, dict[str, Any]],
+    ) -> int:
+        """Update findings rows with Patcher proposals (migration 058).
+
+        `by_finding` is keyed by the engine's finding_id (matches
+        `findings.vuln_id` set at insert time by worker_insert_finding).
+        One UPDATE per finding; service-role bypasses RLS.
+
+        We use scan_id + vuln_id as the WHERE — engine finding ids are
+        only stable within a run, and re-running the scan reassigns
+        them. A multi-target scan can have the same vuln_id across
+        different targets, so we ALSO filter by scan_id (eliminates
+        the cross-target collision).
+
+        Returns the count of rows actually updated (skips proposals
+        whose finding_id doesn't match any row in our DB — typically
+        because the finding wasn't structured-emitted, only logged).
+        """
+        if not by_finding:
+            return 0
+        total_updated = 0
+        for vuln_id, proposal in by_finding.items():
+            update = {
+                "patch_id": proposal.get("patch_id"),
+                "patch_diff": proposal.get("diff"),
+                "patch_commit_message": proposal.get("commit_message"),
+                "patch_status": proposal.get("status") or "proposed",
+            }
+            verified_at = proposal.get("verified_at")
+            if isinstance(verified_at, (int, float)) and verified_at > 0:
+                update["patch_verified_at"] = _epoch_to_iso(verified_at)
+            created_at = proposal.get("created_at")
+            if isinstance(created_at, (int, float)) and created_at > 0:
+                update["patch_proposed_at"] = _epoch_to_iso(created_at)
+            try:
+                res = (
+                    self.client.table("findings")
+                    .update(update)
+                    .eq("scan_id", scan_id)
+                    .eq("vuln_id", vuln_id)
+                    .execute()
+                )
+                total_updated += len(res.data or [])
+            except Exception:  # noqa: BLE001
+                # Don't let one malformed proposal kill the whole batch.
+                # `_ingest_patches_from_run_dir` will log the failure
+                # context; we just keep going.
+                continue
+        return total_updated
+
     def ingest_compliance_evidence(
         self,
         scan_id: str,
@@ -218,6 +324,40 @@ class WorkerSupabase:
             {"p_scan_id": scan_id, "p_integration_id": integration_id},
         ).execute()
         return result.data
+
+    def decrypt_scan_auth(self, scan_id: str) -> tuple[str | None, str | None]:
+        """Resolve the auth credentials for a scan (Phase A / migration 061).
+
+        Returns (auth_method, plaintext). Both are None when neither the
+        scan nor the parent target has an `auth_method` configured. The
+        method comes from the scan override first, falling back to the
+        target's default — same precedence as the engine accepts on the
+        CLI when both are passed.
+
+        Auth-method strings + corresponding plaintext shapes (engine
+        contract — matches strix/interface/main.py):
+          bearer       → "<token>"
+          cookie       → "k=v; k2=v2"
+          basic        → "user:pass"
+          login_creds  → "email:user@x.com:pass:hunter2"
+          header       → JSON: {"headers": ["X-A: 1", "X-B: 2"]}
+          none         → method only, no plaintext
+
+        Best-effort: any RPC failure returns (None, None) and the
+        worker falls through to "no auth" — the scan still runs, just
+        against the unauthenticated surface.
+        """
+        try:
+            result = self.client.rpc(
+                "worker_decrypt_scan_auth", {"p_scan_id": scan_id}
+            ).execute()
+        except Exception:  # noqa: BLE001
+            return (None, None)
+        rows = result.data or []
+        if not rows:
+            return (None, None)
+        row = rows[0] if isinstance(rows, list) else rows
+        return (row.get("auth_method"), row.get("plaintext"))
 
     def decrypt_org_slack_webhook(self, scan_id: str) -> str | None:
         """Returns the org's Slack webhook URL, or None when none is set

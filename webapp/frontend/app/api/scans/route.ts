@@ -44,6 +44,22 @@ const Body = z.object({
     )
     .max(5)
     .optional(),
+  // Phase A / migration 061 — auth credentials, advanced engine flags.
+  // The auth_plaintext is encrypted into vault server-side before the
+  // create_scan_with_targets RPC fires (we never persist the literal
+  // on the scan row). When save_auth_on_target is true the wrapper
+  // also stamps the auth method + secret onto the parent target as
+  // the default for future scans.
+  auth_method: z.enum(['bearer', 'cookie', 'basic', 'header', 'login_creds']).optional(),
+  auth_plaintext: z.string().min(1).max(8 * 1024).optional(),
+  save_auth_on_target: z.boolean().default(false),
+  exclude_paths: z.array(z.string().min(1).max(500)).max(50).optional(),
+  rate_limit_qps: z.number().int().positive().max(1000).optional(),
+  export_formats: z
+    .array(z.enum(['vanta', 'drata', 'hyperproof', 'secureframe', 'servicenow', 'generic']))
+    .max(6)
+    .optional(),
+  seed_urls: z.array(z.string().url().max(500)).max(20).optional(),
 });
 
 // POST /api/scans — queue a new scan.
@@ -158,6 +174,28 @@ export async function POST(req: Request) {
     workspace_subdir: `target_${i + 1}`,
   }));
 
+  // Phase A / migration 061 — mint a vault secret for auth_plaintext if
+  // present. The plaintext shape is method-specific (bearer = literal
+  // token; header = JSON; etc.); we don't parse here, the worker's
+  // _build_env switches on auth_method and treats the plaintext as a
+  // pre-validated payload.
+  const admin = createAdminClient();
+  let authSecretId: string | null = null;
+  if (body.auth_method && body.auth_plaintext) {
+    const { data: secretId, error: secretErr } = await admin.rpc('vault_create_secret', {
+      p_secret: body.auth_plaintext,
+      p_name: `org_${orgId}_scan_auth_${body.auth_method}_${Date.now()}`,
+      p_description: `Scan auth (${body.auth_method}) — minted on POST /api/scans`,
+    } as never);
+    if (secretErr || !secretId) {
+      return NextResponse.json(
+        { error: `failed to store auth credential: ${secretErr?.message ?? 'unknown'}` },
+        { status: 500 },
+      );
+    }
+    authSecretId = secretId as string;
+  }
+
   const { data: scanId, error: rpcErr } = await supabase.rpc('create_scan_with_targets', {
     p_org_id: orgId,
     p_run_name: runName,
@@ -173,7 +211,14 @@ export async function POST(req: Request) {
     p_max_cost: effectiveMaxCost,
     p_max_input_tokens: body.max_input_tokens ?? null,
     p_imports: body.imports && body.imports.length > 0 ? body.imports : null,
-  });
+    // Phase A additions — all optional. RPC ignores nulls.
+    p_auth_method: body.auth_method ?? null,
+    p_auth_secret_id: authSecretId,
+    p_exclude_paths: body.exclude_paths ?? null,
+    p_rate_limit_qps: body.rate_limit_qps ?? null,
+    p_export_formats: body.export_formats ?? null,
+    p_seed_urls: body.seed_urls ?? null,
+  } as never);
   if (rpcErr || !scanId) {
     return NextResponse.json(
       { error: rpcErr?.message ?? 'failed to create scan' },
@@ -181,9 +226,24 @@ export async function POST(req: Request) {
     );
   }
 
+  // Phase A — "Save as default for this target" — stamp auth onto the
+  // parent target row so the next scan of the same target inherits it.
+  // Service-role admin bypasses RLS; we trust this codepath because
+  // the org membership + target ownership were already validated by
+  // the RPC (which inserted scan rows with the same org+target).
+  if (body.target_id && body.auth_method && authSecretId && body.save_auth_on_target) {
+    await admin
+      .from('targets')
+      .update({
+        auth_method: body.auth_method,
+        auth_secret_id: authSecretId,
+      })
+      .eq('id', body.target_id)
+      .eq('org_id', orgId);
+  }
+
   // Audit (service role bypasses RLS). Stays out of the RPC because audit_log
   // RLS forbids authenticated inserts.
-  const admin = createAdminClient();
   await admin.from('audit_log').insert({
     org_id: orgId,
     user_id: user.id,

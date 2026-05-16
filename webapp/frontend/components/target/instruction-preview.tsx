@@ -79,6 +79,8 @@ function augmentLines(type: TargetType, config: Record<string, unknown>): string
       return augmentRepository(config);
     case 'web_application':
       return augmentWebApplication(config);
+    case 'api':
+      return augmentApi(config);
     case 'domain':
       return augmentDomain(config);
     case 'ip_address':
@@ -108,6 +110,23 @@ function augmentWebApplication(c: Record<string, unknown>): string[] {
   const out: string[] = [];
   const seeds = asStringList(c.crawl_seeds);
   if (seeds.length) out.push(`Begin crawling from these URLs: ${seeds.join(', ')}.`);
+  const qps = c.rate_limit_qps;
+  if (typeof qps === 'number' && Number.isInteger(qps) && qps > 0) {
+    out.push(
+      `Do not exceed ${qps} requests per second total — this is production traffic, treat it accordingly.`,
+    );
+  }
+  return out;
+}
+
+function augmentApi(c: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const spec = asNonEmptyStr(c.spec_url);
+  if (spec) {
+    out.push(
+      `Ingest the OpenAPI / Swagger spec at \`${spec}\` before probing — it's the endpoint inventory source.`,
+    );
+  }
   const qps = c.rate_limit_qps;
   if (typeof qps === 'number' && Number.isInteger(qps) && qps > 0) {
     out.push(

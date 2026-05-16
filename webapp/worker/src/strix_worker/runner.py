@@ -257,10 +257,16 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             # whole scan.
             staged_imports = _download_imports(sb, scan_id, scan.get("imports"), workdir)
 
+            # Phase A / migration 061 — per-scan auth credentials.
+            # Falls back to the parent target's default when the scan
+            # row has no override. Both may be None (no auth).
+            auth_method, auth_plaintext = sb.decrypt_scan_auth(scan_id)
+
             env = _build_env(
                 cfg, scan, creds.env, llm_provider, llm_api_key,
                 feedback_path=feedback_path, fp_policy=fp_policy,
                 org_strix_keys=org_strix_keys,
+                auth_method=auth_method, auth_plaintext=auth_plaintext,
             )
             cmd = _build_cmd(
                 cfg, scan, targets,
@@ -824,13 +830,42 @@ def _build_env(
     feedback_path: str | None = None,
     fp_policy: str | None = None,
     org_strix_keys: dict[str, str] | None = None,
+    auth_method: str | None = None,
+    auth_plaintext: str | None = None,
 ) -> dict[str, str]:
     env = {
         "STRIX_LLM": llm_provider,
         "LLM_API_KEY": llm_api_key,
+        # Belt-and-braces: litellm's per-provider adapters look for the
+        # provider-specific env var (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+        # GEMINI_API_KEY) directly when the strix-level LLM_API_KEY isn't
+        # threaded through the call path. The strix wrapper-integration
+        # doc claimed "strix does not read ANTHROPIC_API_KEY" — technically
+        # true at strix's Config layer, but practically false at the
+        # actual API-call layer, where missing keys produced:
+        #     litellm.AuthenticationError: Missing Anthropic API Key
+        # Source: ClatTribe/strix PR #226. We set all three to the same
+        # value rather than parsing the provider prefix — bulletproof and
+        # only costs three extra env-var assignments.
+        "ANTHROPIC_API_KEY": llm_api_key,
+        "OPENAI_API_KEY": llm_api_key,
+        "GEMINI_API_KEY": llm_api_key,
         "STRIX_IMAGE": cfg.strix_image,
         # Disable cli-config persistence — we never want a server worker to write ~/.strix/cli-config.json
         "STRIX_PERSIST_CONFIG": "false",
+        # Default to the single-lead architecture (engine roadmap §8.5 Phase 3).
+        # Engine accepts the literal `single-lead` (case-insensitive); any
+        # other value, including unset, falls back to the legacy
+        # parent-spawns-N pattern. We default to single-lead so wrapper
+        # behaviour is deterministic across engine version bumps, and so
+        # specialist-dispatch + cost-cap accounting match what the engine's
+        # roadmap PR series targets. An operator who wants the legacy
+        # behaviour can set `STRIX_AGENT_ARCHITECTURE=legacy` (or any non-
+        # `single-lead` value) in the worker's own environment — the
+        # pass-through below picks that up.
+        "STRIX_AGENT_ARCHITECTURE": os.environ.get(
+            "STRIX_AGENT_ARCHITECTURE", "single-lead"
+        ),
         # Run logs directory; we'll harvest after exit.
         "PYTHONUNBUFFERED": "1",
     }
@@ -856,6 +891,71 @@ def _build_env(
         for key, value in org_strix_keys.items():
             if key in _ALLOWED_ORG_STRIX_KEYS and isinstance(value, str) and value:
                 env[key] = value
+
+    # Phase A / migration 061 — scan auth credentials. Engine env vars
+    # (per wrapper-integration.md §1):
+    #   STRIX_AUTH_BEARER / STRIX_AUTH_COOKIE / STRIX_AUTH_BASIC /
+    #   STRIX_HEADERS (newline-joined). We use env rather than CLI flag
+    #   for these because the engine treats both as identical and env
+    #   keeps the value out of argv / process listings.
+    #
+    # `header` is the multi-value case — plaintext is JSON
+    # {"headers": [...]} (see migration 061 docstring). We join with
+    # newlines to match the engine's STRIX_HEADERS expectation.
+    # `login_creds` rides the existing instruction text path — engine
+    # accepts the literal as part of `--instruction` per PR #156.
+    if auth_method and auth_plaintext:
+        if auth_method == "bearer":
+            env["STRIX_AUTH_BEARER"] = auth_plaintext
+        elif auth_method == "cookie":
+            env["STRIX_AUTH_COOKIE"] = auth_plaintext
+        elif auth_method == "basic":
+            env["STRIX_AUTH_BASIC"] = auth_plaintext
+        elif auth_method == "header":
+            try:
+                parsed = json.loads(auth_plaintext)
+                headers = parsed.get("headers") if isinstance(parsed, dict) else None
+                if isinstance(headers, list):
+                    cleaned = [h for h in headers if isinstance(h, str) and h.strip()]
+                    if cleaned:
+                        env["STRIX_HEADERS"] = "\n".join(cleaned)
+            except (json.JSONDecodeError, AttributeError):
+                logger.warning("scan %s: malformed header auth plaintext", scan.get("id"))
+        elif auth_method == "login_creds":
+            # Engine PR #156 — tenant-supplied login credentials for the
+            # `scan_auth_flow` specialist. Plaintext is a JSON list of
+            # {username, password} objects; engine reads STRIX_LOGIN_CREDS
+            # in that shape directly. Wrapper validates JSON-ness before
+            # forwarding so a malformed string can't break the agent loop.
+            try:
+                parsed = json.loads(auth_plaintext)
+                if isinstance(parsed, list) and parsed:
+                    env["STRIX_LOGIN_CREDS"] = json.dumps(parsed)
+            except json.JSONDecodeError:
+                logger.warning("scan %s: malformed login_creds plaintext", scan.get("id"))
+
+    # Phase A — outbound rate limit. Engine reads STRIX_RATE_LIMIT or
+    # --rate-limit; we forward via env so the value isn't part of argv.
+    rate_limit_qps = scan.get("rate_limit_qps")
+    if isinstance(rate_limit_qps, int) and rate_limit_qps > 0:
+        env["STRIX_RATE_LIMIT"] = str(rate_limit_qps)
+
+    # Phase A — exclude paths. Newline-joined; engine accepts
+    # STRIX_EXCLUDE_PATHS or repeated --exclude-path. We use env to
+    # keep argv compact when there are many.
+    exclude_paths = scan.get("exclude_paths")
+    if isinstance(exclude_paths, list) and exclude_paths:
+        cleaned = [p for p in exclude_paths if isinstance(p, str) and p.strip()]
+        if cleaned:
+            env["STRIX_EXCLUDE_PATHS"] = "\n".join(cleaned)
+
+    # Phase A — seed URLs (web_application targets). Newline-joined
+    # for STRIX_SEED_URLS; engine accepts the env or repeated --seed-url.
+    seed_urls = scan.get("seed_urls")
+    if isinstance(seed_urls, list) and seed_urls:
+        cleaned = [u for u in seed_urls if isinstance(u, str) and u.strip()]
+        if cleaned:
+            env["STRIX_SEED_URLS"] = "\n".join(cleaned)
     env.update(cred_env)
     return env
 
@@ -914,8 +1014,60 @@ def _build_cmd(
     if compliance_pack_path:
         cmd += ["--compliance-pack", compliance_pack_path]
 
+    # Phase A — direct GRC exports. The engine writes
+    # `grc_export_<platform>.json` next to vulnerabilities.json for
+    # each --export-format the user picked. Wrapper API + frontend
+    # restrict to the engine's enum
+    # {vanta, drata, hyperproof, secureframe, servicenow, generic}.
+    export_formats = scan.get("export_formats")
+    if isinstance(export_formats, list):
+        for fmt in export_formats:
+            if isinstance(fmt, str) and fmt.strip():
+                cmd += ["--export-format", fmt.strip()]
+
+    # Engine PR #271 — `<type>:<value>` prefix on `--target`. We use the
+    # prefix only for `api`-typed targets, the case the engine's
+    # URL-shape inference cannot disambiguate: a JSON API at
+    # `https://api.example.com` looks identical to a web app at
+    # `https://example.com`, but the two should run different tool
+    # catalogs (engine PRs #267 + #268 + #269 added the api catalog
+    # which drops browser / DOM / scan_xss / bfs_crawl). Without the
+    # prefix, an api target silently runs the ~58-tool web_application
+    # DAST set.
+    #
+    # All other target types travel as bare `--target <value>` so older
+    # Strix versions (pre-PR-#271) keep working unchanged AND so we
+    # don't trigger the engine's strict-match check — if the wrapper
+    # DB classified a github URL as `web_application` (operator error)
+    # and we passed `web_application:https://github.com/...`, the
+    # engine would reject it (the URL parses as `repository`). Letting
+    # those targets fall through to the bare form keeps the engine's
+    # own inference as the safety net.
     for target in targets:
-        cmd += ["-t", target["value"]]
+        t_value = target["value"]
+        if target.get("type") == "api":
+            cmd += ["-t", f"api:{t_value}"]
+        else:
+            cmd += ["-t", t_value]
+
+    # Engine PRs #267 + #271 — when the parent target is `api`-typed
+    # and the tenant supplied an OpenAPI / Swagger spec URL in its
+    # config, forward it as `--openapi <url>`. The engine otherwise
+    # probes 11 standard publishing paths automatically
+    # (`/openapi.json`, `/swagger.json`, `/v3/api-docs`, etc.) — this
+    # just short-circuits discovery when the spec lives elsewhere.
+    #
+    # The parent target config lives at `scan["targets"]["config"]` via
+    # the supabase_client.fetch_scan() FK join; the per-scan
+    # scan_targets rows (the `targets` argument) don't carry config.
+    # We honour spec_url only when the parent target type is `api` to
+    # keep the contract clean — a web_application target with a stray
+    # spec_url in its config is silently ignored.
+    parent_target = scan.get("targets") or {}
+    if parent_target.get("type") == "api":
+        spec_url = (parent_target.get("config") or {}).get("spec_url")
+        if isinstance(spec_url, str) and spec_url.strip():
+            cmd += ["--openapi", spec_url.strip()]
 
     # Combine the user's free-form instruction with augmented text derived
     # from `targets.config` (per-target-type configuration). See
@@ -1284,6 +1436,28 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         # amber "coverage incomplete" banner keys off this column.
         _persist_coverage(sb, scan_id, run_dir)
 
+        # Engine kg.json — typed knowledge graph
+        # (strix PRs #240/#265/#266 / migration 058). Powers the
+        # "Discovered" panel on scan detail: assets, surfaces,
+        # secrets, credentials, dependencies, threat-intel
+        # observations, synthesised exploits + the relationships
+        # between them. Best-effort; older engines without §3 typed
+        # KG leave the file absent and we silently skip.
+        try:
+            _ingest_kg_from_run_dir(sb, scan_id, scan["org_id"], run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: kg.json ingest failed", scan_id)
+
+        # Engine patches.jsonl — Patcher specialist proposals
+        # (strix PRs #243/#250 / migration 058). One row per patch
+        # the engine proposed for a verified finding; we attach the
+        # diff + status to the matching findings row. Best-effort;
+        # older engines without the Patcher leave the file absent.
+        try:
+            _ingest_patches_from_run_dir(sb, scan_id, run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: patches.jsonl ingest failed", scan_id)
+
         # CycloneDX SBOM (engine PR #131 / §19.4 Tier 4 row 3,
         # migration 032). The file itself was already uploaded by the
         # rglob("*") loop above; we only need to flip the boolean so
@@ -1414,6 +1588,204 @@ def _persist_run_meta(sb: WorkerSupabase, scan_id: str, run_dir: Path) -> None:
         sb.set_run_meta(scan_id, data)
     except Exception:  # noqa: BLE001
         logger.exception("scan %s: failed to persist run_meta", scan_id)
+
+
+_KG_NODE_TYPES = frozenset({
+    "Surface", "Asset", "Vuln", "Credential", "Secret",
+    "Dependency", "Role", "ThreatIntel", "Exploit",
+})
+_KG_EDGE_TYPES = frozenset({
+    "AFFECTS", "REACHABLE_FROM", "LEAKS", "GRANTS_ACCESS_TO",
+    "CHAINS_TO", "RUNS_ON", "USES", "OBSERVED",
+    "PIVOTED_FROM", "EXPLOITS",
+})
+
+
+def _ingest_kg_from_run_dir(
+    sb: WorkerSupabase, scan_id: str, org_id: str, run_dir: Path
+) -> None:
+    """Read <run_dir>/kg.json (strix PRs #240/#265/#266) and bulk-insert
+    its nodes + edges into kg_nodes / kg_edges (migration 058).
+
+    The engine serialises a process-global singleton KG to disk at scan
+    end. Schema (from strix/agents/knowledge_graph.py):
+
+      { "version": 1,
+        "nodes": [ { "id": "N-001", "type": "Surface", "props": {...},
+                     "created_at": float, "updated_at": float } ],
+        "edges": [ { "id": "E-001", "type": "AFFECTS",
+                     "source": "N-001", "target": "N-002",
+                     "props": {...}, "created_at": float } ] }
+
+    Best-effort across the board: missing file, parse error, unknown
+    node/edge type — log and skip. An unknown type is the most likely
+    "engine added a new node kind faster than the wrapper bumped its
+    CHECK constraint" case; preferable to surface a partial KG than
+    fail the whole ingest.
+    """
+    path = run_dir / "kg.json"
+    if not path.exists():
+        logger.info("scan %s: no kg.json — skipping KG ingest", scan_id)
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to parse kg.json", scan_id)
+        return
+    if not isinstance(data, dict):
+        logger.warning("scan %s: kg.json is not a JSON object", scan_id)
+        return
+
+    raw_nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+    raw_edges = data.get("edges") if isinstance(data.get("edges"), list) else []
+
+    node_rows: list[dict[str, Any]] = []
+    skipped_unknown_types: set[str] = set()
+    for n in raw_nodes:
+        if not isinstance(n, dict):
+            continue
+        node_id = n.get("id")
+        node_type = n.get("type")
+        if not isinstance(node_id, str) or not isinstance(node_type, str):
+            continue
+        if node_type not in _KG_NODE_TYPES:
+            # Skip but track so we can flag engine drift in one log line.
+            skipped_unknown_types.add(node_type)
+            continue
+        node_rows.append({
+            "org_id": org_id,
+            "scan_id": scan_id,
+            "node_id": node_id,
+            "node_type": node_type,
+            "props": n.get("props") or {},
+        })
+
+    edge_rows: list[dict[str, Any]] = []
+    skipped_unknown_edge_types: set[str] = set()
+    for e in raw_edges:
+        if not isinstance(e, dict):
+            continue
+        edge_id = e.get("id")
+        edge_type = e.get("type")
+        source = e.get("source")
+        target = e.get("target")
+        if not all(isinstance(v, str) for v in (edge_id, edge_type, source, target)):
+            continue
+        if edge_type not in _KG_EDGE_TYPES:
+            skipped_unknown_edge_types.add(edge_type)
+            continue
+        edge_rows.append({
+            "org_id": org_id,
+            "scan_id": scan_id,
+            "edge_id": edge_id,
+            "edge_type": edge_type,
+            "source_node_id": source,
+            "target_node_id": target,
+            "props": e.get("props") or {},
+        })
+
+    if skipped_unknown_types:
+        logger.warning(
+            "scan %s: KG ingest skipped %d nodes with unknown types: %s "
+            "— engine likely added a new NodeType ahead of the wrapper's "
+            "CHECK constraint; add the type to migration 058 to surface "
+            "them in the UI.",
+            scan_id, sum(1 for n in raw_nodes if isinstance(n, dict) and n.get("type") in skipped_unknown_types),
+            sorted(skipped_unknown_types),
+        )
+    if skipped_unknown_edge_types:
+        logger.warning(
+            "scan %s: KG ingest skipped edges with unknown types: %s",
+            scan_id, sorted(skipped_unknown_edge_types),
+        )
+
+    try:
+        n_nodes = sb.insert_kg_nodes(node_rows) if node_rows else 0
+        n_edges = sb.insert_kg_edges(edge_rows) if edge_rows else 0
+        logger.info(
+            "scan %s: ingested KG — %d nodes / %d edges",
+            scan_id, n_nodes, n_edges,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: KG bulk-insert failed", scan_id)
+
+
+def _ingest_patches_from_run_dir(
+    sb: WorkerSupabase, scan_id: str, run_dir: Path
+) -> None:
+    """Read <run_dir>/patches.jsonl (strix PRs #243/#250) and update the
+    matching findings rows with patch_* columns (migration 058).
+
+    One JSON object per line; schema mirrors PatchProposal in
+    strix/agents/patcher.py:
+
+      { "patch_id":  "PATCH-abc123",
+        "finding_id": "<engine finding id>",
+        "diff":       "<unified diff>",
+        "commit_message": "<conventional commit summary>",
+        "diff_hash":  "<sha1[:12]>",
+        "applied":    bool,
+        "status":     "proposed" | "applied" | "verified" | "failed",
+        "created_at": float,
+        "verified_at": float | null,
+        "last_failure_reason": str }
+
+    We map by `finding_id` — engine's identifier matches the value the
+    wrapper stored on the findings row at ingest time. Findings without
+    a matching row (proposed for a vuln that didn't make it into our
+    DB) are logged + skipped. Multiple patches per finding (re-proposal
+    after a verify-fail) keep last-write-wins — final state is what the
+    UI shows.
+    """
+    path = run_dir / "patches.jsonl"
+    if not path.exists():
+        logger.info("scan %s: no patches.jsonl — skipping patch ingest", scan_id)
+        return
+
+    proposals: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "scan %s: patches.jsonl line %d: malformed JSON, skipping",
+                        scan_id, line_no,
+                    )
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if not isinstance(obj.get("finding_id"), str) or not obj["finding_id"]:
+                    continue
+                if not isinstance(obj.get("diff"), str):
+                    continue
+                proposals.append(obj)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to read patches.jsonl", scan_id)
+        return
+
+    if not proposals:
+        logger.info("scan %s: patches.jsonl present but empty — nothing to ingest", scan_id)
+        return
+
+    # Last write wins per finding_id — the engine appends; the most
+    # recent line is the latest state.
+    by_finding: dict[str, dict[str, Any]] = {}
+    for obj in proposals:
+        by_finding[obj["finding_id"]] = obj
+
+    try:
+        applied = sb.attach_patches_to_findings(scan_id, by_finding)
+        logger.info(
+            "scan %s: attached %d patches to findings (%d in file, %d unique)",
+            scan_id, applied, len(proposals), len(by_finding),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: patch attach failed", scan_id)
 
 
 def _load_trajectories(run_dir: Path) -> dict[str, dict[str, Any]]:

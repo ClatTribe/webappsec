@@ -18,7 +18,7 @@ export type FindingStatus =
   // policy) so it's auditable and one-click-reversible. See migration 020.
   | 'dismissed_by_ai';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
-export type TargetType = 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
+export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'domain' | 'ip_address';
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
 export type TargetStatus = 'active' | 'archived';
 
@@ -541,7 +541,7 @@ export interface KillChainResponse {
 export interface ScanTarget {
   id: string;
   scan_id: string;
-  type: 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
+  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'domain' | 'ip_address';
   value: string;
   workspace_subdir: string | null;
   source_integration_id: string | null;
@@ -657,6 +657,21 @@ export interface Finding {
    *  whole record verbatim; the UI lazy-renders the "How did the engine
    *  arrive at this?" panel from these fields. */
   trajectory?: TrajectoryRecord | null;
+  /** Patcher specialist (strix PRs #243 / #250 / migration 058). One
+   *  unified-diff proposal per finding. status ∈
+   *  `proposed | applied | verified | failed`. UI renders these as the
+   *  "Suggested fix" expandable panel on the finding card. */
+  patch_id?: string | null;
+  patch_diff?: string | null;
+  patch_commit_message?: string | null;
+  patch_status?: string | null;
+  patch_verified_at?: string | null;
+  patch_proposed_at?: string | null;
+  /** Patcher → PR flow (wrapper migration 060). Set when a user clicks
+   *  "Apply as PR" and the wrapper opens a GitHub PR with the engine's
+   *  diff. Never set by the engine. */
+  patch_pr_url?: string | null;
+  patch_applied_at?: string | null;
 }
 
 export interface TrajectoryRecord {
