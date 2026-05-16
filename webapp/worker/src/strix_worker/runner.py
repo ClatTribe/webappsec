@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
 import hashlib
 import json
 import logging
 import os
 import re
 import shlex
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -1458,6 +1462,18 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         except Exception:  # noqa: BLE001
             logger.exception("scan %s: patches.jsonl ingest failed", scan_id)
 
+        # Phase A #5 / migration 062 — SARIF upload to GitHub Code
+        # Scanning. Only fires when (a) the parent target is a
+        # repository, (b) it has integration_id set to a GitHub OAuth
+        # integration, and (c) the engine wrote *.sarif files in the
+        # run dir. Anything else (no sarif, non-github host, no
+        # integration, API failure) is a silent skip — the wrapper UI
+        # gates the "View in Code Scanning" link on the row's URL.
+        try:
+            _upload_sarif_to_code_scanning(sb, scan_id, scan, run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: SARIF Code Scanning upload failed", scan_id)
+
         # CycloneDX SBOM (engine PR #131 / §19.4 Tier 4 row 3,
         # migration 032). The file itself was already uploaded by the
         # rglob("*") loop above; we only need to flip the boolean so
@@ -1786,6 +1802,219 @@ def _ingest_patches_from_run_dir(
         )
     except Exception:  # noqa: BLE001
         logger.exception("scan %s: patch attach failed", scan_id)
+
+
+def _upload_sarif_to_code_scanning(
+    sb: WorkerSupabase,
+    scan_id: str,
+    scan: dict[str, Any],
+    run_dir: Path,
+) -> None:
+    """Phase A #5 — push SARIF artefacts to GitHub Code Scanning.
+
+    Preconditions for a non-skip path (all must be true):
+      1. The parent target is a `repository`.
+      2. The parent target carries an `integration_id` (migration 061).
+      3. The integration is a github.com OAuth integration.
+      4. The engine wrote at least one `*.sarif` file in run_dir.
+
+    Failure modes are all log-and-skip:
+      - No SARIF in run_dir → silent (older engines or scans that
+        didn't run SAST).
+      - No integration_id → silent.
+      - Non-GitHub host → silent (we only know how to hit
+        api.github.com today; gitlab + bitbucket have analogous
+        surfaces we don't yet integrate).
+      - GitHub API rejects (auth scope insufficient, repo not opted
+        in to Code Scanning, etc.) → log the response body so the
+        operator can fix it; the scan still finalises clean.
+
+    GitHub Code Scanning API: POST /repos/{owner}/{repo}/code-scanning/
+    sarifs. Body shape:
+      { commit_sha, ref, sarif (base64+gzip), tool_name, started_at }
+    Response: 202 + {id, url}. The result is asynchronously processed;
+    we stamp the row right away and the user-visible URL is the
+    repo's `/security/code-scanning` surface (works even before the
+    server-side processing completes).
+    """
+    sarif_files = list(run_dir.rglob("*.sarif"))
+    if not sarif_files:
+        return
+
+    parent = scan.get("targets") or {}
+    if parent.get("type") != "repository":
+        return
+    integration_id = parent.get("integration_id")
+    if not integration_id:
+        logger.info(
+            "scan %s: SARIF found but target has no integration_id — skipping upload",
+            scan_id,
+        )
+        return
+
+    repo_url = parent.get("value") or ""
+    parsed = _parse_github_repo_url(repo_url)
+    if parsed is None:
+        logger.info(
+            "scan %s: SARIF found but target value %r isn't a GitHub URL — "
+            "Code Scanning upload only supports github.com today",
+            scan_id, repo_url,
+        )
+        return
+
+    try:
+        token_blob = sb.decrypt_integration(scan_id, integration_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to decrypt github integration", scan_id)
+        return
+    try:
+        token = json.loads(token_blob).get("access_token")
+    except (json.JSONDecodeError, AttributeError):
+        logger.warning("scan %s: integration token isn't JSON", scan_id)
+        return
+    if not token:
+        return
+
+    owner, repo = parsed
+    # Engine PR #117 — `--branch` ref. Worker sends `null` when the
+    # user didn't pick a branch and the engine clones the repo's
+    # default. We GET /repos/<o>/<r> to discover the default if
+    # needed, then resolve the head SHA for the right ref.
+    branch = scan.get("branch") or None
+    ref_name, commit_sha = _resolve_github_ref(token, owner, repo, branch)
+    if not commit_sha:
+        logger.warning(
+            "scan %s: couldn't resolve head SHA for github.com/%s/%s@%s — skipping",
+            scan_id, owner, repo, branch or "default",
+        )
+        return
+
+    # GitHub accepts one SARIF per request. Most strix scans produce
+    # 0 or 1 file (one combined SAST run). We iterate defensively.
+    for sarif_path in sarif_files:
+        try:
+            with sarif_path.open("rb") as f:
+                raw = f.read()
+            payload = base64.b64encode(gzip.compress(raw)).decode("ascii")
+        except OSError:
+            logger.exception("scan %s: couldn't read SARIF at %s", scan_id, sarif_path)
+            continue
+
+        body = {
+            "commit_sha": commit_sha,
+            "ref": f"refs/heads/{ref_name}",
+            "sarif": payload,
+            "tool_name": "tensorshield",
+            "started_at": (scan.get("started_at") or "")[:19] + "Z"
+            if scan.get("started_at")
+            else None,
+        }
+        # Strip None — GitHub rejects nulls on some fields.
+        body = {k: v for k, v in body.items() if v is not None}
+
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/code-scanning/sarifs",
+                data=json.dumps(body).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "tensorshield-worker",
+                    "Content-Type": "application/json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                resp_body = resp.read().decode("utf-8", errors="replace")
+                logger.info(
+                    "scan %s: SARIF upload accepted by github.com/%s/%s (%d): %s",
+                    scan_id, owner, repo, resp.status, resp_body[:200],
+                )
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+            logger.warning(
+                "scan %s: SARIF upload to github.com/%s/%s rejected (%s): %s",
+                scan_id, owner, repo, e.code, err[:500],
+            )
+            return  # bail on first hard failure; don't try more files
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: SARIF upload network failure", scan_id)
+            return
+
+    # All uploads succeeded — stamp the row. The URL we surface is the
+    # repo's Code Scanning landing page (the per-upload URL works too
+    # but only after server-side ingest completes, which is async).
+    url = f"https://github.com/{owner}/{repo}/security/code-scanning"
+    try:
+        sb.set_code_scanning_uploaded(scan_id, url)
+        logger.info(
+            "scan %s: stamped code_scanning_url=%s for %d SARIF file(s)",
+            scan_id, url, len(sarif_files),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "scan %s: failed to stamp code_scanning_url (upload still happened)",
+            scan_id,
+        )
+
+
+def _parse_github_repo_url(value: str) -> tuple[str, str] | None:
+    """Pull (owner, repo) out of a GitHub URL. Returns None for non-
+    github.com URLs or SSH paths — we only support github.com Code
+    Scanning today (gitlab + bitbucket have analogous APIs we'll wire
+    later)."""
+    import re
+    cleaned = value.strip()
+    m = re.match(
+        r"^https?://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$",
+        cleaned,
+    )
+    if m:
+        return m.group(1), m.group(2)
+    m = re.match(r"^git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?$", cleaned)
+    if m:
+        return m.group(1), m.group(2)
+    return None
+
+
+def _resolve_github_ref(
+    token: str, owner: str, repo: str, branch: str | None
+) -> tuple[str, str | None]:
+    """Look up the head SHA of a branch via GitHub. Returns
+    (resolved_branch_name, commit_sha). When `branch` is None we ask
+    GitHub for the repo's default_branch first, then resolve the head
+    of that.
+    """
+    base = f"https://api.github.com/repos/{owner}/{repo}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "tensorshield-worker",
+    }
+
+    resolved_branch = branch
+    if not resolved_branch:
+        try:
+            req = urllib.request.Request(base, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                meta = json.loads(resp.read())
+                resolved_branch = meta.get("default_branch") or "main"
+        except Exception:  # noqa: BLE001
+            resolved_branch = "main"  # last-resort fallback
+
+    try:
+        req = urllib.request.Request(
+            f"{base}/git/ref/heads/{resolved_branch}",
+            headers=headers,
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            ref_obj = json.loads(resp.read())
+            sha = ref_obj.get("object", {}).get("sha")
+            return resolved_branch, sha
+    except Exception:  # noqa: BLE001
+        return resolved_branch, None
 
 
 def _load_trajectories(run_dir: Path) -> dict[str, dict[str, Any]]:

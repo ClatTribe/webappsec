@@ -127,6 +127,23 @@ class WorkerSupabase:
             "worker_set_compliance_pack_uploaded", {"p_scan_id": scan_id}
         ).execute()
 
+    def set_code_scanning_uploaded(self, scan_id: str, url: str) -> None:
+        """Stamp scans.code_scanning_url + uploaded_at after a successful
+        SARIF push to GitHub Code Scanning (Phase A #5 / migration 062).
+
+        Service-role bypasses RLS. The wrapper API doesn't expose a
+        manual re-upload path today — the worker is the only caller —
+        so a thin direct update is fine. We compute the timestamp
+        Python-side rather than sending "now()" as a string, since
+        PostgREST won't evaluate function calls inside JSON payloads.
+        """
+        self.client.table("scans").update(
+            {
+                "code_scanning_url": url,
+                "code_scanning_uploaded_at": _epoch_to_iso(__import__("time").time()),
+            }
+        ).eq("id", scan_id).execute()
+
     def insert_kg_nodes(self, rows: list[dict[str, Any]]) -> int:
         """Bulk-insert engine-emitted KG nodes (migration 058).
 

@@ -53,6 +53,14 @@ function NewScanInner() {
   const [integrationIds, setIntegrationIds] = useState<string[]>([]);
   const [dnsOnly, setDnsOnly] = useState(false);
   const [branch, setBranch] = useState('');
+  // Phase A #4 — "Scan this PR" diff mode. Engine accepts
+  // `--scope-mode diff --diff-base <ref>`; the worker forwards as-is.
+  // When `scopeMode === 'diff'`, the engine scans only the commits
+  // between `diffBase` and the cloned ref (the branch field above,
+  // or the repo default), which is the canonical "PR review" pattern.
+  type ScopeMode = 'auto' | 'diff' | 'full';
+  const [scopeMode, setScopeMode] = useState<ScopeMode>('auto');
+  const [diffBase, setDiffBase] = useState<string>('');
   const [maxCost, setMaxCost] = useState<string>('');
   const [maxInputTokens, setMaxInputTokens] = useState<string>('');
   const [imports, setImports] = useState<ImportRef[]>([]);
@@ -156,6 +164,19 @@ function NewScanInner() {
         target_id: selected.id,
         targets: [selected.value],
         scan_mode: scanMode,
+        // Phase A #4 — diff-aware scope. The engine's --scope-mode
+        // accepts {auto, diff, full}; the wrapper API sets the
+        // default to 'auto' so omitting the field is safe.
+        scope_mode:
+          selected.type === 'repository' && scopeMode !== 'auto' ? scopeMode : undefined,
+        // Phase A #4 — companion diff-base ref. Only forwarded when
+        // scope_mode is 'diff'; ignored otherwise.
+        diff_base:
+          selected.type === 'repository' &&
+          scopeMode === 'diff' &&
+          diffBase.trim().length > 0
+            ? diffBase.trim()
+            : undefined,
         instruction_text: instruction.trim() || null,
         integration_ids: integrationIds,
         // Phase A / migration 061 — auth credentials + advanced engine
@@ -352,22 +373,107 @@ function NewScanInner() {
             dropdown is on the wishlist but out of scope here — requires
             a connected GitHub integration to enumerate refs. */}
         {selected?.type === 'repository' && (
-          <section>
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
-              Branch <span className="text-neutral-500">(optional)</span>
+          <section className="space-y-3">
+            <div>
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                Branch <span className="text-neutral-500">(optional)</span>
+              </div>
+              <input
+                type="text"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                maxLength={255}
+                placeholder="main"
+                className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+              <p className="mt-1 text-[11px] text-neutral-500">
+                Branch, tag, or commit SHA. Leave empty to scan the repository&apos;s
+                default branch.
+              </p>
             </div>
-            <input
-              type="text"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              maxLength={255}
-              placeholder="main"
-              className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2 font-mono text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
-            />
-            <p className="mt-1 text-[11px] text-neutral-500">
-              Branch, tag, or commit SHA. Leave empty to scan the repository&apos;s
-              default branch.
-            </p>
+
+            {/* Phase A #4 — "Scan this PR" diff-mode tile. Engine
+                PR #117 surfaced as --scope-mode + --diff-base; this
+                is the UX entry point. Three-state pill picker so the
+                full-scan default is one click and the diff path
+                shows its companion base-ref input only when relevant. */}
+            <div className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
+              <div className="mb-2">
+                <div className="text-[12px] font-semibold uppercase tracking-wider text-neutral-200">
+                  Scan scope
+                </div>
+                <p className="mt-0.5 text-[11px] text-neutral-500">
+                  Diff scope reviews only what changed against a base ref — the canonical PR-review
+                  pattern. Use full scope for periodic audits.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    { v: 'auto' as const, label: 'Auto', hint: "Engine picks based on target shape" },
+                    { v: 'full' as const, label: 'Full scan', hint: 'Audit the whole repository' },
+                    { v: 'diff' as const, label: 'PR diff', hint: 'Review only changes vs the base ref' },
+                  ]
+                ).map(({ v, label, hint }) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setScopeMode(v)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      scopeMode === v
+                        ? 'bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-400/40'
+                        : 'bg-neutral-900/40 text-neutral-400 ring-1 ring-neutral-800 hover:text-neutral-100'
+                    }`}
+                    title={hint}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {scopeMode === 'diff' && (
+                <div className="mt-3">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                    Base ref
+                  </div>
+                  <input
+                    type="text"
+                    value={diffBase}
+                    onChange={(e) => setDiffBase(e.target.value)}
+                    maxLength={255}
+                    placeholder="origin/main"
+                    className="w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+                  />
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    Engine computes <code>{diffBase || 'origin/main'}..{branch || 'HEAD'}</code> and
+                    scans only files touched in those commits. Common values:{' '}
+                    <button
+                      type="button"
+                      onClick={() => setDiffBase('origin/main')}
+                      className="font-mono text-neutral-300 underline-offset-2 hover:underline"
+                    >
+                      origin/main
+                    </button>
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={() => setDiffBase('origin/master')}
+                      className="font-mono text-neutral-300 underline-offset-2 hover:underline"
+                    >
+                      origin/master
+                    </button>
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={() => setDiffBase('origin/develop')}
+                      className="font-mono text-neutral-300 underline-offset-2 hover:underline"
+                    >
+                      origin/develop
+                    </button>
+                    .
+                  </p>
+                </div>
+              )}
+            </div>
           </section>
         )}
 
