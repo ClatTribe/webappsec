@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { BrandLockup } from '@/components/marketing/marketing-shell';
+import OnboardingDialog from '@/components/onboarding/onboarding-dialog';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -37,6 +38,32 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: orgs } = await supabase.from('organizations').select('*').limit(5);
   const org = orgs?.[0];
+
+  // Tier II #9 — onboarding wizard.
+  // Only fetch the integration list when the wizard is actually going
+  // to show. Saves a round-trip on every page load for the 99% of
+  // users who are past onboarding. The migration 067 backfill marks
+  // existing users as 'completed' so this is mostly a new-signup path.
+  const onboardingState =
+    (profile as { onboarding_state?: string } | null)?.onboarding_state ?? 'completed';
+  const showOnboarding =
+    onboardingState === 'pending' || onboardingState === 'in_progress';
+
+  let onboardingIntegrations: Array<{
+    id: string;
+    type: string;
+    status: string;
+    name: string;
+    metadata?: { login?: string };
+  }> = [];
+  if (showOnboarding) {
+    const { data } = await supabase
+      .from('integrations')
+      .select('id, type, status, name, metadata')
+      .eq('type', 'github')
+      .eq('status', 'active');
+    onboardingIntegrations = (data ?? []) as typeof onboardingIntegrations;
+  }
   const initials = (profile?.full_name ?? user.email ?? '?')
     .split(/[\s@]+/)
     .filter(Boolean)
@@ -111,6 +138,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="flex-1 px-10 py-8">
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
+
+      {/* Tier II #9 — onboarding wizard. Rendered only when the
+          server-side profile state is pending/in_progress so we never
+          flash the modal to users who've completed it or dismissed
+          it on a prior visit. The component fetches integration data
+          via the prop list passed here. */}
+      {showOnboarding && <OnboardingDialog initialIntegrations={onboardingIntegrations} />}
     </div>
   );
 }
