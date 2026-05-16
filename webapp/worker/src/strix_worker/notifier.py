@@ -87,12 +87,20 @@ def notify_scan_completion(
         scan = {}
 
     counts = _count_findings_by_severity(sb, scan_id)
+    # Phase B #5 — regressions inside this scan. The finding ingest
+    # path (worker_insert_finding RPC) sets occurrences.reopened=true
+    # when an existing dismissed/fixed finding gets re-detected on
+    # this scan. We surface the count + a sample in the Slack message
+    # so the team gets a "this came back" beat rather than reading
+    # the dashboard.
+    regressions = _count_regressions(sb, scan_id)
     payload = _compose_message(
         scan=scan,
         scan_id=scan_id,
         final_status=final_status,
         error_message=error_message,
         counts=counts,
+        regressions=regressions,
         wrapper_origin=wrapper_origin,
     )
 
@@ -135,6 +143,34 @@ def _count_findings_by_severity(sb: WorkerSupabase, scan_id: str) -> dict[str, i
     return counts
 
 
+def _count_regressions(sb: WorkerSupabase, scan_id: str) -> int:
+    """Count findings on this scan flagged as regressions
+    (Phase B #5 / migration 017 — reopened=true on the per-scan
+    occurrence row).
+
+    A regression is a finding that was previously dismissed or fixed
+    and has been re-detected by this scan. The worker_insert_finding
+    RPC stamps `reopened=true` on the occurrence row when the
+    finding's prior status was in ('fixed','false_positive',
+    'wont_fix','dismissed_by_ai').
+
+    Best-effort: any failure returns 0 so we silently skip the
+    regression line in Slack rather than failing the notify.
+    """
+    try:
+        result = (
+            sb.client.table("finding_occurrences")
+            .select("id", count="exact")
+            .eq("scan_id", scan_id)
+            .eq("reopened", True)
+            .execute()
+        )
+        return int(getattr(result, "count", 0) or 0)
+    except Exception:  # noqa: BLE001
+        logger.warning("scan %s: failed to load regression count", scan_id, exc_info=True)
+        return 0
+
+
 def _compose_message(
     *,
     scan: dict[str, Any],
@@ -143,6 +179,7 @@ def _compose_message(
     error_message: str | None,
     counts: dict[str, int],
     wrapper_origin: str | None,
+    regressions: int = 0,
 ) -> dict[str, Any]:
     """Compose the Slack-blocks payload.
 
@@ -174,6 +211,16 @@ def _compose_message(
     )
     if not sev_line:
         sev_line = "_no findings_"
+
+    # Phase B #5 — regression beat. Surfaces when at least one
+    # finding on this scan was reopened (previously dismissed/fixed
+    # but re-detected now). The line is appended to subtitle_lines so
+    # it renders prominently above the severity breakdown.
+    if regressions > 0:
+        subtitle_lines.append(
+            f"⚠️ *{regressions} regression{'s' if regressions != 1 else ''}* — "
+            "finding(s) we marked closed have come back."
+        )
 
     blocks: list[dict[str, Any]] = [
         {

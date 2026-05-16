@@ -390,7 +390,7 @@ export default function NewTargetPage() {
             <div className="space-y-5">
               <Field
                 label="Scan frequency"
-                hint="Manual today; scheduled scans land in a future release."
+                hint="Set daily / weekly / monthly to have TensorShield auto-scan this target. The first scheduled scan runs within the cadence window of the target's creation; you can run a manual scan any time."
               >
                 <div className="flex flex-wrap gap-2">
                   {(['manual', 'daily', 'weekly', 'monthly'] as ScanFrequency[]).map((f) => (
