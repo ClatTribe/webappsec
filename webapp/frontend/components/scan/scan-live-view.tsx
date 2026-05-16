@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import { Activity, Pause, ShieldAlert, ShieldCheck, ShieldX, AlertTriangle, X, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
+import type {
+  Finding,
+  ScanEvent,
+  ScanStatus,
+  ScanTarget,
+  ScanCoverage,
+  RunMeta,
+} from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
@@ -13,6 +20,8 @@ import DiscoveredPanel, { type KgNode } from '@/components/scan/discovered-panel
 import HypothesisPane from '@/components/scan/hypothesis-pane';
 import ComplianceOverlay from '@/components/scan/compliance-overlay';
 import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
+import ToolFreshness from '@/components/scan/tool-freshness';
+import CoverageMatrix from '@/components/scan/coverage-matrix';
 
 interface Props {
   scanId: string;
@@ -22,6 +31,12 @@ interface Props {
   initialCancelRequestedAt?: string | null;
   initialErrorMessage?: string | null;
   initialExitCode?: number | null;
+  /** Tier I #2 / #3 — passed through from the scan-detail page so the
+   *  coverage matrix + tool-freshness panels have engine-emitted
+   *  context without an extra fetch round-trip. */
+  targets?: ScanTarget[];
+  coverage?: ScanCoverage | null;
+  runMeta?: RunMeta | null;
 }
 
 // A scan is "stale" if it's still in 'running' but hasn't heartbeat'd in this
@@ -94,6 +109,9 @@ export default function ScanLiveView({
   initialCancelRequestedAt,
   initialErrorMessage,
   initialExitCode,
+  targets = [],
+  coverage = null,
+  runMeta = null,
 }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
@@ -373,6 +391,22 @@ export default function ScanLiveView({
           empty. Hidden until the engine emits a `phase.entered` event
           (older versions / pre-recon phase). */}
       <PhaseProgress events={events} />
+
+      {/* Tier I #2 — Coverage matrix. Category × tool × result grid built
+          from `coverage.required`, `tool.execution.started` events, and
+          findings.vuln_id. Collapsed by default; the header summary
+          (X found · Y clean · Z gaps) is the trust signal on its own. */}
+      <CoverageMatrix
+        coverage={coverage}
+        events={events}
+        targets={targets}
+        findings={findings}
+      />
+
+      {/* Tier I #3 — Tool freshness. Per-tool roll-up (invocations, last
+          call, content-freshness pill from run_meta.tools). Hidden when
+          no tool fired AND no engine-emitted tools meta. */}
+      <ToolFreshness events={events} runMeta={runMeta} />
 
       {/* "Discovered" panel — typed knowledge graph the engine built
           during this scan (strix PRs #240 / #265 / #266). Surfaces

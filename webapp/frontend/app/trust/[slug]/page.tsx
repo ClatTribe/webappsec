@@ -71,11 +71,18 @@ interface TrustPagePayload {
 const FRAMEWORK_LABELS: Record<string, string> = {
   soc2_type_2:      'SOC 2 Type 2',
   soc2_type_1:      'SOC 2 Type 1',
-  iso_27001:        'ISO 27001',
-  pci_dss:          'PCI DSS',
+  iso_27001:        'ISO 27001:2022',
+  pci_dss:          'PCI DSS 4.0',
   hipaa:            'HIPAA',
+  // Tier I #5 — additional frameworks the engine can now emit
+  // evidence against (migration 065 seeded SAQ templates).
+  nist_800_53:      'NIST 800-53',
+  nist_800_171:     'NIST 800-171 / CMMC',
   gdpr:             'GDPR',
   fedramp_moderate: 'FedRAMP Moderate',
+  fedramp_high:     'FedRAMP High',
+  csa_caiq:         'CSA CAIQ',
+  owasp_asvs:       'OWASP ASVS',
 };
 
 function frameworkLabel(id: string): string {

@@ -32,6 +32,8 @@ import type {
 import { createClient } from '@/lib/supabase/client';
 import PatchPreview from '@/components/finding/patch-preview';
 import AffectedFiles from '@/components/finding/affected-files';
+import AssigneePicker from '@/components/finding/assignee-picker';
+import CommentThread from '@/components/finding/comment-thread';
 import {
   AI_BRAND,
   REACHABILITY_THEME,
@@ -1058,6 +1060,22 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </div>
             )}
 
+            {/* Tier I #6 — assignee + due-date controls. Sits inside the
+                triage section because "who owns this" is a triage
+                decision, not a separate concept. The picker auto-fills
+                due_at from severity SLA on first assignment. */}
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+                Owner
+              </span>
+              <AssigneePicker
+                findingId={finding.id}
+                orgId={finding.org_id}
+                initialAssigneeId={finding.assignee_id ?? null}
+                initialDueAt={finding.due_at ?? null}
+              />
+            </div>
+
             {/* Phase B #7 — risk-acceptance receipt. Surfaces on
                 wont_fix findings so the rationale + expiry are
                 visible without expanding any sub-panel. Auditor pack
@@ -1089,6 +1107,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               </div>
             )}
           </section>
+
+          {/* Tier I #6 — comment thread for security-team discussion.
+              Sits beneath the Triage section so the per-finding
+              discussion sits with the rest of the per-finding
+              metadata. Soft-deleted comments render as "[redacted]"
+              so the audit pack stays intact (migration 065). */}
+          <CommentThread findingId={finding.id} />
         </div>
       )}
 
