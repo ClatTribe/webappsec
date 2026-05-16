@@ -14,6 +14,9 @@ import {
   Shuffle,
   FileJson,
   Plug,
+  Container,
+  ShieldAlert,
+  Lock,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TargetType } from '@/lib/target-config';
@@ -36,6 +39,11 @@ export interface AllFields {
   // strix as `--openapi <url>` when set; the engine otherwise probes 11
   // standard publishing paths automatically.
   specUrl: string;
+  // engine PR #274 — container_image target. severity_floor is passed
+  // to Trivy via instruction text; private_registry is a UI hint that
+  // gates a warning banner when no registry-auth integration is wired.
+  imageSeverityFloor: '' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  imagePrivateRegistry: boolean;
   subdomainExcludes: string[];
   portSpec: string;
   protocols: '' | 'tcp' | 'udp' | 'both';
@@ -70,6 +78,12 @@ const TYPE_META: Record<
     ring: 'border-indigo-500/30',
     tag: 'bg-indigo-500/15 text-indigo-200 ring-indigo-500/30',
     label: 'API target configuration',
+  },
+  container_image: {
+    Icon: Container,
+    ring: 'border-sky-500/30',
+    tag: 'bg-sky-500/15 text-sky-200 ring-sky-500/30',
+    label: 'Container image configuration',
   },
   domain: {
     Icon: Compass,
@@ -121,6 +135,9 @@ export default function TypeFields({ type, value, onChange }: Props) {
       )}
       {type === 'api' && (
         <ApiFields value={value} set={set} />
+      )}
+      {type === 'container_image' && (
+        <ContainerImageFields value={value} set={set} />
       )}
       {type === 'domain' && (
         <DomainFields value={value} set={set} accent="emerald" />
@@ -267,6 +284,54 @@ function ApiFields({ value, set }: { value: AllFields; set: Setter }) {
         GraphQL deep introspection and gRPC reflection probes. Browser, DOM, and reflected-XSS
         tools are <span className="text-neutral-300">skipped</span> — they don&apos;t apply to
         JSON / gRPC surfaces.
+      </p>
+    </div>
+  );
+}
+
+// --- Container image -------------------------------------------------------
+
+function ContainerImageFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      <FieldRow
+        Icon={ShieldAlert}
+        label="Minimum severity"
+        hint="Trivy filters out CVEs below this. Most production setups want HIGH+ to keep the inbox actionable; pick LOW for full visibility."
+      >
+        <select
+          value={value.imageSeverityFloor}
+          onChange={(e) => set('imageSeverityFloor', e.target.value as AllFields['imageSeverityFloor'])}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        >
+          <option value="">Default (HIGH+)</option>
+          <option value="LOW">LOW and above (everything)</option>
+          <option value="MEDIUM">MEDIUM and above</option>
+          <option value="HIGH">HIGH and above</option>
+          <option value="CRITICAL">CRITICAL only</option>
+        </select>
+      </FieldRow>
+      <FieldRow
+        Icon={Lock}
+        label="Private registry"
+        hint="Tick if this image lives in a private registry. v1 expects registry auth in the worker's docker config; per-org registry credentials are on the roadmap."
+      >
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] text-neutral-300">
+          <input
+            type="checkbox"
+            checked={value.imagePrivateRegistry}
+            onChange={(e) => set('imagePrivateRegistry', e.target.checked)}
+            className="h-4 w-4 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+          />
+          This image requires authentication to pull
+        </label>
+      </FieldRow>
+      <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] leading-relaxed text-sky-200/80">
+        <span className="font-medium text-sky-100">Routed to the container-image tool catalog.</span>{' '}
+        The engine runs <code>scan_container_image</code> (Trivy) for OS + language-package CVEs,
+        emits an SBOM, and decorates findings with KEV / EPSS data. New CVEs against your image
+        packages auto-fire MOAK exploit synthesis. Browser, DOM, and DAST tools are{' '}
+        <span className="text-neutral-300">skipped</span> — a registry artefact has no live surface.
       </p>
     </div>
   );

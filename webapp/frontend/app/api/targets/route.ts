@@ -6,7 +6,15 @@ import { configSchemaFor, type TargetType } from '@/lib/target-config';
 
 const Body = z.object({
   name: z.string().min(1).max(120),
-  type: z.enum(['local_code', 'repository', 'web_application', 'api', 'domain', 'ip_address']),
+  type: z.enum([
+    'local_code',
+    'repository',
+    'web_application',
+    'api',
+    'container_image',
+    'domain',
+    'ip_address',
+  ]),
   value: z.string().min(1).max(500),
   description: z.string().max(1000).optional(),
   scan_frequency: z.enum(['manual', 'daily', 'weekly', 'monthly']).default('manual'),

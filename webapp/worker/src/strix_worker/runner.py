@@ -1029,15 +1029,18 @@ def _build_cmd(
             if isinstance(fmt, str) and fmt.strip():
                 cmd += ["--export-format", fmt.strip()]
 
-    # Engine PR #271 — `<type>:<value>` prefix on `--target`. We use the
-    # prefix only for `api`-typed targets, the case the engine's
-    # URL-shape inference cannot disambiguate: a JSON API at
-    # `https://api.example.com` looks identical to a web app at
-    # `https://example.com`, but the two should run different tool
-    # catalogs (engine PRs #267 + #268 + #269 added the api catalog
-    # which drops browser / DOM / scan_xss / bfs_crawl). Without the
-    # prefix, an api target silently runs the ~58-tool web_application
-    # DAST set.
+    # Engine PR #271 / PR #274 — `<type>:<value>` prefix on `--target`.
+    # We use the prefix for two types whose values the engine's URL-
+    # shape inference cannot disambiguate:
+    #   - `api:` (PR #267-#271) — a JSON API at `https://api.example.com`
+    #      looks identical to a web app at `https://example.com`, but the
+    #      two should run different tool catalogs (the api catalog drops
+    #      browser / DOM / scan_xss / bfs_crawl).
+    #   - `container_image:` (PR #274) — image refs like `nginx:1.25` are
+    #      syntactically ambiguous with `host:port` strings. The engine's
+    #      `_infer_container_image_value` validator REQUIRES the prefix
+    #      and rejects URL-shaped values; without the prefix the engine
+    #      would never route to scan_container_image.
     #
     # All other target types travel as bare `--target <value>` so older
     # Strix versions (pre-PR-#271) keep working unchanged AND so we
@@ -1045,12 +1048,14 @@ def _build_cmd(
     # DB classified a github URL as `web_application` (operator error)
     # and we passed `web_application:https://github.com/...`, the
     # engine would reject it (the URL parses as `repository`). Letting
-    # those targets fall through to the bare form keeps the engine's
+    # those types fall through to the bare form keeps the engine's
     # own inference as the safety net.
+    _PREFIXED_TYPES = ("api", "container_image")
     for target in targets:
         t_value = target["value"]
-        if target.get("type") == "api":
-            cmd += ["-t", f"api:{t_value}"]
+        t_type = target.get("type")
+        if t_type in _PREFIXED_TYPES:
+            cmd += ["-t", f"{t_type}:{t_value}"]
         else:
             cmd += ["-t", t_value]
 
