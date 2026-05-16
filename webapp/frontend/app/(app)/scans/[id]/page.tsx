@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ShieldAlert,
   ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -303,6 +304,25 @@ export default async function ScanDetailPage({ params }: Props) {
               >
                 <ShieldAlert className="h-3.5 w-3.5" strokeWidth={2.25} />
                 View in Code Scanning
+                <ExternalLink className="h-3 w-3 opacity-70" strokeWidth={2.5} />
+              </a>
+            )}
+            {/* Tier II #7 — PR comment posted. Surfaces only when the
+                worker post-finalize hook successfully called
+                /api/scans/[id]/pr-comment. Link goes to the sticky
+                comment on the PR itself so the user can verify the
+                comment landed. Hidden when the scan wasn't PR-driven
+                or the comment hasn't been posted yet. */}
+            {scan.pr_comment_url && (
+              <a
+                href={scan.pr_comment_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20"
+                title={`Sticky scan summary posted on PR #${scan.github_pull_request_number}${scan.pr_comment_updated_at ? ` (updated ${new Date(scan.pr_comment_updated_at).toLocaleString()})` : ''}`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" strokeWidth={2.25} />
+                PR #{scan.github_pull_request_number} commented
                 <ExternalLink className="h-3 w-3 opacity-70" strokeWidth={2.5} />
               </a>
             )}

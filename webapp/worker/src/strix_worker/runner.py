@@ -437,6 +437,22 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
         except Exception:  # noqa: BLE001
             logger.exception("scan %s: Slack notification dispatch crashed", scan_id)
 
+        # Tier II #7 — GitHub PR sticky comment (migration 066).
+        # If this scan was created by the /api/webhooks/github
+        # receiver, the row carries `github_pull_request_number` and
+        # the dispatch nudges the wrapper to (re)post the sticky
+        # comment on the PR. No-op for non-PR-driven scans.
+        # Best-effort: errors logged, never block scan finalisation.
+        try:
+            from .pr_comment_dispatch import dispatch_pr_comment  # local import
+            dispatch_pr_comment(
+                sb,
+                scan_id=scan_id,
+                wrapper_origin=cfg.wrapper_origin,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: PR comment dispatch crashed", scan_id)
+
 
 def cancel_running_scan(scan_id: str) -> bool:
     """Send SIGTERM to the subprocess for `scan_id` if we have one running.
