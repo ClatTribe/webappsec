@@ -13,6 +13,7 @@ import {
   Search,
   Calendar,
   Plug,
+  Container,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ScanFrequency } from '@/lib/supabase/types';
@@ -52,6 +53,14 @@ const TYPES: {
     Icon: Plug,
     blurb:
       'JSON / GraphQL / gRPC API. Skips browser & DOM tools; runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) + OpenAPI / Swagger spec ingest.',
+  },
+  {
+    value: 'container_image',
+    label: 'Container image',
+    example: 'nginx:1.25',
+    Icon: Container,
+    blurb:
+      'OCI image reference (registry path + tag, or sha256 digest). Runs Trivy for OS + language-package CVEs, emits an SBOM, and feeds MOAK so new CVEs against your image packages auto-fire exploit synthesis. DAST tools are skipped — a registry artefact has no live surface.',
   },
   {
     value: 'domain',
@@ -111,6 +120,9 @@ const EMPTY_FIELDS: AllFields = {
   crawlSeeds: [],
   rateLimitQps: '',
   specUrl: '',
+  // Engine PR #274 — container_image config fields.
+  imageSeverityFloor: '',
+  imagePrivateRegistry: false,
   subdomainExcludes: [],
   portSpec: '',
   protocols: '',
@@ -529,6 +541,16 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
       if (raw.specUrl.trim()) out.spec_url = raw.specUrl.trim();
       const qps = parseInt(raw.rateLimitQps, 10);
       if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
+      return out;
+    }
+    case 'container_image': {
+      // Engine PR #274 — Trivy-driven scanning of OCI images. The
+      // engine's prefix validator already rejects schemes and bad
+      // chars; here we just persist the optional severity floor +
+      // private-registry flag for the worker / UI to read.
+      const out: Record<string, unknown> = {};
+      if (raw.imageSeverityFloor) out.severity_floor = raw.imageSeverityFloor;
+      if (raw.imagePrivateRegistry) out.private_registry = true;
       return out;
     }
     case 'domain': {

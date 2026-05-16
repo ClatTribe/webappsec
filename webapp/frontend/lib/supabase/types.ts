@@ -18,7 +18,7 @@ export type FindingStatus =
   // policy) so it's auditable and one-click-reversible. See migration 020.
   | 'dismissed_by_ai';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
-export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'domain' | 'ip_address';
+export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'domain' | 'ip_address';
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
 export type TargetStatus = 'active' | 'archived';
 
@@ -547,7 +547,7 @@ export interface KillChainResponse {
 export interface ScanTarget {
   id: string;
   scan_id: string;
-  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'domain' | 'ip_address';
+  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'domain' | 'ip_address';
   value: string;
   workspace_subdir: string | null;
   source_integration_id: string | null;

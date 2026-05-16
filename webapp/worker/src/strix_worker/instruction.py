@@ -116,6 +116,31 @@ def _augment_api(config: dict[str, Any]) -> list[str]:
     return out
 
 
+def _augment_container_image(config: dict[str, Any]) -> list[str]:
+    # Engine PR #274 — `container_image` target. The wrapper passes
+    # `--target container_image:<ref>` (prefix required by the engine
+    # to disambiguate `nginx:1.25` from `host:port`). Optional severity
+    # floor flows through as instruction text so the lead's planning
+    # context routes it into the Trivy invocation. `private_registry`
+    # is a UI flag that becomes a credential-availability hint.
+    out: list[str] = []
+    floor = config.get("severity_floor")
+    if isinstance(floor, str) and floor.strip():
+        out.append(
+            f"When invoking scan_container_image, pass severity_floor="
+            f"`{floor.strip()}` to Trivy so the inbox doesn't drown in "
+            "LOW noise."
+        )
+    if config.get("private_registry") is True:
+        out.append(
+            "This image lives in a private registry — the worker host's "
+            "docker config must carry credentials to pull it. Skip the "
+            "scan with a clear error if `trivy image` reports an auth "
+            "failure rather than silently emitting zero findings."
+        )
+    return out
+
+
 def _augment_domain(config: dict[str, Any]) -> list[str]:
     out: list[str] = []
     excludes = config.get("subdomain_excludes")
@@ -163,6 +188,7 @@ _AUGMENTERS = {
     "repository": _augment_repository,
     "web_application": _augment_web_application,
     "api": _augment_api,
+    "container_image": _augment_container_image,
     "domain": _augment_domain,
     "ip_address": _augment_ip_address,
     "local_code": _augment_local_code,

@@ -81,6 +81,8 @@ function augmentLines(type: TargetType, config: Record<string, unknown>): string
       return augmentWebApplication(config);
     case 'api':
       return augmentApi(config);
+    case 'container_image':
+      return augmentContainerImage(config);
     case 'domain':
       return augmentDomain(config);
     case 'ip_address':
@@ -131,6 +133,22 @@ function augmentApi(c: Record<string, unknown>): string[] {
   if (typeof qps === 'number' && Number.isInteger(qps) && qps > 0) {
     out.push(
       `Do not exceed ${qps} requests per second total — this is production traffic, treat it accordingly.`,
+    );
+  }
+  return out;
+}
+
+function augmentContainerImage(c: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const floor = asNonEmptyStr(c.severity_floor);
+  if (floor) {
+    out.push(
+      `When invoking scan_container_image, pass severity_floor=\`${floor}\` to Trivy so the inbox doesn't drown in LOW noise.`,
+    );
+  }
+  if (c.private_registry === true) {
+    out.push(
+      'This image lives in a private registry — the worker must have credentials configured (per-org auth is on the roadmap; v1 relies on the worker host\'s docker config).',
     );
   }
   return out;

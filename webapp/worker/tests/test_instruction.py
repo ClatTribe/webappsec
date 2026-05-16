@@ -171,6 +171,46 @@ def test_api_empty_config_emits_nothing() -> None:
 
 
 # ---------------------------------------------------------------------------
+# container_image (engine PR #274 — Trivy-driven OCI image scanning)
+# ---------------------------------------------------------------------------
+
+
+def test_container_image_severity_floor_threads_to_instruction() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "container_image",
+                "config": {"severity_floor": "HIGH"},
+            }
+        }
+    )
+    assert out is not None
+    assert "HIGH" in out
+    assert "scan_container_image" in out or "Trivy" in out
+
+
+def test_container_image_private_registry_flag_surfaces_warning() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "container_image",
+                "config": {"private_registry": True},
+            }
+        }
+    )
+    assert out is not None
+    assert "private registry" in out.lower()
+
+
+def test_container_image_empty_config_emits_nothing() -> None:
+    """Empty config on a container_image target is the common case —
+    Trivy picks sensible defaults. Wrapper should not bloat the
+    instruction with placeholder text."""
+    out = build_instruction({"targets": {"type": "container_image", "config": {}}})
+    assert out is None
+
+
+# ---------------------------------------------------------------------------
 # domain
 # ---------------------------------------------------------------------------
 

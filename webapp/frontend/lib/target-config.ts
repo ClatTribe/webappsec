@@ -51,6 +51,27 @@ export const ApiConfig = z.object({
   rate_limit_qps: z.number().int().positive().max(1000).optional(),
 });
 
+// Engine PR #274 — first-class `container_image` target type.
+// Routed to scan_container_image (Trivy wrapper) + threat_intel
+// lookups + sbom_extract. DAST tools deliberately excluded — a
+// registry-resident artefact has no live surface to probe. CLI
+// contract: `--target container_image:<ref>` (prefix REQUIRED — image
+// refs are ambiguous with host:port like `nginx:1.25` vs
+// `localhost:1025`).
+export const ContainerImageConfig = z.object({
+  // Optional severity threshold passed to Trivy. Without it, Trivy
+  // emits everything from LOW upward; production users typically
+  // want HIGH+. Worker forwards via instruction text since the
+  // engine's tool reads it from the lead's planning context.
+  severity_floor: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  // Image-pull credentials registry hint. v1 expects users to put
+  // the registry's auth in the worker's docker config; per-target
+  // pull-credential storage is a follow-up. We surface the toggle
+  // so the UI can warn when scanning a private-registry image
+  // without per-org auth wired.
+  private_registry: z.boolean().optional(),
+});
+
 export const DomainConfig = z.object({
   // Glob excludes for subdomain auto-discovery. Even with auto_discover on,
   // the user may want to skip "*-staging.*" or "internal-*". Filtered both
@@ -89,6 +110,7 @@ export type TargetType =
   | 'repository'
   | 'web_application'
   | 'api'
+  | 'container_image'
   | 'domain'
   | 'ip_address'
   | 'local_code';
@@ -101,6 +123,8 @@ export function configSchemaFor(type: TargetType) {
       return WebApplicationConfig;
     case 'api':
       return ApiConfig;
+    case 'container_image':
+      return ContainerImageConfig;
     case 'domain':
       return DomainConfig;
     case 'ip_address':
@@ -116,13 +140,15 @@ export type TargetConfigOf<T extends TargetType> = T extends 'repository'
     ? z.infer<typeof WebApplicationConfig>
     : T extends 'api'
       ? z.infer<typeof ApiConfig>
-      : T extends 'domain'
-        ? z.infer<typeof DomainConfig>
-        : T extends 'ip_address'
-          ? z.infer<typeof IpAddressConfig>
-          : T extends 'local_code'
-            ? z.infer<typeof LocalCodeConfig>
-            : never;
+      : T extends 'container_image'
+        ? z.infer<typeof ContainerImageConfig>
+        : T extends 'domain'
+          ? z.infer<typeof DomainConfig>
+          : T extends 'ip_address'
+            ? z.infer<typeof IpAddressConfig>
+            : T extends 'local_code'
+              ? z.infer<typeof LocalCodeConfig>
+              : never;
 
 /** Shape-validate `config` for the given target type. Throws ZodError on bad
  *  data; returns the parsed object on success. */
