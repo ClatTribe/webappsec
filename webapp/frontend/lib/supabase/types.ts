@@ -685,6 +685,28 @@ export interface Finding {
    *  writes them via the triage flow. */
   wont_fix_reason?: string | null;
   risk_acceptance_expires_at?: string | null;
+  /** Tier I #6 / migration 065 — collaboration metadata. assignee_id
+   *  references auth.users(id) directly so the FK stays valid if a
+   *  member is moved between orgs. due_at is auto-set on triage by
+   *  severity SLA when missing; sla_severity_tier captures the tier
+   *  the due-date came from so a severity bump doesn't silently
+   *  reset it. */
+  assignee_id?: string | null;
+  due_at?: string | null;
+  sla_severity_tier?: string | null;
+}
+
+/** Tier I #6 / migration 065 — per-finding discussion thread. */
+export interface FindingComment {
+  id: string;
+  finding_id: string;
+  org_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
 }
 
 export interface TrajectoryRecord {

@@ -28,7 +28,13 @@ import CompliancePostureCard from '@/components/scan/compliance-posture-card';
 import MonitoringPostureBadge from '@/components/scan/monitoring-posture-badge';
 import CoverageBanner from '@/components/scan/coverage-banner';
 import { AI_BRAND } from '@/lib/finding-theme';
-import type { ScanRecurrenceSummary, ScanSummary } from '@/lib/supabase/types';
+import type {
+  ScanRecurrenceSummary,
+  ScanSummary,
+  ScanTarget,
+  ScanCoverage,
+  RunMeta,
+} from '@/lib/supabase/types';
 
 // ---------------------------------------------------------------------------
 // Engine event parsers (§19.1 Tier 1 slice 2). Read the structured events
@@ -616,6 +622,9 @@ export default async function ScanDetailPage({ params }: Props) {
         initialCancelRequestedAt={scan.cancel_requested_at ?? null}
         initialErrorMessage={scan.error_message ?? null}
         initialExitCode={scan.exit_code ?? null}
+        targets={(targets ?? []) as ScanTarget[]}
+        coverage={(scan.coverage ?? null) as ScanCoverage | null}
+        runMeta={(scan.run_meta ?? null) as RunMeta | null}
       />
     </div>
   );

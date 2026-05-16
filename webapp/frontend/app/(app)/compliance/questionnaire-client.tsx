@@ -47,10 +47,14 @@ interface Answer {
 
 const TEMPLATE_LABELS: Record<string, string> = {
   soc2_saq_v1: 'SOC 2 Trust Services SAQ',
-  // Engine PR #253 / migration 059 — HIPAA Security Rule SAQ. 10 questions
-  // across Administrative / Physical / Technical safeguards keyed by 45
-  // CFR § 164.30x control identifiers.
   hipaa_saq_v1: 'HIPAA Security Rule SAQ',
+  // Tier I #5 / migration 065 — three new GRC framework templates.
+  // ISO 27001:2022 Annex A (15 high-yield controls across A.5/6/8);
+  // PCI DSS 4.0 (12 requirements, ~300 sub-controls); NIST 800-53
+  // Rev 5 (subset of AC/AU/IA/SI families, 12 questions).
+  iso27001_saq_v1: 'ISO 27001:2022 SAQ',
+  pci_dss_v4_saq: 'PCI DSS 4.0 SAQ',
+  nist_800_53_saq_v1: 'NIST 800-53 Rev 5 SAQ',
   sig_lite_v1: 'SIG Lite (Standardized Information Gathering)',
   caiq_v4: 'Cloud Security Alliance CAIQ v4',
   vsa_v1: 'Vendor Security Assessment (VSA)',
