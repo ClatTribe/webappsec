@@ -230,12 +230,12 @@ Ranked by `impact × effort` for the brand thesis.
 
 | # | Item | Why | Effort | Status |
 |---|---|---|---|---|
-| **1** | `container_image` target type wrapper-side | Closes the 4th target type | 1 wk wrapper | **in-flight** |
-| **2** | Coverage matrix view on scan-detail (category × tool × result per target) | Trust signal — auditors / engineers both want it | 3 days | |
-| **3** | Tool freshness panel on scan-detail (Nuclei N templates · X hours ago) | Trust signal; ~zero engine work | 1 day | |
-| **4** | Engine reasoning trace on finding-card ("How did the agent arrive at this?") | Brand-aligned — proves it's an agent, not a scanner | 1 day | |
-| **5** | GRC templates for ISO 27001 + PCI DSS + NIST 800-53 (seed rows) | Unlocks enterprise procurement | 1 day per framework | |
-| **6** | Per-finding assignee + due-date + simple comment thread | Closes team-workflow gap | 4 days | |
+| **1** | `container_image` target type wrapper-side | Closes the 4th target type | 1 wk wrapper | ✅ PR #102 |
+| **2** | Coverage matrix view on scan-detail (category × tool × result per target) | Trust signal — auditors / engineers both want it | 3 days | ✅ PR #103 |
+| **3** | Tool freshness panel on scan-detail (Nuclei N templates · X hours ago) | Trust signal; ~zero engine work | 1 day | ✅ PR #103 |
+| **4** | Engine reasoning trace on finding-card ("How did the agent arrive at this?") | Brand-aligned — proves it's an agent, not a scanner | 1 day | ✅ shipped inline as `TrajectorySection` |
+| **5** | GRC templates for ISO 27001 + PCI DSS + NIST 800-53 (seed rows) | Unlocks enterprise procurement | 1 day per framework | ✅ PR #103 (39 SAQ rows seeded) |
+| **6** | Per-finding assignee + due-date + simple comment thread | Closes team-workflow gap | 4 days | ✅ PR #103 |
 
 ## Tier II — ship Q1 (marquee features)
 
