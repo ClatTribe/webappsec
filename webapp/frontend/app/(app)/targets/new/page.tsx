@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 import {
   ChevronRight,
   Code2,
@@ -11,6 +12,7 @@ import {
   Folder,
   Search,
   Calendar,
+  Plug,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ScanFrequency } from '@/lib/supabase/types';
@@ -39,9 +41,17 @@ const TYPES: {
   {
     value: 'web_application',
     label: 'Deployed web app',
-    example: 'https://api.myapp.com',
+    example: 'https://myapp.com',
     Icon: Globe,
-    blurb: 'Live HTTP target — agent crawls and probes endpoints.',
+    blurb: 'Live HTTP target — agent crawls and probes rendered pages.',
+  },
+  {
+    value: 'api',
+    label: 'API endpoint',
+    example: 'https://api.myapp.com',
+    Icon: Plug,
+    blurb:
+      'JSON / GraphQL / gRPC API. Skips browser & DOM tools; runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) + OpenAPI / Swagger spec ingest.',
   },
   {
     value: 'domain',
@@ -69,7 +79,27 @@ const TYPES: {
 function inferType(value: string): TargetType {
   if (/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//.test(value) || /^git@/.test(value))
     return 'repository';
-  if (/^https?:\/\//.test(value)) return 'web_application';
+  if (/^https?:\/\//.test(value)) {
+    // Best-effort `api` heuristic: api.* hostname, or a path that looks
+    // like spec discovery (/openapi.json, /swagger.json, /v3/api-docs)
+    // or versioned API (/v1, /v2, /api/v1, …). User can always override
+    // via the type buttons — this is just the default.
+    try {
+      const u = new URL(value);
+      if (/^api\./i.test(u.hostname)) return 'api';
+      if (
+        /\/(openapi|swagger)(\.json|\.yaml|\.yml)?\b/i.test(u.pathname) ||
+        /\/v\d+\/api-docs\b/i.test(u.pathname) ||
+        /^\/api(\/v\d+)?\b/i.test(u.pathname) ||
+        /^\/v\d+\//i.test(u.pathname)
+      ) {
+        return 'api';
+      }
+    } catch {
+      // malformed URL — fall through to web_application
+    }
+    return 'web_application';
+  }
   if (/^\d+\.\d+\.\d+\.\d+$/.test(value)) return 'ip_address';
   if (value.startsWith('./') || value.startsWith('/')) return 'local_code';
   return 'domain';
@@ -80,6 +110,7 @@ const EMPTY_FIELDS: AllFields = {
   subdirectory: '',
   crawlSeeds: [],
   rateLimitQps: '',
+  specUrl: '',
   subdomainExcludes: [],
   portSpec: '',
   protocols: '',
@@ -102,6 +133,28 @@ export default function NewTargetPage() {
   const [fields, setFields] = useState<AllFields>(EMPTY_FIELDS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase A / migration 061 — repository targets can be bound to a
+  // specific GitHub / GitLab / Bitbucket integration so the worker
+  // clones with that integration's OAuth token. Without this, private
+  // repos silently fail to clone.
+  const [integrations, setIntegrations] = useState<
+    { id: string; type: string; name: string }[]
+  >([]);
+  const [integrationId, setIntegrationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from('integrations')
+      .select('id, type, name')
+      .in('type', ['github', 'gitlab', 'bitbucket'])
+      .eq('status', 'active')
+      .then(({ data }) => setIntegrations((data ?? []) as typeof integrations));
+    // Only repeat when the page mounts — integrations list doesn't change
+    // mid-form. Eslint complains because `integrations` is in the deps
+    // array conceptually, but we intentionally don't re-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resolvedType: TargetType = typeOverride ?? (value ? inferType(value) : 'web_application');
   const config = useMemo(() => buildConfigForType(resolvedType, fields), [resolvedType, fields]);
@@ -124,6 +177,11 @@ export default function NewTargetPage() {
         description: description.trim() || undefined,
         scan_frequency: frequency,
         auto_discover: resolvedType === 'domain' ? autoDiscover : false,
+        // Phase A / migration 061 — repository targets can be paired
+        // with the GitHub / GitLab / Bitbucket integration that should
+        // clone them.
+        integration_id:
+          resolvedType === 'repository' && integrationId ? integrationId : undefined,
         config,
       }),
     });
@@ -197,7 +255,7 @@ export default function NewTargetPage() {
                     </span>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {TYPES.map((t) => {
                     const Icon = t.Icon;
                     const active = resolvedType === t.value;
@@ -244,6 +302,61 @@ export default function NewTargetPage() {
 
             {/* Per-type config — the big visual moment */}
             <TypeFields type={resolvedType} value={fields} onChange={setFields} />
+
+            {/* Phase A / migration 061 — repository targets can be
+                bound to a GitHub / GitLab / Bitbucket integration so
+                the worker clones private repos with that integration's
+                OAuth token. Hidden when no eligible integration exists. */}
+            {resolvedType === 'repository' && integrations.length > 0 && (
+              <Field
+                label="Clone via integration"
+                hint="Pick the OAuth token the worker should use. Required for private repos; optional for public ones."
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationId(null)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium ring-1 transition-colors ${
+                      integrationId === null
+                        ? 'bg-neutral-800 text-neutral-200 ring-neutral-700'
+                        : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                    }`}
+                  >
+                    No integration (public only)
+                  </button>
+                  {integrations.map((i) => (
+                    <button
+                      key={i.id}
+                      type="button"
+                      onClick={() => setIntegrationId(i.id)}
+                      className={`rounded-md px-2.5 py-1 text-[11px] font-medium ring-1 transition-colors ${
+                        integrationId === i.id
+                          ? 'bg-cyan-500/15 text-cyan-100 ring-cyan-400/40'
+                          : 'bg-neutral-900/40 text-neutral-400 ring-neutral-800 hover:text-neutral-100'
+                      }`}
+                    >
+                      <span className="uppercase tracking-wider text-[9.5px] text-neutral-500 mr-1.5">
+                        {i.type}
+                      </span>
+                      {i.name}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {resolvedType === 'repository' && integrations.length === 0 && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2 text-[11.5px] text-amber-200/90">
+                No GitHub / GitLab / Bitbucket integration connected yet. Public repos work
+                without one; for private repos,{' '}
+                <Link
+                  href="/integrations"
+                  className="font-medium text-amber-100 underline-offset-2 hover:underline"
+                >
+                  connect one
+                </Link>
+                {' '}first.
+              </p>
+            )}
 
             {/* Domain-only opt-in (auto-discover) */}
             {resolvedType === 'domain' && (
@@ -407,6 +520,13 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
     case 'web_application': {
       const out: Record<string, unknown> = {};
       if (raw.crawlSeeds.length) out.crawl_seeds = raw.crawlSeeds;
+      const qps = parseInt(raw.rateLimitQps, 10);
+      if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
+      return out;
+    }
+    case 'api': {
+      const out: Record<string, unknown> = {};
+      if (raw.specUrl.trim()) out.spec_url = raw.specUrl.trim();
       const qps = parseInt(raw.rateLimitQps, 10);
       if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
       return out;

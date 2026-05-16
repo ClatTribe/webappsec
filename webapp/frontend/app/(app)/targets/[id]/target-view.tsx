@@ -10,6 +10,7 @@ import {
   Network,
   Server,
   Plus,
+  Plug,
   Activity,
   CheckCircle2,
   XCircle,
@@ -30,6 +31,7 @@ import type { Finding, Scan, ScanStatus, Target, TargetType } from '@/lib/supaba
 const TYPE_ICON: Record<TargetType, LucideIcon> = {
   repository: Code2,
   web_application: Globe,
+  api: Plug,
   domain: Globe,
   ip_address: Network,
   local_code: Folder,

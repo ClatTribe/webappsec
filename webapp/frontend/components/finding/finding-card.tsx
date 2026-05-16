@@ -30,6 +30,8 @@ import type {
   TriagePrediction,
 } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
+import PatchPreview from '@/components/finding/patch-preview';
+import AffectedFiles from '@/components/finding/affected-files';
 import {
   AI_BRAND,
   REACHABILITY_THEME,
@@ -101,6 +103,13 @@ export type FindingForCard = Finding & {
     reopened: boolean;
     scans?: { run_name: string } | null;
   }[] | null;
+  // Phase A — parent target join used to build repo-blob deeplinks for
+  // each entry in `affected_files`. Populated by the findings page
+  // query (`targets(name, value, type)`).
+  targets?: { name?: string | null; value?: string | null; type?: string | null } | null;
+  // Branch the scan ran against (engine PR #117). Joined in by the
+  // scans-side query when present.
+  scans?: { run_name?: string | null; status?: string | null; branch?: string | null } | null;
 };
 
 interface Props {
@@ -546,18 +555,33 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               <span className="text-neutral-400">{sev.label}</span>
             </span>
             {/* Engine signals (migration 024). Verification status + confidence
-                are the headline trust signals from PR #137; render them prominently. */}
+                are the headline trust signals from PR #137; render them prominently.
+                `exploited` was added in strix PR #255 — the agent didn't just verify
+                the bug, it actually ran the exploit and captured proof of impact.
+                Strictly more severe than `verified`; render red + bold to match the
+                "stop reading the inbox, fix this one first" treatment. */}
             {finding.verification_status && (
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider ring-1 ${
-                  finding.verification_status === 'verified'
-                    ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30'
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider ring-1 ${
+                  finding.verification_status === 'exploited'
+                    ? 'bg-red-500/20 text-red-100 ring-red-400/40 shadow-sm shadow-red-500/20'
+                    : finding.verification_status === 'verified'
+                    ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30 font-medium'
                     : finding.verification_status === 'pattern_match'
-                    ? 'bg-amber-500/10 text-amber-200 ring-amber-400/30'
-                    : 'bg-zinc-700/40 text-zinc-300 ring-zinc-600/40'
+                    ? 'bg-amber-500/10 text-amber-200 ring-amber-400/30 font-medium'
+                    : 'bg-zinc-700/40 text-zinc-300 ring-zinc-600/40 font-medium'
                 }`}
-                title="Engine verification — verified means the agent ran the exploit and confirmed; pattern_match is signature-only (PR #137)."
+                title={
+                  finding.verification_status === 'exploited'
+                    ? 'Engine exploited this finding — proof-of-impact captured (strix PR #255). The agent ran the exploit and confirmed real-world impact, not just reachability.'
+                    : 'Engine verification — verified means the agent ran the exploit and confirmed; pattern_match is signature-only (PR #137).'
+                }
               >
+                {finding.verification_status === 'exploited' && (
+                  <span className="text-[11px] leading-none" aria-hidden>
+                    ⚡
+                  </span>
+                )}
                 {finding.verification_status.replace(/_/g, ' ')}
               </span>
             )}
@@ -890,6 +914,38 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               <Markdown body={s.body} />
             </section>
           ))}
+
+          {/* Phase A — affected_files repo deeplinks. Only meaningful
+              for repository-typed targets (the engine emits code-line
+              locations only for code findings). Falls through to a
+              flat list when there's no repo URL or the host isn't
+              recognised. */}
+          {finding.targets?.type === 'repository' && (
+            <AffectedFiles
+              affectedFiles={finding.affected_files}
+              repoUrl={finding.targets?.value ?? null}
+              branch={finding.scans?.branch ?? null}
+            />
+          )}
+
+          {/* Suggested fix (engine PRs #243 / #250 — Patcher specialist).
+              Unified-diff renderer keyed off findings.patch_* columns
+              (migration 058). Renders nothing when the engine didn't
+              propose a patch. Verified patches get an emerald accent;
+              failed verifications get an amber warning. */}
+          <PatchPreview
+            findingId={finding.id}
+            patch={{
+              patch_id: finding.patch_id ?? null,
+              patch_diff: finding.patch_diff ?? null,
+              patch_commit_message: finding.patch_commit_message ?? null,
+              patch_status: finding.patch_status ?? null,
+              patch_verified_at: finding.patch_verified_at ?? null,
+              patch_proposed_at: finding.patch_proposed_at ?? null,
+              patch_pr_url: finding.patch_pr_url ?? null,
+              patch_applied_at: finding.patch_applied_at ?? null,
+            }}
+          />
 
           {/* Triage controls */}
           <section className="space-y-2.5 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4">

@@ -25,6 +25,13 @@ interface Evidence {
   verdict: 'pass' | 'fail' | 'warn' | 'untested' | 'info';
   summary: string | null;
   observed_at: string | null;
+  // Engine-emitted freshness fields (strix PR #252). The engine stamps
+  // `expires_at = evidence_collected_at + STRIX_EVIDENCE_TTL_DAYS` (90 by
+  // default). Both arrive through compliance_evidence.detail.* on the
+  // ingest path and are surfaced by the questionnaire API alongside the
+  // evidence summary.
+  evidence_collected_at?: string | null;
+  expires_at?: string | null;
 }
 
 interface Answer {
@@ -40,6 +47,10 @@ interface Answer {
 
 const TEMPLATE_LABELS: Record<string, string> = {
   soc2_saq_v1: 'SOC 2 Trust Services SAQ',
+  // Engine PR #253 / migration 059 — HIPAA Security Rule SAQ. 10 questions
+  // across Administrative / Physical / Technical safeguards keyed by 45
+  // CFR § 164.30x control identifiers.
+  hipaa_saq_v1: 'HIPAA Security Rule SAQ',
   sig_lite_v1: 'SIG Lite (Standardized Information Gathering)',
   caiq_v4: 'Cloud Security Alliance CAIQ v4',
   vsa_v1: 'Vendor Security Assessment (VSA)',
@@ -302,15 +313,21 @@ export default function QuestionnaireClient({ templates }: { templates: Template
                               Evidence ({a.evidence.length})
                             </summary>
                             <ul className="mt-2 space-y-1 pl-3">
-                              {a.evidence.map((e) => (
-                                <li key={e.control_id} className="text-neutral-300">
-                                  <code className="font-mono text-neutral-400">{e.control_id}</code>
-                                  <span className={`ml-2 ${verdictColor(e.verdict)}`}>{e.verdict}</span>
-                                  {e.summary && (
-                                    <span className="ml-2 text-neutral-400">— {e.summary}</span>
-                                  )}
-                                </li>
-                              ))}
+                              {a.evidence.map((e) => {
+                                const fresh = describeFreshness(e);
+                                return (
+                                  <li key={e.control_id} className="text-neutral-300">
+                                    <code className="font-mono text-neutral-400">{e.control_id}</code>
+                                    <span className={`ml-2 ${verdictColor(e.verdict)}`}>{e.verdict}</span>
+                                    {e.summary && (
+                                      <span className="ml-2 text-neutral-400">— {e.summary}</span>
+                                    )}
+                                    {fresh && (
+                                      <FreshnessChip {...fresh} />
+                                    )}
+                                  </li>
+                                );
+                              })}
                             </ul>
                           </details>
                         )}
@@ -345,6 +362,62 @@ function verdictColor(v: string): string {
   if (v === 'fail') return 'text-rose-300';
   if (v === 'warn') return 'text-amber-300';
   return 'text-neutral-400';
+}
+
+// Engine PR #252 — auditor-grade evidence freshness. Strix stamps each
+// control's `evidence_collected_at` + `expires_at` (collected_at +
+// STRIX_EVIDENCE_TTL_DAYS, default 90). The wrapper trusts the engine's
+// TTL rather than computing one — different frameworks may set
+// different TTLs and that's the engine's call to make. We render three
+// states:
+//
+//   - stale  → past expires_at, amber pill ("stale · 17 days past")
+//   - fresh  → collected within the last 30 days, neutral pill
+//                ("3 days ago")
+//   - aging  → between fresh and stale, neutral pill ("47 days ago")
+//
+// Returns null when the engine didn't emit freshness fields (older
+// strix versions pre-#252).
+function describeFreshness(e: Evidence): { kind: 'stale' | 'aging' | 'fresh'; label: string } | null {
+  // Prefer engine's authoritative collected_at; fall back to wrapper's
+  // observed_at which is set to `now()` on the row insert.
+  const collected = e.evidence_collected_at ?? e.observed_at;
+  if (!collected) return null;
+  const collectedMs = Date.parse(collected);
+  if (!Number.isFinite(collectedMs)) return null;
+
+  const now = Date.now();
+  const ageDays = Math.max(0, Math.floor((now - collectedMs) / (24 * 60 * 60 * 1000)));
+
+  if (e.expires_at) {
+    const expiresMs = Date.parse(e.expires_at);
+    if (Number.isFinite(expiresMs) && expiresMs < now) {
+      const pastDays = Math.max(1, Math.floor((now - expiresMs) / (24 * 60 * 60 * 1000)));
+      return { kind: 'stale', label: `stale · ${pastDays}d past TTL` };
+    }
+  }
+
+  if (ageDays < 30) {
+    return { kind: 'fresh', label: ageDays === 0 ? 'today' : `${ageDays}d ago` };
+  }
+  return { kind: 'aging', label: `${ageDays}d ago` };
+}
+
+function FreshnessChip({ kind, label }: { kind: 'stale' | 'aging' | 'fresh'; label: string }) {
+  const tone =
+    kind === 'stale'
+      ? 'bg-amber-500/15 text-amber-200 ring-amber-400/30'
+      : kind === 'fresh'
+        ? 'bg-emerald-500/10 text-emerald-300/80 ring-emerald-500/20'
+        : 'bg-neutral-800/60 text-neutral-400 ring-neutral-700/60';
+  return (
+    <span
+      className={`ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ${tone}`}
+      title="Evidence age — engine emits evidence_collected_at + expires_at per control (strix PR #252)."
+    >
+      {label}
+    </span>
+  );
 }
 
 function csvEscape(cell: string): string {

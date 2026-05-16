@@ -57,6 +57,17 @@ function NewScanInner() {
   const [maxInputTokens, setMaxInputTokens] = useState<string>('');
   const [imports, setImports] = useState<ImportRef[]>([]);
   const [orgId, setOrgId] = useState<string | null>(null);
+  // Phase A — auth credentials + advanced flags.
+  type AuthMethod = 'none' | 'bearer' | 'cookie' | 'basic' | 'header' | 'login_creds';
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('none');
+  const [authValue, setAuthValue] = useState<string>(''); // bearer / cookie / basic single-line
+  const [authHeadersText, setAuthHeadersText] = useState<string>(''); // one "Name: Value" per line
+  const [authLoginCredsText, setAuthLoginCredsText] = useState<string>(''); // one "user:pass" per line
+  const [saveAuthOnTarget, setSaveAuthOnTarget] = useState(false);
+  const [excludePathsText, setExcludePathsText] = useState<string>(''); // one glob per line
+  const [rateLimitQps, setRateLimitQps] = useState<string>('');
+  const [exportFormats, setExportFormats] = useState<string[]>([]);
+  const [seedUrlsText, setSeedUrlsText] = useState<string>(''); // one URL per line
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,6 +100,38 @@ function NewScanInner() {
 
   const selected = targets.find((t) => t.id === targetId);
 
+  // Phase A — derive the vault-bound plaintext from whichever auth-method
+  // input the user filled in. Returns null when no auth was supplied,
+  // matching the "none" path the API treats as omit.
+  function deriveAuthPlaintext(): string | null {
+    if (authMethod === 'none') return null;
+    if (authMethod === 'header') {
+      const lines = authHeadersText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      if (lines.length === 0) return null;
+      // Engine expects "Name: Value" strings — bare strings are echoed
+      // as-is via STRIX_HEADERS. JSON-wrap so the engine's adapter sees
+      // a single payload it can split.
+      return JSON.stringify({ headers: lines });
+    }
+    if (authMethod === 'login_creds') {
+      // "user:pass" per line → JSON list of {username, password}.
+      const creds = authLoginCredsText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.includes(':'))
+        .map((l) => {
+          const idx = l.indexOf(':');
+          return { username: l.slice(0, idx), password: l.slice(idx + 1) };
+        });
+      return creds.length > 0 ? JSON.stringify(creds) : null;
+    }
+    // bearer / cookie / basic — single-line literal
+    return authValue.trim() || null;
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -97,6 +140,15 @@ function NewScanInner() {
       return;
     }
     setSubmitting(true);
+    const authPlaintext = deriveAuthPlaintext();
+    const excludePaths = excludePathsText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    const seedUrls = seedUrlsText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
     const res = await fetch('/api/scans', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -106,6 +158,18 @@ function NewScanInner() {
         scan_mode: scanMode,
         instruction_text: instruction.trim() || null,
         integration_ids: integrationIds,
+        // Phase A / migration 061 — auth credentials + advanced engine
+        // flags. The API route mints a vault secret for the plaintext
+        // (when supplied), persists it on the scan row, and (when
+        // `save_auth_on_target` is true) also stamps the auth method +
+        // secret on the parent target as the new default.
+        auth_method: authMethod === 'none' ? undefined : authMethod,
+        auth_plaintext: authPlaintext ?? undefined,
+        save_auth_on_target: authMethod !== 'none' && saveAuthOnTarget,
+        exclude_paths: excludePaths.length > 0 ? excludePaths : undefined,
+        rate_limit_qps: rateLimitQps.trim() ? Math.max(1, Math.floor(Number(rateLimitQps))) : undefined,
+        export_formats: exportFormats.length > 0 ? exportFormats : undefined,
+        seed_urls: seedUrls.length > 0 ? seedUrls : undefined,
         // Engine PR #30 — passive recon mode (only valid for domain targets).
         // Forwarded to the worker as STRIX_DNS_ONLY=1 / --dns-only flag.
         dns_only: dnsOnly && selected.type === 'domain',
@@ -411,6 +475,204 @@ function NewScanInner() {
             </label>
           </div>
         </section>
+
+        {/* Phase A / migration 061 — authentication credentials.
+            Without auth the scanner only sees the unauthenticated 30%
+            of any real app, which makes the `api` target type
+            unusable. The picker covers the five methods the engine
+            recognises: bearer / cookie / basic / header / login_creds.
+            Plaintext goes to vault on submit; the worker decrypts at
+            scan time and forwards via STRIX_AUTH_* env vars. */}
+        {selected && selected.type !== 'local_code' && selected.type !== 'ip_address' && (
+          <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[12px] font-semibold uppercase tracking-wider text-neutral-200">
+                  Authentication
+                </div>
+                <p className="mt-0.5 text-[11px] text-neutral-500">
+                  Pre-authorise the scanner so it can probe logged-in surfaces. Stored encrypted in the
+                  vault; never logged in argv.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(['none', 'bearer', 'cookie', 'basic', 'header', 'login_creds'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setAuthMethod(m)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    authMethod === m
+                      ? 'bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-400/40'
+                      : 'bg-neutral-900/40 text-neutral-400 ring-1 ring-neutral-800 hover:text-neutral-100'
+                  }`}
+                >
+                  {m === 'login_creds' ? 'login creds' : m}
+                </button>
+              ))}
+            </div>
+            {authMethod === 'bearer' && (
+              <input
+                type="text"
+                autoComplete="off"
+                value={authValue}
+                onChange={(e) => setAuthValue(e.target.value)}
+                placeholder="eyJhbGciOiJI…  (the bearer token, no 'Bearer ' prefix)"
+                className="mt-3 w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            )}
+            {authMethod === 'cookie' && (
+              <input
+                type="text"
+                autoComplete="off"
+                value={authValue}
+                onChange={(e) => setAuthValue(e.target.value)}
+                placeholder="session=abc123; csrf=def456"
+                className="mt-3 w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            )}
+            {authMethod === 'basic' && (
+              <input
+                type="text"
+                autoComplete="off"
+                value={authValue}
+                onChange={(e) => setAuthValue(e.target.value)}
+                placeholder="username:password"
+                className="mt-3 w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            )}
+            {authMethod === 'header' && (
+              <textarea
+                value={authHeadersText}
+                onChange={(e) => setAuthHeadersText(e.target.value)}
+                rows={3}
+                placeholder={'X-API-Key: abc123\nX-Tenant: acme-prod'}
+                className="mt-3 w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            )}
+            {authMethod === 'login_creds' && (
+              <>
+                <textarea
+                  value={authLoginCredsText}
+                  onChange={(e) => setAuthLoginCredsText(e.target.value)}
+                  rows={3}
+                  placeholder={'admin@example.com:hunter2\nuser1@example.com:pass1'}
+                  className="mt-3 w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+                />
+                <p className="mt-1.5 text-[10.5px] text-neutral-500">
+                  One <code>user:pass</code> pair per line. The agent will try each one via the
+                  <code> scan_auth_flow</code> tool.
+                </p>
+              </>
+            )}
+            {authMethod !== 'none' && (
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-[11px] text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={saveAuthOnTarget}
+                  onChange={(e) => setSaveAuthOnTarget(e.target.checked)}
+                  className="h-3.5 w-3.5 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+                />
+                Save as the default for <span className="font-mono text-neutral-300">{selected.name}</span> so I don&apos;t have to re-enter it next scan.
+              </label>
+            )}
+          </section>
+        )}
+
+        {/* Phase A — advanced engine flags. Optional, collapsed by
+            default. Covers exclude-paths (production safety), rate-
+            limit, seed URLs (web_application), GRC direct exports. */}
+        <details className="group rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
+          <summary className="flex cursor-pointer items-center justify-between text-[12px] font-semibold uppercase tracking-wider text-neutral-300 hover:text-neutral-100">
+            <span>Advanced</span>
+            <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="mt-3 space-y-4">
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                Exclude paths
+              </div>
+              <p className="mb-1.5 text-[11px] text-neutral-500">
+                Globs the agent must skip. Helpful for production traffic — keep <code>/admin/*</code> out of probing.
+              </p>
+              <textarea
+                value={excludePathsText}
+                onChange={(e) => setExcludePathsText(e.target.value)}
+                rows={3}
+                placeholder={'/admin/**\n/billing/**\n/internal/**'}
+                className="w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                Outbound rate limit (req/s)
+              </div>
+              <p className="mb-1.5 text-[11px] text-neutral-500">
+                Cap the agent&apos;s outbound traffic. Stay low for prod (5–10).
+              </p>
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={rateLimitQps}
+                onChange={(e) => setRateLimitQps(e.target.value)}
+                placeholder="10"
+                className="w-32 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            {selected && (selected.type === 'web_application' || selected.type === 'api') && (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                  Seed URLs
+                </div>
+                <p className="mb-1.5 text-[11px] text-neutral-500">
+                  Pre-load specific URLs into the crawler so the agent starts from the right place.
+                </p>
+                <textarea
+                  value={seedUrlsText}
+                  onChange={(e) => setSeedUrlsText(e.target.value)}
+                  rows={3}
+                  placeholder={'https://app.example.com/dashboard\nhttps://app.example.com/api/v1/users'}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 font-mono text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+                />
+              </div>
+            )}
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">
+                GRC direct exports
+              </div>
+              <p className="mb-1.5 text-[11px] text-neutral-500">
+                Engine writes one <code>grc_export_&lt;platform&gt;.json</code> file per pick — ready to import into the platform.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(['vanta', 'drata', 'hyperproof', 'secureframe', 'servicenow', 'generic'] as const).map(
+                  (fmt) => {
+                    const active = exportFormats.includes(fmt);
+                    return (
+                      <button
+                        key={fmt}
+                        type="button"
+                        onClick={() =>
+                          setExportFormats((prev) =>
+                            active ? prev.filter((f) => f !== fmt) : [...prev, fmt],
+                          )
+                        }
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                          active
+                            ? 'bg-violet-500/15 text-violet-100 ring-1 ring-violet-400/40'
+                            : 'bg-neutral-900/40 text-neutral-400 ring-1 ring-neutral-800 hover:text-neutral-100'
+                        }`}
+                      >
+                        {fmt}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+          </div>
+        </details>
 
         <section>
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-300">

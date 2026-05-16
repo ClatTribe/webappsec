@@ -34,6 +34,23 @@ export const WebApplicationConfig = z.object({
   rate_limit_qps: z.number().int().positive().max(1000).optional(),
 });
 
+// Engine PRs #267 + #268 + #269 + #271 — first-class `api` target type.
+// The strix lead routes api targets to a separate ~50-tool catalog that
+// drops browser / DOM / scan_xss / bfs_crawl and enables the OWASP API
+// Top 10 specialists (BOLA, BFLA, mass assignment, rate_limit) plus
+// openapi_spec_ingest and graphql / grpc deep probes. To force this
+// routing, the worker passes `--target api:<value>` to the engine
+// (PR #271 contract).
+export const ApiConfig = z.object({
+  // Optional spec URL — the engine probes 11 standard paths automatically
+  // (/openapi.json, /swagger.json, /v3/api-docs, …) but a tenant who
+  // hosts their spec elsewhere can point us at it directly. Worker
+  // forwards as `--openapi <url>` / `STRIX_OPENAPI_URL`.
+  spec_url: z.string().trim().url().max(500).optional(),
+  // Same shape as web_application — both consume an HTTP surface.
+  rate_limit_qps: z.number().int().positive().max(1000).optional(),
+});
+
 export const DomainConfig = z.object({
   // Glob excludes for subdomain auto-discovery. Even with auto_discover on,
   // the user may want to skip "*-staging.*" or "internal-*". Filtered both
@@ -71,6 +88,7 @@ export const LocalCodeConfig = z.object({
 export type TargetType =
   | 'repository'
   | 'web_application'
+  | 'api'
   | 'domain'
   | 'ip_address'
   | 'local_code';
@@ -81,6 +99,8 @@ export function configSchemaFor(type: TargetType) {
       return RepositoryConfig;
     case 'web_application':
       return WebApplicationConfig;
+    case 'api':
+      return ApiConfig;
     case 'domain':
       return DomainConfig;
     case 'ip_address':
@@ -94,13 +114,15 @@ export type TargetConfigOf<T extends TargetType> = T extends 'repository'
   ? z.infer<typeof RepositoryConfig>
   : T extends 'web_application'
     ? z.infer<typeof WebApplicationConfig>
-    : T extends 'domain'
-      ? z.infer<typeof DomainConfig>
-      : T extends 'ip_address'
-        ? z.infer<typeof IpAddressConfig>
-        : T extends 'local_code'
-          ? z.infer<typeof LocalCodeConfig>
-          : never;
+    : T extends 'api'
+      ? z.infer<typeof ApiConfig>
+      : T extends 'domain'
+        ? z.infer<typeof DomainConfig>
+        : T extends 'ip_address'
+          ? z.infer<typeof IpAddressConfig>
+          : T extends 'local_code'
+            ? z.infer<typeof LocalCodeConfig>
+            : never;
 
 /** Shape-validate `config` for the given target type. Throws ZodError on bad
  *  data; returns the parsed object on success. */

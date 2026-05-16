@@ -12,6 +12,8 @@ import {
   Server,
   Layers,
   Shuffle,
+  FileJson,
+  Plug,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TargetType } from '@/lib/target-config';
@@ -30,6 +32,10 @@ export interface AllFields {
   subdirectory: string;
   crawlSeeds: string[];
   rateLimitQps: string;
+  // engine PRs #267 + #271 — api target type. spec_url is forwarded to
+  // strix as `--openapi <url>` when set; the engine otherwise probes 11
+  // standard publishing paths automatically.
+  specUrl: string;
   subdomainExcludes: string[];
   portSpec: string;
   protocols: '' | 'tcp' | 'udp' | 'both';
@@ -58,6 +64,12 @@ const TYPE_META: Record<
     ring: 'border-cyan-500/30',
     tag: 'bg-cyan-500/15 text-cyan-200 ring-cyan-500/30',
     label: 'Web application configuration',
+  },
+  api: {
+    Icon: Plug,
+    ring: 'border-indigo-500/30',
+    tag: 'bg-indigo-500/15 text-indigo-200 ring-indigo-500/30',
+    label: 'API target configuration',
   },
   domain: {
     Icon: Compass,
@@ -106,6 +118,9 @@ export default function TypeFields({ type, value, onChange }: Props) {
       )}
       {type === 'web_application' && (
         <WebApplicationFields value={value} set={set} accent="cyan" />
+      )}
+      {type === 'api' && (
+        <ApiFields value={value} set={set} />
       )}
       {type === 'domain' && (
         <DomainFields value={value} set={set} accent="emerald" />
@@ -214,6 +229,45 @@ function WebApplicationFields({ value, set, accent }: { value: AllFields; set: S
           onChange={(v) => set('rateLimitQps', v)}
         />
       </FieldRow>
+    </div>
+  );
+}
+
+// --- API -------------------------------------------------------------------
+
+function ApiFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      <FieldRow
+        Icon={FileJson}
+        label="OpenAPI / Swagger spec URL"
+        hint="Optional. Strix probes 11 standard paths automatically (/openapi.json, /swagger.json, /v3/api-docs, …). Set this if your spec lives elsewhere — forwarded as `--openapi <url>`."
+      >
+        <TextInput
+          placeholder="https://api.myapp.com/openapi.json"
+          value={value.specUrl}
+          onChange={(v) => set('specUrl', v)}
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Gauge}
+        label="Rate limit (req/s)"
+        hint="Same caveat as web apps — stay low for production traffic. Burst probes (rate-limit specialist, BOLA, mass-assignment) honour this cap."
+      >
+        <TextInput
+          type="number"
+          placeholder="10"
+          value={value.rateLimitQps}
+          onChange={(v) => set('rateLimitQps', v)}
+        />
+      </FieldRow>
+      <p className="rounded-md border border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-[11px] leading-relaxed text-indigo-200/80">
+        <span className="font-medium text-indigo-100">Routed to the API tool catalog.</span> The
+        agent runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) plus
+        GraphQL deep introspection and gRPC reflection probes. Browser, DOM, and reflected-XSS
+        tools are <span className="text-neutral-300">skipped</span> — they don&apos;t apply to
+        JSON / gRPC surfaces.
+      </p>
     </div>
   );
 }

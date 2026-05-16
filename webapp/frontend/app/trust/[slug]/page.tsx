@@ -30,6 +30,13 @@ interface FrameworkPosture {
   warning: number;
   untested: number;
   readiness_pct: number;
+  // Engine PR #252 / wrapper migration 059 — auditor-grade freshness
+  // rollup. `latest_observed_at` is max(observed_at) across the
+  // framework's controls; `stale_controls` is the count whose engine-
+  // emitted `expires_at` is now past. Both nullable for older engines
+  // / pre-#252 evidence rows (no expires_at in detail).
+  latest_observed_at: string | null;
+  stale_controls: number;
 }
 
 interface RecentResolved {
@@ -211,6 +218,10 @@ export default async function TrustPage({ params }: { params: { slug: string } }
                         <div className="mt-0.5 text-[9px] uppercase tracking-wider text-neutral-500">Untested</div>
                       </div>
                     </div>
+                    <FreshnessFooter
+                      latestObservedAt={fw.latest_observed_at}
+                      staleControls={fw.stale_controls}
+                    />
                   </div>
                 );
               })}
@@ -268,6 +279,60 @@ export default async function TrustPage({ params }: { params: { slug: string } }
         </footer>
       </div>
     </main>
+  );
+}
+
+// Engine PR #252 / wrapper migration 059 — auditor-grade evidence
+// freshness footer for each framework card. Renders in three modes:
+//
+//   - stale  → amber: at least one control is past its engine-stamped
+//     `expires_at` TTL. The trust page's prospect / auditor audience
+//     should see this prominently — it's the difference between
+//     "actively maintained" and "snapshot from Q3".
+//   - aging  → neutral: no stale controls, but the most-recent scan is
+//     >30 days old. We surface the age but don't alarm.
+//   - fresh  → neutral muted: latest evidence is recent.
+//
+// Hidden entirely when latest_observed_at is null (no controls yet for
+// this framework — handled by the empty-state above).
+function FreshnessFooter({
+  latestObservedAt,
+  staleControls,
+}: {
+  latestObservedAt: string | null;
+  staleControls: number;
+}) {
+  if (!latestObservedAt) return null;
+
+  const observedMs = Date.parse(latestObservedAt);
+  if (!Number.isFinite(observedMs)) return null;
+
+  const ageDays = Math.max(0, Math.floor((Date.now() - observedMs) / (24 * 60 * 60 * 1000)));
+  const isStale = staleControls > 0;
+
+  const tone = isStale
+    ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-200'
+    : ageDays > 30
+      ? 'border-neutral-800/60 bg-neutral-900/30 text-neutral-300'
+      : 'border-neutral-800/40 bg-neutral-900/20 text-neutral-400';
+
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 border-t px-3 py-2 text-[10.5px] ${tone}`}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <Clock className="h-3 w-3" />
+        Latest evidence {ageDays === 0 ? 'today' : `${ageDays}d ago`}
+      </span>
+      {isStale && (
+        <span
+          className="font-medium uppercase tracking-wider"
+          title="Engine flagged these controls as past their evidence TTL (strix PR #252 — default 90-day expiry, configurable via STRIX_EVIDENCE_TTL_DAYS)."
+        >
+          {staleControls} stale
+        </span>
+      )}
+    </div>
   );
 }
 

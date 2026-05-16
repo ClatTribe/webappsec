@@ -364,6 +364,12 @@ class FakeSupabase:
     def decrypt_integration(self, scan_id: str, integration_id: str) -> str:
         return "{}"
 
+    def decrypt_scan_auth(self, scan_id: str) -> tuple[str | None, str | None]:
+        # Phase A / migration 061. Tests can override by setting
+        # `self.scan_auth = ("bearer", "<token>")` to exercise the
+        # auth-env-var path.
+        return getattr(self, "scan_auth", (None, None))
+
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         return None
 

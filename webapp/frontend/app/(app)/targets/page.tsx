@@ -1,5 +1,14 @@
 import Link from 'next/link';
-import { Plus, Target as TargetIcon, Code2, Globe, Server, Folder, Network } from 'lucide-react';
+import {
+  Plus,
+  Target as TargetIcon,
+  Code2,
+  Globe,
+  Server,
+  Folder,
+  Network,
+  Plug,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import type { Target, TargetType } from '@/lib/supabase/types';
@@ -7,6 +16,7 @@ import type { Target, TargetType } from '@/lib/supabase/types';
 const TYPE_ICON: Record<TargetType, LucideIcon> = {
   repository: Code2,
   web_application: Globe,
+  api: Plug,
   domain: Globe,
   ip_address: Network,
   local_code: Folder,

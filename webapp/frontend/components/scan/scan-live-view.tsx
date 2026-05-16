@@ -9,6 +9,7 @@ import FindingCard from '@/components/finding/finding-card';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
 import PhaseProgress from '@/components/scan/phase-progress';
+import DiscoveredPanel, { type KgNode } from '@/components/scan/discovered-panel';
 import HypothesisPane from '@/components/scan/hypothesis-pane';
 import ComplianceOverlay from '@/components/scan/compliance-overlay';
 import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
@@ -98,6 +99,7 @@ export default function ScanLiveView({
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [kgNodes, setKgNodes] = useState<KgNode[]>([]);
   const [heartbeatAt, setHeartbeatAt] = useState<string | null>(initialHeartbeatAt ?? null);
   const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(
     initialCancelRequestedAt ?? null,
@@ -114,7 +116,11 @@ export default function ScanLiveView({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [{ data: ev }, { data: fd }] = await Promise.all([
+      // kg_nodes is fetched alongside events + findings on mount. The
+      // engine writes kg.json at scan finalize, so for a still-running
+      // scan this returns []; the status-change effect below re-fetches
+      // once the scan reaches a terminal state.
+      const [{ data: ev }, { data: fd }, { data: kg }] = await Promise.all([
         supabase
           .from('scan_events')
           .select('*')
@@ -126,15 +132,42 @@ export default function ScanLiveView({
           .select('*')
           .eq('scan_id', scanId)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('kg_nodes')
+          .select('id, scan_id, node_id, node_type, props, created_at')
+          .eq('scan_id', scanId)
+          .order('node_type', { ascending: true }),
       ]);
       if (cancelled) return;
       setEvents((ev ?? []) as ScanEvent[]);
       setFindings((fd ?? []) as Finding[]);
+      setKgNodes((kg ?? []) as KgNode[]);
     })();
     return () => {
       cancelled = true;
     };
   }, [scanId, supabase]);
+
+  // Re-fetch kg_nodes when the scan transitions to a terminal status —
+  // that's when the engine has written kg.json and the worker has
+  // ingested it. Saves us from needing a realtime subscription on
+  // the (read-only, finalize-only-written) kg_nodes table.
+  useEffect(() => {
+    if (status !== 'completed' && status !== 'cancelled' && status !== 'failed') return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('kg_nodes')
+        .select('id, scan_id, node_id, node_type, props, created_at')
+        .eq('scan_id', scanId)
+        .order('node_type', { ascending: true });
+      if (cancelled) return;
+      setKgNodes((data ?? []) as KgNode[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, scanId, supabase]);
 
   useEffect(() => {
     const channel = supabase
@@ -340,6 +373,15 @@ export default function ScanLiveView({
           empty. Hidden until the engine emits a `phase.entered` event
           (older versions / pre-recon phase). */}
       <PhaseProgress events={events} />
+
+      {/* "Discovered" panel — typed knowledge graph the engine built
+          during this scan (strix PRs #240 / #265 / #266). Surfaces
+          assets, secrets, credentials, dependencies, threat intel,
+          synthesised exploits + the edges between them. Hidden until
+          kg_nodes rows arrive (scan finalize writes kg.json, the
+          worker ingests via _ingest_kg_from_run_dir, the row table
+          re-fetches on terminal status). */}
+      <DiscoveredPanel nodes={kgNodes} />
 
       {/* Active-hypothesis live pane (engine PR #138 / wishlist §15.4).
           Cross-specialist hypotheses with status (open / confirmed /

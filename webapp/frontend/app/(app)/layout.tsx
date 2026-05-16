@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { BrandLockup } from '@/components/marketing/marketing-shell';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -48,15 +49,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-neutral-800/80 bg-neutral-950/40 backdrop-blur-xl">
         <Link
           href="/dashboard"
-          className="flex items-center gap-2.5 px-5 pb-3 pt-6"
+          className="px-5 pb-3 pt-6"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 font-mono text-sm font-semibold text-white shadow-lg shadow-cyan-500/20">
-            y.
-          </div>
-          <span className="text-sm font-semibold tracking-tight leading-tight">
-            your <span className="text-cyan-300">AI</span><br />
-            security engineer
-          </span>
+          <BrandLockup />
         </Link>
 
         {org && (
