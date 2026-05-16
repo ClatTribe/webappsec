@@ -543,6 +543,55 @@ export interface ScanRecurrenceSummary {
 }
 
 /**
+ * Tier II #11 — Cross-scan finding rollup.
+ *
+ * One row per fingerprint that hits >= 2 distinct targets in the org.
+ * Returned by `fingerprint_rollup()`. The canonical title / severity /
+ * CWE / CVE come from the most-recent occurrence; the counts are over
+ * the full set of occurrences (including pre-resolved ones).
+ */
+export interface FingerprintRollupRow {
+  fingerprint: string;
+  title: string;
+  severity: Severity;
+  cwe: string | null;
+  cve: string | null;
+  occurrence_count: number;
+  target_count: number;
+  open_count: number;
+  triaged_real_count: number;
+  fixed_count: number;
+  false_positive_count: number;
+  wont_fix_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  /** Highest urgency tier observed across occurrences. fix_now wins
+   *  over fix_soon > monitor > dismiss. null when no occurrence has
+   *  an ai_assessment. */
+  max_urgency: 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss' | null;
+}
+
+/**
+ * Tier II #11 — drill-in row for `fingerprint_targets(p_fingerprint)`.
+ * One row per occurrence of the fingerprint across all targets in
+ * the org, ordered open-first then by recency.
+ */
+export interface FingerprintTargetRow {
+  finding_id: string;
+  target_id: string | null;
+  target_name: string | null;
+  target_value: string | null;
+  target_type: string | null;
+  scan_id: string;
+  scan_name: string;
+  status: FindingStatus;
+  severity: Severity;
+  created_at: string;
+  last_seen_at: string | null;
+  times_seen: number | null;
+}
+
+/**
  * One step in the heuristic "kill-chain" reconstruction (pillar 1 item 2).
  * The `event_type` is from Strix's vocabulary; the `payload` is the raw
  * scan_event payload. UI extracts a friendly label per event_type.

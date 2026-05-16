@@ -58,7 +58,7 @@ export default async function FindingsPage() {
   return (
     <div className="space-y-8">
       <header className="space-y-4">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-6">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Findings</h1>
             <p className="mt-1.5 max-w-2xl text-sm text-neutral-400">
@@ -67,6 +67,18 @@ export default async function FindingsPage() {
               to <em>All</em> to see everything including dismissed false positives.
             </p>
           </div>
+          {/* Tier II #11 — Recurring view CTA. We don't try to pre-
+              compute the count here (would need another query for the
+              same data the next page already fetches); just surface
+              the entry point. */}
+          <Link
+            href="/findings/recurring"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20"
+            title="Findings that hit two or more of your targets — triage as a group"
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={2.25} />
+            Recurring across targets
+          </Link>
         </div>
 
         {findings.length > 0 && (
