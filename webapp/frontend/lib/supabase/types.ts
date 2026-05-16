@@ -335,6 +335,21 @@ export interface Scan {
    *  artefact, target isn't a GitHub repo, or no integration_id). */
   code_scanning_url?: string | null;
   code_scanning_uploaded_at?: string | null;
+  /** Tier II #7 / migration 066 — GitHub PR context, set when this
+   *  scan was created by the /api/webhooks/github receiver. The
+   *  PR comment dispatcher uses these to compose + post the sticky
+   *  comment. All four null for scans not driven by a PR webhook. */
+  github_owner?: string | null;
+  github_repo?: string | null;
+  github_pull_request_number?: number | null;
+  github_head_sha?: string | null;
+  /** Tier II #7 — sticky PR comment tracking. pr_comment_id is the
+   *  GitHub comment we own (PATCHed on re-runs rather than POSTed
+   *  fresh so the PR keeps one running comment, not N per push). */
+  pr_comment_id?: number | null;
+  pr_comment_url?: string | null;
+  pr_comment_posted_at?: string | null;
+  pr_comment_updated_at?: string | null;
   /** Engine PR #141 — HAR / Burp project imports persisted by the
    *  API route on scan creation (migration 035). Browser uploads to
    *  user-uploads bucket; worker downloads at scan-start. */
