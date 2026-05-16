@@ -121,6 +121,17 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   const [finding, setFinding] = useState<FindingForCard>(initial);
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [updating, setUpdating] = useState(false);
+  // Phase B #7 — risk-acceptance dialog state. When the user clicks
+  // "Won't fix", we collect a reason + optional expiry before
+  // actually writing the status. Lets the auditor pack carry the
+  // rationale next to the dismissal.
+  const [showRiskDialog, setShowRiskDialog] = useState(false);
+  const [riskReason, setRiskReason] = useState(finding.wont_fix_reason ?? '');
+  const [riskExpiry, setRiskExpiry] = useState(
+    finding.risk_acceptance_expires_at
+      ? finding.risk_acceptance_expires_at.slice(0, 10)
+      : '',
+  );
 
   const sev = SEVERITY_THEME[finding.severity];
   const statusTheme = STATUS_THEME[finding.status];
@@ -236,18 +247,31 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
     && prediction.p_false_positive >= 0.4
     && prediction.p_false_positive <= 0.6;
 
-  async function setStatus(newStatus: FindingStatus) {
-    if (updating || newStatus === finding.status) return;
+  async function setStatus(
+    newStatus: FindingStatus,
+    riskMeta?: { reason: string; expires_at: string | null },
+  ) {
+    if (updating || (newStatus === finding.status && !riskMeta)) return;
     setUpdating(true);
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const update = {
+    const update: Record<string, unknown> = {
       status: newStatus,
       triaged_by: newStatus === 'open' ? null : user?.id ?? null,
       triaged_at: newStatus === 'open' ? null : new Date().toISOString(),
     };
+    // Phase B #7 — write reason + expiry only when going to wont_fix.
+    // Going from wont_fix to anything else clears them so a reopen-
+    // and-fix history doesn't carry stale acceptance metadata.
+    if (newStatus === 'wont_fix' && riskMeta) {
+      update.wont_fix_reason = riskMeta.reason;
+      update.risk_acceptance_expires_at = riskMeta.expires_at;
+    } else if (newStatus !== 'wont_fix') {
+      update.wont_fix_reason = null;
+      update.risk_acceptance_expires_at = null;
+    }
     const { error, data } = await supabase
       .from('findings')
       .update(update)
@@ -255,11 +279,18 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
       .select()
       .single();
     setUpdating(false);
-    // Preserve joined fields (last_seen_scan, finding_occurrences) — the
-    // .select() above only returns columns from the `findings` table.
     if (!error && data) {
       setFinding((prev) => ({ ...prev, ...(data as Finding) }));
     }
+  }
+
+  async function confirmWontFix() {
+    if (!riskReason.trim()) return;
+    await setStatus('wont_fix', {
+      reason: riskReason.trim(),
+      expires_at: riskExpiry ? new Date(riskExpiry).toISOString() : null,
+    });
+    setShowRiskDialog(false);
   }
 
   return (
@@ -989,13 +1020,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 False positive
               </TriageButton>
               <TriageButton
-                onClick={() => setStatus('wont_fix')}
+                onClick={() => setShowRiskDialog(true)}
                 active={finding.status === 'wont_fix'}
                 tone="neutral"
                 Icon={XCircle}
                 disabled={updating}
               >
-                Won't fix
+                Won&apos;t fix
               </TriageButton>
               {finding.status !== 'open' && (
                 <TriageButton
@@ -1026,7 +1057,99 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 Triaged {new Date(finding.triaged_at).toLocaleString()}
               </div>
             )}
+
+            {/* Phase B #7 — risk-acceptance receipt. Surfaces on
+                wont_fix findings so the rationale + expiry are
+                visible without expanding any sub-panel. Auditor pack
+                can pull this same data via the findings RPC. */}
+            {finding.status === 'wont_fix' && finding.wont_fix_reason && (
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2 text-[11.5px] text-amber-100">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/80">
+                  Risk acceptance
+                </div>
+                <div className="mt-1 leading-relaxed">{finding.wont_fix_reason}</div>
+                {finding.risk_acceptance_expires_at && (
+                  <div className="mt-1.5 text-[10.5px] text-amber-200/70">
+                    Expires{' '}
+                    {new Date(finding.risk_acceptance_expires_at).toLocaleDateString()}{' '}
+                    {(() => {
+                      const days = Math.floor(
+                        (new Date(finding.risk_acceptance_expires_at).getTime() -
+                          Date.now()) /
+                          86400000,
+                      );
+                      return days <= 0
+                        ? '· EXPIRED — re-review'
+                        : days <= 14
+                          ? `· in ${days}d`
+                          : `· in ${days}d`;
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
+        </div>
+      )}
+
+      {/* Phase B #7 — risk-acceptance dialog. Inline modal because we
+          want the surrounding finding context still visible while the
+          user composes the rationale. Reason required; expiry is
+          optional (no expiry = accept indefinitely). */}
+      {showRiskDialog && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md space-y-3 rounded-xl border border-neutral-700 bg-neutral-900 p-5 shadow-2xl">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-100">
+                Accept this risk
+              </h3>
+              <p className="mt-0.5 text-[11.5px] text-neutral-400">
+                The auditor pack carries this reason next to the dismissal. Optional expiry
+                turns it into a time-boxed exception.
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-400">
+                Reason <span className="text-rose-300">*</span>
+              </div>
+              <textarea
+                value={riskReason}
+                onChange={(e) => setRiskReason(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="e.g. Mitigated by WAF rule X; full fix tracked in JIRA-1234."
+                className="w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-400">
+                Expires (optional)
+              </div>
+              <input
+                type="date"
+                value={riskExpiry}
+                onChange={(e) => setRiskExpiry(e.target.value)}
+                className="rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowRiskDialog(false)}
+                className="rounded-md px-3 py-1.5 text-[12px] text-neutral-300 hover:bg-neutral-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!riskReason.trim() || updating}
+                onClick={confirmWontFix}
+                className="rounded-md bg-amber-500/20 px-3 py-1.5 text-[12px] font-medium text-amber-100 ring-1 ring-amber-400/40 transition-colors hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Accept risk
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -678,6 +678,13 @@ export interface Finding {
    *  diff. Never set by the engine. */
   patch_pr_url?: string | null;
   patch_applied_at?: string | null;
+  /** Phase B #7 / migration 063 — risk-acceptance metadata when the
+   *  user marked this finding `wont_fix`. Required reason; optional
+   *  expiry timestamp (after which the finding visually surfaces as
+   *  an expired acceptance). Engine never sets these — wrapper UI
+   *  writes them via the triage flow. */
+  wont_fix_reason?: string | null;
+  risk_acceptance_expires_at?: string | null;
 }
 
 export interface TrajectoryRecord {

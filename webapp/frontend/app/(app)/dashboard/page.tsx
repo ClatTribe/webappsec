@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   XCircle,
   Pause,
+  AlertTriangle,
+  Clock,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
@@ -25,15 +27,87 @@ const STATUS_DOT: Record<ScanStatus, { color: string; Icon: LucideIcon }> = {
 export default async function DashboardPage() {
   const supabase = createClient();
 
-  const [{ data: recentScans }, { count: openFindings }, { data: integrations }] =
-    await Promise.all([
-      supabase.from('scans').select('*').order('created_at', { ascending: false }).limit(5),
-      supabase
-        .from('findings')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'open'),
-      supabase.from('integrations').select('id, type, name').eq('status', 'active').limit(20),
-    ]);
+  // Phase B #5 — regressions: findings whose `finding_occurrences`
+  // ledger shows a `reopened=true` row in the last 7 days, AND the
+  // current finding row is open. That's the canonical "this finding
+  // was fixed and came back" signal. The data has been wired since
+  // migration 017 — we just never surfaced it. We fetch a count for
+  // the dashboard tile + the most recent 5 for the regression list.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const [
+    { data: recentScans },
+    { count: openFindings },
+    { data: integrations },
+    { data: regressionsData },
+    { count: expiringAcceptanceCount },
+  ] = await Promise.all([
+    supabase.from('scans').select('*').order('created_at', { ascending: false }).limit(5),
+    supabase
+      .from('findings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'open'),
+    supabase.from('integrations').select('id, type, name').eq('status', 'active').limit(20),
+    supabase
+      .from('finding_occurrences')
+      .select(
+        'id, seen_at, reopened, finding_id, findings!inner(id, title, severity, status, target_id, targets(name))',
+      )
+      .eq('reopened', true)
+      .gte('seen_at', sevenDaysAgo)
+      .order('seen_at', { ascending: false })
+      .limit(10),
+    // Phase B #7 — risk-acceptance exceptions expiring in the next 14
+    // days. Surfaced so a team doesn't get caught off-guard by a
+    // tombstone re-opening at the wrong moment.
+    supabase
+      .from('findings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'wont_fix')
+      .not('risk_acceptance_expires_at', 'is', null)
+      .lt(
+        'risk_acceptance_expires_at',
+        new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      ),
+  ]);
+  // De-dup regressions by finding_id (a finding can have multiple
+  // reopened occurrences across scans within the window).
+  const regressions: Array<{
+    finding_id: string;
+    seen_at: string;
+    title: string | null;
+    severity: string | null;
+    status: string | null;
+    target_name: string | null;
+  }> = [];
+  const seenFindingIds = new Set<string>();
+  // The supabase-types stub claims `findings` is an array (because
+  // it generates from FK metadata), but the !inner join returns a
+  // single object. Cast through `unknown` to keep the strict-type
+  // generator happy without losing per-field safety inside this loop.
+  type RegressionRow = {
+    finding_id: string;
+    seen_at: string;
+    findings: {
+      id: string;
+      title: string | null;
+      severity: string | null;
+      status: string | null;
+      targets?: { name: string | null } | null;
+    } | null;
+  };
+  for (const row of (regressionsData ?? []) as unknown as RegressionRow[]) {
+    if (!row.findings || seenFindingIds.has(row.finding_id)) continue;
+    seenFindingIds.add(row.finding_id);
+    if (row.findings.status !== 'open') continue;
+    regressions.push({
+      finding_id: row.finding_id,
+      seen_at: row.seen_at,
+      title: row.findings.title,
+      severity: row.findings.severity,
+      status: row.findings.status,
+      target_name: row.findings.targets?.name ?? null,
+    });
+  }
 
   return (
     <div className="space-y-8">
@@ -77,6 +151,65 @@ export default async function DashboardPage() {
           tone="violet"
         />
       </section>
+
+      {/* Phase B #5 — regression alerts. Renders only when reopened
+          findings exist; silently absent on healthy dashboards. The
+          per-finding link deep-jumps to the finding card on /findings
+          for re-triage. */}
+      {regressions.length > 0 && (
+        <section>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-rose-200">
+              <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Regressions in the last 7 days
+            </h2>
+            <span className="text-[11px] text-neutral-500">
+              Findings that were fixed or dismissed and have returned.
+            </span>
+          </div>
+          <ul className="overflow-hidden rounded-xl border border-rose-500/30 bg-rose-500/[0.04] divide-y divide-rose-500/20">
+            {regressions.slice(0, 5).map((r) => (
+              <li key={r.finding_id}>
+                <Link
+                  href={`/findings#finding-${r.finding_id}`}
+                  className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-rose-500/[0.08]"
+                >
+                  <span className="mt-1 flex h-1.5 w-1.5 flex-shrink-0 rounded-full bg-rose-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-neutral-100">
+                      {r.title ?? '(untitled)'}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-rose-200/80">
+                      {r.severity}
+                      {r.target_name ? ` · ${r.target_name}` : ''} · reopened{' '}
+                      {new Date(r.seen_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Phase B #7 — expiring risk-acceptance reminder. Surfaces only
+          when the org has wont_fix findings whose expiry is within 14
+          days. Click-through goes to /findings filtered to wont_fix. */}
+      {(expiringAcceptanceCount ?? 0) > 0 && (
+        <section className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-4 py-3 text-[13px] text-amber-100">
+          <Link
+            href="/findings?status=wont_fix"
+            className="inline-flex items-center gap-2 hover:underline"
+          >
+            <Clock className="h-3.5 w-3.5" strokeWidth={2.5} />
+            <strong className="font-semibold">{expiringAcceptanceCount}</strong>
+            <span>
+              accepted-risk finding{(expiringAcceptanceCount ?? 0) === 1 ? '' : 's'} expire within
+              the next 14 days — review before they auto-reopen.
+            </span>
+          </Link>
+        </section>
+      )}
 
       <section>
         <div className="mb-3 flex items-baseline justify-between">
