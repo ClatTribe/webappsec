@@ -15,6 +15,8 @@ import {
   Download,
   Package,
   RefreshCw,
+  ShieldAlert,
+  ExternalLink,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -276,6 +278,26 @@ export default async function ScanDetailPage({ params }: Props) {
               >
                 <Download className="h-3.5 w-3.5" strokeWidth={2.25} />
                 Download compliance pack
+              </a>
+            )}
+            {/* Phase A #5 / migration 062 — SARIF auto-uploaded to
+                GitHub Code Scanning. Surfaces only when the worker
+                successfully pushed at scan-finalize. The link goes
+                to the repo's Code Scanning landing page (the
+                per-upload URL works too but only after GitHub's
+                async ingest completes, so the repo URL is the
+                friendlier deeplink). */}
+            {scan.code_scanning_url && (
+              <a
+                href={scan.code_scanning_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/20"
+                title="SARIF uploaded to GitHub Code Scanning — findings render inline on PR diffs in the repo"
+              >
+                <ShieldAlert className="h-3.5 w-3.5" strokeWidth={2.25} />
+                View in Code Scanning
+                <ExternalLink className="h-3 w-3 opacity-70" strokeWidth={2.5} />
               </a>
             )}
           </div>

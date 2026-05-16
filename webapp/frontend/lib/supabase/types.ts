@@ -329,6 +329,12 @@ export interface Scan {
    *  `<org>/<scan>/sbom.cdx.json` (migration 032). UI keys the
    *  "View SBOM" / "Download CycloneDX" CTAs off this column. */
   sbom_uploaded?: boolean;
+  /** Phase A #5 / migration 062 — SARIF auto-pushed to GitHub Code
+   *  Scanning at scan-finalize. URL is the repo's Code Scanning
+   *  landing page; null means the worker didn't upload (no SARIF
+   *  artefact, target isn't a GitHub repo, or no integration_id). */
+  code_scanning_url?: string | null;
+  code_scanning_uploaded_at?: string | null;
   /** Engine PR #141 — HAR / Burp project imports persisted by the
    *  API route on scan creation (migration 035). Browser uploads to
    *  user-uploads bucket; worker downloads at scan-start. */

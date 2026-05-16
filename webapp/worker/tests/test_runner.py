@@ -387,6 +387,13 @@ class FakeSupabase:
         # set_compliance_pack_uploaded fake.
         self._sbom_uploaded = True
 
+    def set_code_scanning_uploaded(self, scan_id: str, url: str) -> None:
+        # Phase A #5 / migration 062. Tests assert via
+        # `sb._code_scanning_url` to verify the upload path stamps a
+        # URL. No-op when the test doesn't exercise SARIF — the worker
+        # only calls this when *.sarif exists in run_dir.
+        self._code_scanning_url = url
+
     def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
         # Tests can read this back via `sb.run_meta` to assert the
         # worker forwarded the right blob to Postgres.
