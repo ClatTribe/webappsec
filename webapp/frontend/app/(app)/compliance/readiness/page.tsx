@@ -268,13 +268,21 @@ function DeltaPill({
 }
 
 function Callouts({ row }: { row: AuditReadinessRow }) {
-  const items: Array<{ tone: 'amber' | 'rose' | 'emerald'; text: string; Icon: typeof AlertCircle }> = [];
+  const items: Array<{
+    tone: 'amber' | 'rose' | 'emerald';
+    text: string;
+    Icon: typeof AlertCircle;
+    cta?: { href: string; label: string };
+  }> = [];
 
   if (row.open_crit_findings > 0) {
     items.push({
       tone: 'rose',
       Icon: AlertCircle,
       text: `${row.open_crit_findings} critical finding${row.open_crit_findings === 1 ? '' : 's'} tagged against mapped controls — score drops by ${10 * row.open_crit_findings} until resolved.`,
+      // Tier II #13 — quick path to declare a mitigation if the finding
+      // can't be directly fixed (e.g., legacy SAML IdP without MFA).
+      cta: { href: '/compliance/compensating', label: 'Declare compensating control' },
     });
   }
   if (row.stale_controls > 0) {
@@ -311,7 +319,15 @@ function Callouts({ row }: { row: AuditReadinessRow }) {
         return (
           <li key={i} className={`flex items-start gap-2 px-5 py-2.5 text-[11.5px] ${cls}`}>
             <it.Icon className="mt-0.5 h-3 w-3 flex-shrink-0" strokeWidth={2.5} />
-            <span>{it.text}</span>
+            <span className="flex-1">{it.text}</span>
+            {it.cta && (
+              <Link
+                href={it.cta.href}
+                className="flex-shrink-0 rounded-md border border-current/30 px-2 py-0.5 text-[10.5px] font-medium hover:bg-white/5"
+              >
+                {it.cta.label}
+              </Link>
+            )}
           </li>
         );
       })}

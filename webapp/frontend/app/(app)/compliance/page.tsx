@@ -90,11 +90,11 @@ export default async function CompliancePage() {
 }
 
 function ReadinessChips({ chips }: { chips: ReadinessChipShape[] }) {
+  // Split the card into header (with two sibling links — readiness +
+  // compensating) and a clickable chip list (its own Link). Avoids
+  // nesting anchors, which is invalid HTML.
   return (
-    <Link
-      href="/compliance/readiness"
-      className="group block rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.04] px-5 py-4 transition-colors hover:border-cyan-500/40"
-    >
+    <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.04] px-5 py-4">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2.5">
           <Gauge className="h-4 w-4 text-cyan-300" strokeWidth={2.25} />
@@ -102,10 +102,25 @@ function ReadinessChips({ chips }: { chips: ReadinessChipShape[] }) {
             Audit readiness
           </h2>
         </div>
-        <span className="inline-flex items-center gap-0.5 text-[11px] text-cyan-200/80 group-hover:text-cyan-100">
-          full breakdown
-          <ChevronRight className="h-3 w-3" strokeWidth={2.5} />
-        </span>
+        <div className="flex items-center gap-3">
+          {/* Tier II #13 — quick link to compensating controls UI.
+              Pinned here because users that look at readiness scores
+              are the most likely to need the "we mitigate this differently"
+              escape hatch. */}
+          <Link
+            href="/compliance/compensating"
+            className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[10.5px] font-medium text-amber-200 ring-1 ring-amber-400/30 hover:bg-amber-500/20"
+          >
+            Compensating controls
+          </Link>
+          <Link
+            href="/compliance/readiness"
+            className="inline-flex items-center gap-0.5 text-[11px] text-cyan-200/80 hover:text-cyan-100"
+          >
+            full breakdown
+            <ChevronRight className="h-3 w-3" strokeWidth={2.5} />
+          </Link>
+        </div>
       </div>
       <ul className="mt-3 flex flex-wrap gap-2">
         {chips.map((c) => {
@@ -138,6 +153,6 @@ function ReadinessChips({ chips }: { chips: ReadinessChipShape[] }) {
           );
         })}
       </ul>
-    </Link>
+    </section>
   );
 }
