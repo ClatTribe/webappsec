@@ -24,6 +24,7 @@ import ToolFreshness from '@/components/scan/tool-freshness';
 import CoverageMatrix from '@/components/scan/coverage-matrix';
 import CriticalAttackPathsCard from '@/components/scan/critical-attack-paths-card';
 import SupplyChainCard from '@/components/scan/supply-chain-card';
+import MoakPipelineCard from '@/components/scan/moak-pipeline-card';
 
 interface Props {
   scanId: string;
@@ -402,6 +403,14 @@ export default function ScanLiveView({
       {runMeta?.supply_chain && (
         <SupplyChainCard attestation={runMeta.supply_chain} />
       )}
+
+      {/* Wishlist §18.7 — MOAK exploit-synthesis pipeline live view.
+          Engine PRs #270 / #278 — five-stage progress bar built
+          from tool.execution.* events bucketed by agent. Hidden
+          when no MOAK events have fired on this scan; non-cloud /
+          non-API scans don't invoke MOAK so this stays out of
+          the way. */}
+      <MoakPipelineCard events={events} />
 
       {/* Per-phase coverage receipt (engine PR #140 / wishlist §15.4).
           Renders the four canonical phases (recon → exploit → validate

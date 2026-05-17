@@ -896,6 +896,14 @@ def _build_env(
     # without --dns-only keep working unchanged.
     if scan.get("dns_only"):
         env["STRIX_DNS_ONLY"] = "1"
+    # Wishlist §18.7 / engine PR #278 — MOAK live-probe consent.
+    # When the parent target's config has allow_live_probe=true the
+    # wrapper forwards STRIX_MOAK_LIVE_PROBE=1, gating the engine's
+    # LiveProbe stage. Default off; the engine's safety policy
+    # (PR #278) further restricts which findings are eligible.
+    parent_cfg = (scan.get("targets") or {}).get("config") or {}
+    if isinstance(parent_cfg, dict) and parent_cfg.get("allow_live_probe") is True:
+        env["STRIX_MOAK_LIVE_PROBE"] = "1"
     # FP feedback loop (engine PR #142). The wrapper writes the org's
     # accumulated labels to feedback.jsonl; engine reads via --feedback-from
     # AND/OR STRIX_FEEDBACK_FROM. We forward both for belt-and-braces.

@@ -54,6 +54,12 @@ export interface AllFields {
   cloudRoleArn: string;
   cloudExternalId: string;
   cloudRegion: string;
+  // Wishlist §18.7 — per-target consent for MOAK live-probe
+  // (engine PR #278). When true, the worker forwards
+  // STRIX_MOAK_LIVE_PROBE=1 so the LiveProbe stage runs against
+  // the production target. Default off; live probes are an
+  // operational decision, not a default.
+  allowLiveProbe: boolean;
   subdomainExcludes: string[];
   portSpec: string;
   protocols: '' | 'tcp' | 'udp' | 'both';
@@ -265,6 +271,7 @@ function WebApplicationFields({ value, set, accent }: { value: AllFields; set: S
           onChange={(v) => set('rateLimitQps', v)}
         />
       </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
     </div>
   );
 }
@@ -297,6 +304,7 @@ function ApiFields({ value, set }: { value: AllFields; set: Setter }) {
           onChange={(v) => set('rateLimitQps', v)}
         />
       </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
       <p className="rounded-md border border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-[11px] leading-relaxed text-indigo-200/80">
         <span className="font-medium text-indigo-100">Routed to the API tool catalog.</span> The
         agent runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) plus
@@ -304,6 +312,43 @@ function ApiFields({ value, set }: { value: AllFields; set: Setter }) {
         tools are <span className="text-neutral-300">skipped</span> — they don&apos;t apply to
         JSON / gRPC surfaces.
       </p>
+    </div>
+  );
+}
+
+// Wishlist §18.7 — per-target consent toggle for MOAK live-probe.
+//
+// Engine PR #278 ships the LiveProbe stage gated by the
+// STRIX_MOAK_LIVE_PROBE feature flag. The wrapper-side toggle
+// captures per-target consent and the worker forwards the env var
+// to the engine when the toggle is on. Default off — live probes
+// are an operational decision, not a default.
+
+function LiveProbeToggle({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5">
+      <label className="flex cursor-pointer items-start gap-2.5 text-[11.5px]">
+        <input
+          type="checkbox"
+          checked={value.allowLiveProbe}
+          onChange={(e) => set('allowLiveProbe', e.target.checked)}
+          className="mt-0.5 accent-amber-500"
+        />
+        <div className="space-y-0.5">
+          <div className="font-medium text-amber-100">
+            Allow MOAK live-probe against this target
+          </div>
+          <div className="text-[10.5px] leading-relaxed text-amber-200/70">
+            When MOAK Phase B3 produces a verified exploit in the sandbox, replay it
+            against the production target to capture a true positive (engine PR #278).
+            Only the 4 whitelisted impact classes are eligible (info_disclosure,
+            auth_bypass_unprivileged, ssrf_oob, open_redirect) — RCE / SQLi / RFI
+            never live-probe regardless of this setting. The worker forwards
+            <code className="ml-1 rounded bg-amber-500/15 px-1 font-mono text-[10px]">STRIX_MOAK_LIVE_PROBE=1</code>{' '}
+            when enabled.
+          </div>
+        </div>
+      </label>
     </div>
   );
 }
@@ -460,6 +505,7 @@ function CloudAccountFields({ value, set }: { value: AllFields; set: Setter }) {
           className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
         />
       </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
       <p className="rounded-md border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-[11px] leading-relaxed text-orange-200/80">
         <span className="font-medium text-orange-100">Routed to the CSPM tool catalog.</span> The
         engine runs <code>scan_cloud_account</code> (PR #291 / Prowler) when available, falling

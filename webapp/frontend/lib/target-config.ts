@@ -32,6 +32,10 @@ export const WebApplicationConfig = z.object({
   // instruction text — the agent self-limits in natural language. A real
   // CLI flag is on the wishlist (Priority 2 — `--rate-limit`).
   rate_limit_qps: z.number().int().positive().max(1000).optional(),
+  // Wishlist §18.7 / engine PR #278 — per-target MOAK live-probe consent.
+  // When true, the worker forwards STRIX_MOAK_LIVE_PROBE=1 so the
+  // LiveProbe stage runs against the production target. Default off.
+  allow_live_probe: z.boolean().optional(),
 });
 
 // Engine PRs #267 + #268 + #269 + #271 — first-class `api` target type.
@@ -49,6 +53,8 @@ export const ApiConfig = z.object({
   spec_url: z.string().trim().url().max(500).optional(),
   // Same shape as web_application — both consume an HTTP surface.
   rate_limit_qps: z.number().int().positive().max(1000).optional(),
+  // Wishlist §18.7 — MOAK live-probe consent (mirrors WebApplicationConfig).
+  allow_live_probe: z.boolean().optional(),
 });
 
 // Engine PR #274 — first-class `container_image` target type.
@@ -140,6 +146,8 @@ export const CloudAccountConfig = z.object({
     .max(50)
     .regex(/^[a-z]{2,4}-[a-z]+-\d+$/, { message: 'AWS region like us-east-1' })
     .optional(),
+  // Wishlist §18.7 — MOAK live-probe consent (mirrors web/api).
+  allow_live_probe: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------
