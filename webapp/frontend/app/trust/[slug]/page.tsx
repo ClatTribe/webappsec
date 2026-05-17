@@ -100,40 +100,77 @@ function readinessTone(pct: number): {
   return { label: 'Needs work', bg: 'bg-rose-500/15 text-rose-300 border-rose-500/30', text: 'text-rose-300', Icon: AlertCircle };
 }
 
-async function fetchTrustPage(slug: string): Promise<TrustPagePayload | null> {
-  // Anon-key client. The RPC is granted to anon; RLS on the underlying
-  // tables would deny direct reads. The function's opt-in check is the
-  // security boundary.
+// Tier II #12 — per-framework composite + quarterly history.
+// Returned alongside the trust payload via a second anon-safe RPC.
+interface TrustReadinessRow {
+  framework: string;
+  composite_pct: number;
+  latest_quarter: string | null;
+  latest_score: number | null;
+  prev_quarter: string | null;
+  prev_score: number | null;
+}
+
+async function fetchTrustPage(
+  slug: string,
+): Promise<{ payload: TrustPagePayload | null; readiness: TrustReadinessRow[] }> {
+  // Anon-key client. Both RPCs are granted to anon; the publication
+  // gates inside each function are the security boundary.
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { auth: { persistSession: false } },
   );
 
-  const { data, error } = await supabase.rpc('get_trust_page_payload', {
-    p_slug: slug,
-  });
-  if (error) {
-    console.error('[trust page] rpc error', error);
-    return null;
+  const [{ data: payloadData, error: payloadErr }, { data: readinessRaw }] =
+    await Promise.all([
+      supabase.rpc('get_trust_page_payload', { p_slug: slug }),
+      supabase.rpc('get_audit_readiness_for_trust', { p_slug: slug }),
+    ]);
+
+  if (payloadErr) {
+    console.error('[trust page] rpc error', payloadErr);
+    return { payload: null, readiness: [] };
   }
-  return (data as unknown as TrustPagePayload | null) ?? null;
+
+  // RPC returns out_-prefixed columns to dodge plpgsql shadowing;
+  // strip the prefix here for ergonomic consumption.
+  const readiness: TrustReadinessRow[] = ((readinessRaw ?? []) as Array<Record<string, unknown>>).map(
+    (r) => ({
+      framework: (r.out_framework ?? r.framework) as string,
+      composite_pct: (r.out_composite_pct ?? r.composite_pct) as number,
+      latest_quarter: (r.out_latest_quarter ?? r.latest_quarter) as string | null,
+      latest_score: (r.out_latest_score ?? r.latest_score) as number | null,
+      prev_quarter: (r.out_prev_quarter ?? r.prev_quarter) as string | null,
+      prev_score: (r.out_prev_score ?? r.prev_score) as number | null,
+    }),
+  );
+
+  return {
+    payload: (payloadData as unknown as TrustPagePayload | null) ?? null,
+    readiness,
+  };
 }
 
 export async function generateMetadata({ params }: { params: { slug: string } }) {
-  const data = await fetchTrustPage(params.slug);
-  if (!data) {
+  const { payload } = await fetchTrustPage(params.slug);
+  if (!payload) {
     return { title: 'Trust page · Not published' };
   }
   return {
-    title: `${data.org.name} · Security & Trust`,
-    description: data.org.subtitle ?? `${data.org.name}'s continuous security monitoring, compliance posture, and recent improvements.`,
+    title: `${payload.org.name} · Security & Trust`,
+    description: payload.org.subtitle ?? `${payload.org.name}'s continuous security monitoring, compliance posture, and recent improvements.`,
   };
 }
 
 export default async function TrustPage({ params }: { params: { slug: string } }) {
-  const data = await fetchTrustPage(params.slug);
+  const { payload: data, readiness } = await fetchTrustPage(params.slug);
   if (!data) notFound();
+
+  // Index readiness by framework key for fast lookup inside the
+  // existing per-framework card loop below.
+  const readinessByFramework = new Map<string, TrustReadinessRow>();
+  for (const r of readiness) readinessByFramework.set(r.framework, r);
 
   const monitoringStart = new Date(data.org.monitoring_since);
   const monthsMonitored = Math.max(
@@ -188,6 +225,11 @@ export default async function TrustPage({ params }: { params: { slug: string } }
             <div className="grid gap-4 sm:grid-cols-2">
               {data.frameworks.map((fw) => {
                 const tone = readinessTone(fw.readiness_pct);
+                const audit = readinessByFramework.get(fw.framework);
+                const auditDelta =
+                  audit?.composite_pct !== undefined && audit?.prev_score !== null
+                    ? (audit.composite_pct as number) - (audit.prev_score as number)
+                    : null;
                 return (
                   <div
                     key={fw.framework}
@@ -206,6 +248,31 @@ export default async function TrustPage({ params }: { params: { slug: string } }
                       <div className="text-[10px] uppercase tracking-wider text-neutral-400">
                         {tone.label}
                       </div>
+                      {/* Tier II #12 — composite audit-readiness chip
+                          + quarterly delta. Only renders when the
+                          framework has audit-readiness data (the live
+                          composite is always available if there's a
+                          framework card; the delta requires a prior
+                          quarter's snapshot). */}
+                      {audit && (
+                        <div className="mt-3 flex items-baseline gap-2 border-t border-current/10 pt-2.5 text-[11px]">
+                          <span className="text-neutral-400">Audit-ready</span>
+                          <span className="font-mono font-semibold text-neutral-100">
+                            {audit.composite_pct}%
+                          </span>
+                          {auditDelta !== null && auditDelta !== 0 && audit.prev_quarter && (
+                            <span
+                              className={`font-mono text-[10px] ${
+                                auditDelta > 0 ? 'text-emerald-300' : 'text-rose-300'
+                              }`}
+                              title={`vs. ${audit.prev_quarter}`}
+                            >
+                              {auditDelta > 0 ? '+' : ''}
+                              {auditDelta} from {audit.prev_quarter}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="grid grid-cols-4 divide-x divide-neutral-800/60 text-center">
                       <div className="px-2 py-3 text-xs">

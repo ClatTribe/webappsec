@@ -543,6 +543,63 @@ export interface ScanRecurrenceSummary {
 }
 
 /**
+ * Tier II #12 — Audit-readiness score for one framework.
+ *
+ * Returned by `compute_org_audit_readiness()`. The `prev_*` columns
+ * carry the previous-quarter snapshot for delta display ("was 68 last
+ * quarter") — both may be null when no snapshot yet exists.
+ *
+ * Note: all columns are prefixed `out_` in the RPC's RETURNS TABLE
+ * to dodge PG's identifier-shadowing rule (column names shadow OUT
+ * params in plpgsql). The TS shape strips that prefix for ergonomic
+ * consumption — the page code reads `row.framework` not `row.out_framework`.
+ */
+export interface AuditReadinessRow {
+  framework: string;
+  composite_pct: number;
+  base_readiness_pct: number;
+  coverage_pct: number;
+  cadence_pct: number;
+  findings_pct: number;
+  freshness_pct: number;
+  open_crit_findings: number;
+  open_high_findings: number;
+  stale_controls: number;
+  total_controls: number;
+  touched_controls: number;
+  days_since_last_scan: number;
+  prev_quarter: string | null;
+  prev_score: number | null;
+}
+
+/**
+ * Tier II #12 — one quarter's snapshot row from `compliance_snapshots`.
+ * Drives the "Q1: 68 → Q2: 81" history graph on /compliance/readiness.
+ */
+export interface ComplianceSnapshot {
+  id: string;
+  org_id: string;
+  framework: string;
+  /** YYYY-Q[1-4] (e.g. "2026-Q2"). */
+  quarter: string;
+  score: number;
+  breakdown: {
+    base_readiness_pct: number;
+    coverage_pct: number;
+    cadence_pct: number;
+    findings_pct: number;
+    freshness_pct: number;
+    open_crit_findings: number;
+    open_high_findings: number;
+    stale_controls: number;
+    total_controls: number;
+    touched_controls: number;
+    days_since_last_scan: number;
+  };
+  snapshot_at: string;
+}
+
+/**
  * Tier II #11 — Cross-scan finding rollup.
  *
  * One row per fingerprint that hits >= 2 distinct targets in the org.
