@@ -676,6 +676,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             {finding.cwe && (
               <span className="font-mono text-neutral-400">{finding.cwe}</span>
             )}
+            {/* Wishlist §17.2 — per-namespace rule-source badge for cloud
+                findings. The vuln_id prefix tells us which engine path
+                produced the row: boto3 CSPM (AWS_*), Prowler (prowler:*),
+                IaC parser (TF_AWS_*), attack-path graph (cap_*). Lets
+                operators tell "live state" from "declared state" findings
+                at a glance. */}
+            {finding.vuln_id && <RuleSourceBadge vulnId={finding.vuln_id} />}
             {finding.target && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-neutral-600">target</span>
@@ -1792,4 +1799,79 @@ function DriftBadge({
       {theme.label}
     </span>
   );
+}
+
+// Wishlist §17.2 — rule-source badge for cloud-track findings.
+//
+// vuln_id prefix → source tag mapping:
+//   cap_*       → ATTACK PATH (engine PRs #293/#294)
+//   AWS_*       → CSPM-AWS    (boto3 path, engine PR #290)
+//   prowler:*   → CSPM        (Prowler wrapper, engine PR #291)
+//   TF_AWS_*    → IAC         (Terraform parser, engine PR #287)
+//   K8S_*       → IAC         (Kubernetes YAML parser, engine PR #287)
+//   HELM_*      → IAC         (Helm parser, engine PR #287)
+//
+// Returns null for any vuln_id that doesn't match — keeps the chip
+// row clean for the dominant case (web/api/repo findings without
+// cloud prefixes).
+function RuleSourceBadge({ vulnId }: { vulnId: string }) {
+  const tag = classifyRuleSource(vulnId);
+  if (!tag) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${tag.cls}`}
+      title={tag.title}
+    >
+      {tag.label}
+    </span>
+  );
+}
+
+function classifyRuleSource(
+  vulnId: string,
+): { label: string; title: string; cls: string } | null {
+  const v = vulnId.trim();
+  if (v.toLowerCase().startsWith('cap_')) {
+    return {
+      label: 'Attack path',
+      title: 'Engine PRs #293/#294 — graph-traversal toxic combination chained from CSPM findings.',
+      cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    };
+  }
+  if (/^AWS_/i.test(v)) {
+    return {
+      label: 'CSPM · AWS',
+      title: 'Engine PR #290 — live-state attestation from the boto3 CSPM scanner.',
+      cls: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    };
+  }
+  if (/^prowler:/i.test(v)) {
+    return {
+      label: 'CSPM',
+      title: 'Engine PR #291 — live-state attestation from the Prowler wrapper (multi-cloud).',
+      cls: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    };
+  }
+  if (/^(TF_AWS|TF)_/i.test(v)) {
+    return {
+      label: 'IaC · Terraform',
+      title: 'Engine PR #287 — declared-state finding from the Terraform parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  if (/^K8S_/i.test(v)) {
+    return {
+      label: 'IaC · Kubernetes',
+      title: 'Engine PR #287 — declared-state finding from the Kubernetes YAML parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  if (/^HELM_/i.test(v)) {
+    return {
+      label: 'IaC · Helm',
+      title: 'Engine PR #287 — declared-state finding from the Helm chart parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  return null;
 }
