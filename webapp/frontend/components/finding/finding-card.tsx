@@ -50,6 +50,8 @@ import {
   massAssignmentDiff,
   secretIntroductionTrail,
   imageCategory,
+  reachabilityInfo,
+  type ReachabilityInfo,
 } from '@/lib/finding-depth';
 import AssigneePicker from '@/components/finding/assignee-picker';
 import CommentThread from '@/components/finding/comment-thread';
@@ -706,6 +708,14 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             {ssrfFamily(finding) && <SsrfFamilyChip family={ssrfFamily(finding)!} />}
             {bolaVariant(finding) && <BolaVariantChip variant={bolaVariant(finding)!} />}
             {imageCategory(finding) && <ImageCategoryChip category={imageCategory(finding)!} />}
+            {/* SCA / SAST reachability — forward-compat with engine
+                wishlist follow-up. Reads from features.reachability_*
+                and renders nothing when absent. Once the engine
+                emits the field, every existing finding auto-renders
+                the chip with no code change. */}
+            {reachabilityInfo(finding) && (
+              <ReachabilityChip info={reachabilityInfo(finding)!} />
+            )}
             {finding.target && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-neutral-600">target</span>
@@ -1999,6 +2009,38 @@ function ImageCategoryChip({ category }: { category: 'sca' | 'misconfig' | 'secr
   );
 }
 
+// SCA / SAST reachability — engine wishlist §17.6 follow-up. The chip
+// tier is the actionable signal:
+//   reachable    rose   — fix now; user input reaches the vuln
+//   unreachable  zinc   — deprioritise; the vuln isn't on a reachable path
+//   unknown      amber  — engine couldn't conclude; treat as default-risk
+//
+// The optional numeric score is surfaced as a tooltip refinement so
+// the chip stays compact in the metadata row.
+function ReachabilityChip({ info }: { info: ReachabilityInfo }) {
+  const TONE: Record<ReachabilityInfo['tier'], { cls: string; label: string }> = {
+    reachable:   { cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',         label: 'Reachable' },
+    unreachable: { cls: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40', label: 'Unreachable' },
+    unknown:     { cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',      label: 'Unknown reach' },
+  };
+  const t = TONE[info.tier];
+  const tip =
+    info.tier === 'reachable'
+      ? `Engine taint / call-graph analysis: user input reaches the vulnerable function${info.score !== null ? ` (confidence ${info.score}%)` : ''}. Fix-now priority.`
+      : info.tier === 'unreachable'
+        ? `Engine taint analysis: the vulnerable function is not on any reachable path${info.score !== null ? ` (confidence ${info.score}%)` : ''}. Can be deprioritised.`
+        : `Engine could not determine reachability${info.score !== null ? ` (confidence ${info.score}%)` : ''}. Treat as default priority.`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${t.cls}`}
+      title={tip}
+    >
+      <Footprints className="h-2.5 w-2.5" strokeWidth={2.5} />
+      {t.label}
+    </span>
+  );
+}
+
 // ============== Wishlist §18 deeper panels ==========================
 //
 // These live inside the expanded body of the finding card. Each section
@@ -2010,8 +2052,14 @@ function DepthPanels({ finding }: { finding: Finding }) {
   const chain = pivotChainAncestors(finding);
   const secretTrail = secretIntroductionTrail(finding);
   const diff = massAssignmentDiff(finding);
+  const reach = reachabilityInfo(finding);
 
-  const hasAnything = proof || chain.length > 0 || secretTrail || diff;
+  const hasAnything =
+    proof ||
+    chain.length > 0 ||
+    secretTrail ||
+    diff ||
+    (reach && (reach.paths.length > 0 || reach.analysis_note));
   if (!hasAnything) return null;
 
   return (
@@ -2163,6 +2211,55 @@ function DepthPanels({ finding }: { finding: Finding }) {
                 {diff.sample_payload}
               </pre>
             </details>
+          )}
+        </section>
+      )}
+
+      {/* SCA / SAST reachability — call-path breadcrumb + analysis
+          note. Renders only when the engine emitted a non-empty path
+          chain or an analysis note. The tier chip on the metadata
+          row carries the verdict by itself, so we don't repeat it. */}
+      {reach && (reach.paths.length > 0 || reach.analysis_note) && (
+        <section className="space-y-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <Footprints className="h-3.5 w-3.5 text-cyan-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-cyan-200">
+              Reachability
+            </h4>
+            <span className="text-[10.5px] text-cyan-200/70">
+              engine taint / call-graph analysis
+            </span>
+          </div>
+          {reach.paths.length > 0 && (
+            <ol className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              {reach.paths.map((p, i) => (
+                <li
+                  key={`${p.from}-${p.to}-${i}`}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  {i === 0 && (
+                    <span className="rounded bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[10px] text-cyan-100 ring-1 ring-cyan-400/30">
+                      {p.from}
+                    </span>
+                  )}
+                  <ChevronRight
+                    className="h-2.5 w-2.5 text-cyan-300/60"
+                    strokeWidth={2.5}
+                  />
+                  <span
+                    className="rounded bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[10px] text-cyan-100 ring-1 ring-cyan-400/30"
+                    title={p.evidence ?? ''}
+                  >
+                    {p.to}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+          {reach.analysis_note && (
+            <p className="text-[11px] leading-relaxed text-cyan-200/80">
+              {reach.analysis_note}
+            </p>
           )}
         </section>
       )}
