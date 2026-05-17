@@ -367,6 +367,43 @@ function ContainerImageFields({ value, set }: { value: AllFields; set: Setter })
 function CloudAccountFields({ value, set }: { value: AllFields; set: Setter }) {
   return (
     <div className="space-y-4">
+      {/* Wishlist §17.3 — read-only contract notice. Pinned at the top
+          of the panel so security teams reviewing credential grants
+          see it before they get to the role-ARN field. The note
+          mirrors engine PR #290's safety contract: ZERO mutating API
+          calls; recommended grant is AWS-managed SecurityAudit. */}
+      <div className="space-y-2 rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-200">
+          <Lock className="h-3 w-3" strokeWidth={2.5} />
+          Read-only contract
+        </div>
+        <p className="text-[11.5px] leading-relaxed text-emerald-100/85">
+          The CSPM scanner makes <strong>zero mutating API calls</strong> — only{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">Describe*</code>,{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">Get*</code>,{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">List*</code>. We
+          recommend the AWS-managed{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">SecurityAudit</code>{' '}
+          managed policy on the role you grant. The scan attests live state — no resources are
+          created, modified, or deleted.
+        </p>
+      </div>
+
+      {/* Wishlist §17.3 — scheduled-scan callout. Cloud accounts don't
+          change minute-to-minute; daily is the right cadence and the
+          engine is idempotent. The scheduling control lives at the
+          parent <ScheduleFields> level (scan_frequency); we just
+          point at it from here so users understand cloud_account is
+          the canonical schedule-it target. */}
+      <div className="rounded-md border border-cyan-500/20 bg-cyan-500/[0.04] px-3 py-2 text-[11px] leading-relaxed text-cyan-100/85">
+        <strong className="text-cyan-100">Schedule daily.</strong> CSPM is the canonical
+        nightly-scan target — drift accumulates slowly and a daily attestation produces a clean
+        24-hour history for auditors. Set{' '}
+        <code className="rounded bg-cyan-500/15 px-1 font-mono text-[10.5px]">scan_frequency</code>{' '}
+        to <code className="rounded bg-cyan-500/15 px-1 font-mono text-[10.5px]">daily</code> on
+        this target after creation.
+      </div>
+
       <FieldRow
         Icon={Cloud}
         label="Provider"

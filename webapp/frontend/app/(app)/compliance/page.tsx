@@ -48,11 +48,16 @@ export default async function CompliancePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Two queries in parallel: the questionnaire template list (existing)
-  // and the live audit-readiness rollup (Tier II #12).
-  const [{ data: rows }, { data: readiness }] = await Promise.all([
+  // Three queries in parallel: the questionnaire template list
+  // (existing), the live audit-readiness rollup (Tier II #12), and the
+  // CIS attestation rollup (wishlist §17.5).
+  const [{ data: rows }, { data: readiness }, { data: cisEvidence }] = await Promise.all([
     supabase.from('compliance_questionnaire_templates').select('key, framework').order('key'),
     supabase.rpc('compute_org_audit_readiness'),
+    supabase
+      .from('compliance_evidence')
+      .select('framework, control_id, verdict')
+      .in('framework', ['cis_aws', 'cis_gcp', 'cis_azure', 'cis_kubernetes', 'cis_docker']),
   ]);
 
   const grouped = new Map<string, AvailableTemplate>();
@@ -81,11 +86,143 @@ export default async function CompliancePage() {
     }))
     .sort((a, b) => b.composite_pct - a.composite_pct);
 
+  // Wishlist §17.5 — CIS attestation rollup. Per framework, count
+  // distinct control_ids the latest scan attested with a pass / warn
+  // verdict. Denominator pulled from CIS_TOTALS (the published
+  // benchmark counts; we keep them in code so a new control catalog
+  // version is a code change, not a DB migration). 'untested' rows
+  // are excluded — they're attested by absence, not by an active
+  // verdict.
+  const cisRollupRows = (cisEvidence ?? []) as Array<{
+    framework: string;
+    control_id: string;
+    verdict: string;
+  }>;
+  const cisAttestation = computeCisRollup(cisRollupRows);
+
   return (
     <div className="space-y-6">
       {chips.length > 0 && <ReadinessChips chips={chips} />}
+      {cisAttestation.length > 0 && <CisAttestationCard rows={cisAttestation} />}
       <QuestionnaireClient templates={templates} />
     </div>
+  );
+}
+
+// Wishlist §17.5 — CIS benchmark attestation rollup.
+//
+// Denominators come from the published benchmark counts. The numerator
+// is the count of distinct control_ids in `compliance_evidence` for
+// this framework with verdict ∈ {pass, warn}. We deliberately don't
+// count `fail` toward attestation — an attested fail is not the same
+// thing as "the auditor saw it"; the auditor saw a control they would
+// fail you on, not a control you've satisfied.
+//
+// CIS_TOTALS values reflect the published benchmark profiles:
+//   - cis_aws        CIS AWS Foundations Benchmark v3.0 (Level 1+2)
+//   - cis_gcp        CIS GCP Foundations Benchmark v3.0
+//   - cis_azure      CIS Azure Foundations Benchmark v2.0
+//   - cis_kubernetes CIS Kubernetes Benchmark v1.9
+//   - cis_docker     CIS Docker Benchmark v1.6
+//
+// These numbers update annually when the benchmarks ship a new
+// version. A bump here is a code change, not a migration.
+const CIS_TOTALS: Record<string, number> = {
+  cis_aws: 57,
+  cis_gcp: 60,
+  cis_azure: 55,
+  cis_kubernetes: 122,
+  cis_docker: 117,
+};
+
+const CIS_LABELS: Record<string, string> = {
+  cis_aws: 'CIS AWS Foundations',
+  cis_gcp: 'CIS GCP Foundations',
+  cis_azure: 'CIS Azure Foundations',
+  cis_kubernetes: 'CIS Kubernetes',
+  cis_docker: 'CIS Docker',
+};
+
+interface CisRow {
+  framework: string;
+  label: string;
+  attested: number;
+  failing: number;
+  total: number;
+  pct: number;
+}
+
+function computeCisRollup(
+  rows: Array<{ framework: string; control_id: string; verdict: string }>,
+): CisRow[] {
+  const byFw = new Map<string, { attested: Set<string>; failing: Set<string> }>();
+  for (const r of rows) {
+    let bucket = byFw.get(r.framework);
+    if (!bucket) {
+      bucket = { attested: new Set(), failing: new Set() };
+      byFw.set(r.framework, bucket);
+    }
+    if (r.verdict === 'pass' || r.verdict === 'warn') {
+      bucket.attested.add(r.control_id);
+    } else if (r.verdict === 'fail') {
+      bucket.failing.add(r.control_id);
+    }
+  }
+  const out: CisRow[] = [];
+  for (const [fw, sets] of byFw) {
+    const total = CIS_TOTALS[fw] ?? sets.attested.size + sets.failing.size;
+    const attested = sets.attested.size;
+    out.push({
+      framework: fw,
+      label: CIS_LABELS[fw] ?? fw,
+      attested,
+      failing: sets.failing.size,
+      total,
+      pct: total > 0 ? Math.round((attested / total) * 100) : 0,
+    });
+  }
+  return out.sort((a, b) => b.pct - a.pct);
+}
+
+function CisAttestationCard({ rows }: { rows: CisRow[] }) {
+  return (
+    <section className="rounded-2xl border border-orange-500/20 bg-orange-500/[0.04] px-5 py-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5">
+          <Gauge className="h-4 w-4 text-orange-300" strokeWidth={2.25} />
+          <h2 className="text-sm font-medium uppercase tracking-wider text-orange-200">
+            CIS benchmark attestation
+          </h2>
+        </div>
+        <span className="text-[10.5px] text-orange-200/70">
+          attested = distinct controls with pass or warn verdicts in your latest scan
+        </span>
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {rows.map((r) => (
+          <li
+            key={r.framework}
+            className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-lg border border-orange-500/10 bg-orange-500/[0.03] px-3 py-1.5"
+          >
+            <div className="min-w-0">
+              <div className="text-[12px] font-medium text-orange-100">{r.label}</div>
+              <div className="text-[10.5px] text-orange-200/70">
+                {r.attested} attested · {r.failing} failing · {r.total} total controls
+              </div>
+            </div>
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-orange-500/10">
+              <div
+                className="h-full rounded-full bg-orange-400/80"
+                style={{ width: `${Math.max(2, r.pct)}%` }}
+              />
+            </div>
+            <span className="font-mono text-[13px] tabular-nums text-orange-100">
+              {r.pct}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

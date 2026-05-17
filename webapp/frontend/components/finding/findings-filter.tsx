@@ -7,6 +7,7 @@ import FindingCard from './finding-card';
 import type { AiUrgency, Finding, FindingStatus } from '@/lib/supabase/types';
 import { AI_BRAND } from '@/lib/finding-theme';
 import { createClient } from '@/lib/supabase/client';
+import { resolveDriftClassification } from '@/lib/cloud-attack-path';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
@@ -82,12 +83,32 @@ const SEVERITY_CHIP_TONE: Record<string, string> = {
   info: 'bg-neutral-700/40 text-neutral-200 ring-neutral-600/40',
 };
 
+// Wishlist §17.4 — drift classification filter row. Only renders when
+// the page has at least one drift-classified finding (engine PR #292).
+// `__all__` is the no-filter sentinel mirroring ALL_TARGETS.
+type DriftFilterValue =
+  | '__all__'
+  | 'iac_root_cause'
+  | 'drift'
+  | 'iac_unfollowed'
+  | 'uncorrelated_cspm';
+
+const DRIFT_FILTER_OPTIONS: { value: DriftFilterValue; label: string; help: string }[] = [
+  { value: '__all__',          label: 'All',            help: 'Show every finding regardless of drift state.' },
+  { value: 'drift',            label: 'Drift only',     help: 'CSPM-only: resource drifted out of IaC. Fix by realigning IaC.' },
+  { value: 'iac_root_cause',   label: 'IaC root cause', help: 'Both IaC and live agree — fix the IaC and re-apply.' },
+  { value: 'iac_unfollowed',   label: 'IaC unfollowed', help: 'IaC declares the misconfig but live is clean — IaC un-applied.' },
+  { value: 'uncorrelated_cspm', label: 'CSPM-only',     help: 'Live-only attestation; no IaC analog.' },
+];
+
 export default function FindingsFilter({ findings }: { findings: FindingWithScan[] }) {
   const [view, setView] = useState<ViewMode>('open');
   const [targetFilter, setTargetFilter] = useState<string>(ALL_TARGETS);
   // Phase B #1 — multi-axis filter state.
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set());
   const [verificationFilter, setVerificationFilter] = useState<Set<string>>(new Set());
+  // Wishlist §17.4 — drift classification filter.
+  const [driftFilter, setDriftFilter] = useState<DriftFilterValue>('__all__');
   // Phase B #1 — bulk selection state.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkInFlight, setBulkInFlight] = useState(false);
@@ -145,9 +166,24 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
         const v = f.verification_status ?? '';
         if (!verificationFilter.has(v)) return false;
       }
+      // Wishlist §17.4 — drift classification (AND with other filters).
+      // Reads via the same helper FindingCard uses, so the filter row
+      // matches the badges 1:1.
+      if (driftFilter !== '__all__') {
+        const { classification } = resolveDriftClassification(f);
+        if (classification !== driftFilter) return false;
+      }
       return true;
     });
-  }, [sorted, view, severityFilter, verificationFilter]);
+  }, [sorted, view, severityFilter, verificationFilter, driftFilter]);
+
+  // Only render the drift filter row when at least one finding in
+  // this dataset carries a drift classification. Keeps the toolbar
+  // clean for non-cloud scans.
+  const hasDriftFindings = useMemo(
+    () => findings.some((f) => resolveDriftClassification(f).classification !== null),
+    [findings],
+  );
 
   // A single, calm count — what's currently visible.
   const totalForView = visible.length;
@@ -166,6 +202,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     setSeverityFilter(new Set());
     setVerificationFilter(new Set());
     setTargetFilter(ALL_TARGETS);
+    setDriftFilter('__all__');
   }
 
   // Phase B #1 — bulk-select helpers.
@@ -326,6 +363,36 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
           </button>
         )}
       </div>
+
+      {/* Wishlist §17.4 — drift classification filter row. Conditional
+          so this row never appears on the typical web-app-only scan;
+          shows up the moment a CSPM + IaC mixed scan produces drift-
+          classified findings. */}
+      {hasDriftFindings && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-orange-500/15 bg-orange-500/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-orange-200/80">
+            Drift:
+          </span>
+          {DRIFT_FILTER_OPTIONS.map((opt) => {
+            const active = driftFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setDriftFilter(opt.value)}
+                title={opt.help}
+                className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
+                  active
+                    ? 'bg-orange-500/20 text-orange-100 ring-orange-400/40'
+                    : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* AI explainer — the only thing on the page that uses the AI gradient. */}
       <div className="flex items-start gap-2 px-1 text-[11px] text-neutral-500">
