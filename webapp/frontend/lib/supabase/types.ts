@@ -564,6 +564,49 @@ export interface ScanRecurrenceSummary {
 }
 
 /**
+ * Cloud asset inventory row from `kg_cloud_inventory(scan_id)` RPC.
+ *
+ * Surfaces one row per CloudResource / CloudIdentity / CloudPolicy /
+ * CloudFlow / ExternalPrincipal node the engine emitted on a
+ * cloud_account scan (engine PRs #290/#291/#293). The RPC pre-joins:
+ *   - exposure status from kg_edges (`exposed_to_internet` source)
+ *   - finding count from findings.features.affected_node
+ *   - attack-path participation from cap_* findings.features.hops
+ *
+ * Sort order: most-exposed + most-pathfound first → service + name.
+ */
+export interface CloudInventoryNode {
+  node_id: string;
+  node_type:
+    | 'CloudResource'
+    | 'CloudIdentity'
+    | 'CloudPolicy'
+    | 'CloudFlow'
+    | 'ExternalPrincipal';
+  /** AWS / GCP / Azure service identifier ('s3', 'ec2', 'iam', 'rds', etc.). */
+  service: string;
+  display_name: string;
+  exposed_to_internet: boolean;
+  finding_count: number;
+  attack_path_count: number;
+  props: Record<string, unknown> | null;
+  created_at: string;
+}
+
+/**
+ * One row of `kg_cloud_neighbours(scan_id, node_id)` — incoming or
+ * outgoing edge for a given cloud KG node.
+ */
+export interface CloudInventoryNeighbour {
+  direction: 'in' | 'out';
+  edge_type: string;
+  other_node_id: string;
+  other_node_type: string | null;
+  other_display_name: string | null;
+  edge_props: Record<string, unknown> | null;
+}
+
+/**
  * Tier II #13 — org-declared compensating control for a failing
  * framework control. Surfaces on the trust page next to the failing
  * control with an amber "compensated" badge.

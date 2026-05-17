@@ -25,6 +25,7 @@ import CoverageMatrix from '@/components/scan/coverage-matrix';
 import CriticalAttackPathsCard from '@/components/scan/critical-attack-paths-card';
 import SupplyChainCard from '@/components/scan/supply-chain-card';
 import MoakPipelineCard from '@/components/scan/moak-pipeline-card';
+import CloudAssetInventory from '@/components/scan/cloud-asset-inventory';
 
 interface Props {
   scanId: string;
@@ -393,6 +394,13 @@ export default function ScanLiveView({
           unchanged. Pinned above coverage / phase so the CISO sees
           the toxic-combination count first. */}
       <CriticalAttackPathsCard findings={findings} />
+
+      {/* Cloud Asset Inventory — the wrapper-side surface for the
+          engine's typed cloud KG (engine PRs #290/#291/#293). Hidden
+          when no cloud nodes exist; renders the inventory + edge
+          drill-in for cloud_account scans. The "we know your cloud
+          assets" answer to procurement's Wiz-comparison question. */}
+      <CloudAssetInventory scanId={scanId} />
 
       {/* Wishlist §18.4 — Cosign signature + SLSA provenance card.
           Engine PR #286. Renders only for container_image scans
