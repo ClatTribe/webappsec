@@ -13,6 +13,7 @@ export default function NewIntegrationPage({ params }: Props) {
 
   if (type === 'github') return <GitHubFlow />;
   if (type === 'aws') return <AwsForm />;
+  if (type === 'gcp') return <GcpForm />;
   if (type === 'k8s') return <KubeconfigForm />;
   // Skeletons for remaining types — same shape as AWS / k8s.
   return (
@@ -270,6 +271,146 @@ function KubeconfigForm() {
           className="rounded-md bg-white px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
         >
           {submitting ? 'Saving...' : 'Save integration'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ===================== GCP =====================
+function GcpForm() {
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [saJson, setSaJson] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [workspaceDomain, setWorkspaceDomain] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The SA JSON is the source of truth for the project_id, but we
+  // expose the override field so a service account with cross-project
+  // access can target a specific one. We parse defensively — the
+  // user might paste before the JSON is complete.
+  function parseSaProject(input: string): string | null {
+    try {
+      const parsed = JSON.parse(input) as { project_id?: string };
+      return parsed.project_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    // Validate the JSON before sending — gives the user a clear
+    // inline error rather than a generic server failure.
+    let parsed: { project_id?: string; client_email?: string };
+    try {
+      parsed = JSON.parse(saJson);
+    } catch {
+      setError('Service-account JSON is not valid JSON.');
+      setSubmitting(false);
+      return;
+    }
+    const resolvedProject = projectId.trim() || parsed.project_id || '';
+    if (!resolvedProject) {
+      setError(
+        'No project_id detected in the SA JSON — set it in the override field above.',
+      );
+      setSubmitting(false);
+      return;
+    }
+
+    const res = await fetch('/api/integrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'gcp',
+        name,
+        // Vault payload — exactly what the worker's credentials.py
+        // expects under integration.type='gcp'.
+        secret_payload: { service_account_json: saJson },
+        // Metadata is non-sensitive and shown in the UI. We include
+        // the project_id explicitly so the collector + UI don't have
+        // to re-parse the SA JSON, plus the SA client_email so users
+        // can audit which identity their integration uses.
+        metadata: {
+          project_id: resolvedProject,
+          client_email: parsed.client_email ?? null,
+          workspace_domain: workspaceDomain.trim() || null,
+        },
+      }),
+    });
+    setSubmitting(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'Failed to save');
+      return;
+    }
+    router.push('/integrations');
+  }
+
+  const autoProject = parseSaProject(saJson);
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">Connect GCP</h1>
+      <p className="text-sm text-neutral-400">
+        Paste a service-account JSON key with read-only scope on the target
+        project. The SA should hold{' '}
+        <code className="rounded bg-neutral-800 px-1 font-mono text-[11px]">
+          roles/iam.securityReviewer
+        </code>{' '}
+        (or at minimum{' '}
+        <code className="rounded bg-neutral-800 px-1 font-mono text-[11px]">
+          roles/viewer
+        </code>
+        ) so the evidence collector can read IAM policy + SA keys.
+      </p>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <Field label="Name" value={name} onChange={setName} placeholder="prod-readonly" />
+        <label className="flex flex-col text-sm">
+          Service-account JSON key
+          <textarea
+            value={saJson}
+            onChange={(e) => setSaJson(e.target.value)}
+            placeholder='{ "type": "service_account", "project_id": "...", "private_key": "...", ... }'
+            rows={10}
+            className="mt-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-[11px]"
+          />
+          <span className="mt-1 text-[10.5px] text-neutral-500">
+            Stored encrypted in the vault. We never log or display the contents
+            after save.
+          </span>
+        </label>
+        <Field
+          label={`Project ID (override${autoProject ? ` — auto-detected: ${autoProject}` : ''})`}
+          value={projectId}
+          onChange={setProjectId}
+          placeholder={autoProject ?? 'my-project-id'}
+        />
+        <Field
+          label="Workspace domain (optional)"
+          value={workspaceDomain}
+          onChange={setWorkspaceDomain}
+          placeholder="acme.com"
+        />
+        <p className="rounded-md border border-cyan-500/30 bg-cyan-500/[0.05] px-3 py-2 text-[11.5px] text-cyan-200/80">
+          Workspace domain is used by the IAM evidence collector to distinguish
+          your-domain identities from external ones (e.g. a gmail.com user
+          accidentally granted Owner). Leave blank and the collector will only
+          flag <code className="font-mono">@gmail.com</code> bindings.
+        </p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting || !name.trim() || !saJson.trim()}
+          className="rounded-md bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/25 disabled:opacity-50"
+        >
+          {submitting ? 'Saving…' : 'Save integration'}
         </button>
       </form>
     </div>

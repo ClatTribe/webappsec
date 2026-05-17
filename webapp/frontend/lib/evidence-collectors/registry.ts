@@ -7,12 +7,14 @@
 // registry.
 
 import { awsIamCollector } from './aws-iam';
+import { gcpIamCollector } from './gcp-iam';
 import { githubAdminCollector } from './github';
 import type { CollectorDefinition } from './types';
 
 export const COLLECTORS: CollectorDefinition[] = [
   githubAdminCollector,
   awsIamCollector,
+  gcpIamCollector,
 ];
 
 /** Map lookup by collector id. Returns null if the id isn't known —
