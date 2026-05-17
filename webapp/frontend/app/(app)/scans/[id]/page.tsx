@@ -281,7 +281,7 @@ export default async function ScanDetailPage({ params }: Props) {
               <a
                 href={`/api/scans/${scan.id}/compliance-pack`}
                 className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:border-violet-500/50 hover:bg-violet-500/20"
-                title="Auditor-grade evidence bundle — manifest, control attestations, coverage report, findings, signed events excerpt, SHA256 sums"
+                title="Auditor-grade evidence bundle — manifest, control attestations (compliance_evidence.json per engine PR #285), coverage report, findings, signed events excerpt, SHA256 sums"
               >
                 <Download className="h-3.5 w-3.5" strokeWidth={2.25} />
                 Download compliance pack

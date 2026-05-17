@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronDown,
+  ChevronRight,
   CheckCircle2,
   XCircle,
   Eye,
@@ -17,6 +18,8 @@ import {
   RefreshCw,
   Brain,
   Footprints,
+  Key,
+  FileWarning,
 } from 'lucide-react';
 import type {
   Finding,
@@ -37,6 +40,17 @@ import {
   isAttackPathFinding,
   resolveDriftClassification,
 } from '@/lib/cloud-attack-path';
+import {
+  isVerifiedLive,
+  proofArtifactPath,
+  pivotChainAncestors,
+  xssContext,
+  ssrfFamily,
+  bolaVariant,
+  massAssignmentDiff,
+  secretIntroductionTrail,
+  imageCategory,
+} from '@/lib/finding-depth';
 import AssigneePicker from '@/components/finding/assignee-picker';
 import CommentThread from '@/components/finding/comment-thread';
 import {
@@ -683,6 +697,15 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 operators tell "live state" from "declared state" findings
                 at a glance. */}
             {finding.vuln_id && <RuleSourceBadge vulnId={finding.vuln_id} />}
+            {/* Wishlist §18 — per-target-type depth chips. Each helper
+                returns null when the engine didn't emit its field, so
+                the chip row stays clean on web/repo scans that didn't
+                cross MOAK / XSS-context / SSRF-family paths. */}
+            {isVerifiedLive(finding) && <VerifiedLiveChip />}
+            {xssContext(finding) && <XssContextChip context={xssContext(finding)!} />}
+            {ssrfFamily(finding) && <SsrfFamilyChip family={ssrfFamily(finding)!} />}
+            {bolaVariant(finding) && <BolaVariantChip variant={bolaVariant(finding)!} />}
+            {imageCategory(finding) && <ImageCategoryChip category={imageCategory(finding)!} />}
             {finding.target && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-neutral-600">target</span>
@@ -966,6 +989,12 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               description block for these findings — the hop chain IS
               the description for an attack-path. */}
           {isAttackPathFinding(finding) && <CloudAttackPathCasefile finding={finding} />}
+
+          {/* Wishlist §18 — depth panels keyed off engine-emitted
+              metadata. Each panel hides itself when its field is
+              absent so non-cloud / non-MOAK / non-secret findings
+              render unchanged. */}
+          <DepthPanels finding={finding} />
 
           {sections.length === 0 && finding.description_md && !isAttackPathFinding(finding) && (
             <Markdown body={finding.description_md} />
@@ -1874,4 +1903,269 @@ function classifyRuleSource(
     };
   }
   return null;
+}
+
+// ============== Wishlist §18 chips ==================================
+//
+// Each chip is a tiny presentational component fed by lib/finding-depth.
+// They render inline in the FindingCard metadata row. Per the wishlist:
+//   - VerifiedLiveChip (§18.1) — the single most powerful credibility cue
+//   - XssContextChip (§18.2) — drives the encoding fix recommendation
+//   - SsrfFamilyChip (§18.2) — distinguishes 6 SSRF families at a glance
+//   - BolaVariantChip (§18.3) — drives the auth-fix path choice
+//   - ImageCategoryChip (§18.4) — Trivy: sca vs misconfig vs secrets
+
+function VerifiedLiveChip() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-200 ring-1 ring-emerald-400/30"
+      title="Engine PR #278 — MOAK LiveProbe verified this finding against the production target (not just the sandbox). Strongest credibility cue available."
+    >
+      <CheckCircle2 className="h-2.5 w-2.5" strokeWidth={2.75} />
+      Live-probed
+    </span>
+  );
+}
+
+function XssContextChip({ context }: { context: string }) {
+  const LABELS: Record<string, { label: string; tip: string }> = {
+    html_body:  { label: 'HTML body',   tip: 'XSS landed in raw HTML body — encode with HTML-entity escapes.' },
+    attribute:  { label: 'HTML attr',   tip: 'XSS landed in an HTML attribute — quote attributes + escape quotes.' },
+    js:         { label: 'JS context',  tip: 'XSS landed in a <script> block — use JS-encoded escapes or strict CSP.' },
+    url:        { label: 'URL context', tip: 'XSS landed in a URL attribute — use a URL-allowlist or schemeless rejection.' },
+    template:   { label: 'Template',    tip: 'XSS landed via a template engine — switch the variable to the auto-escaped variant.' },
+  };
+  const ctx = LABELS[context.toLowerCase()] ?? { label: context, tip: '' };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-rose-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-rose-200 ring-1 ring-rose-400/30"
+      title={ctx.tip || `XSS context: ${context}`}
+    >
+      XSS · {ctx.label}
+    </span>
+  );
+}
+
+function SsrfFamilyChip({ family }: { family: string }) {
+  const LABELS: Record<string, string> = {
+    aws_imds:      'AWS IMDS',
+    gcp_metadata:  'GCP metadata',
+    azure_imds:    'Azure IMDS',
+    internal_dns:  'Internal DNS',
+    filter_bypass: 'Filter bypass',
+    redirect_chain: 'Redirect chain',
+  };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-orange-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-orange-200 ring-1 ring-orange-400/30"
+      title={`SSRF family: ${family} — engine PR #281 ships 29 probes across 6 families.`}
+    >
+      SSRF · {LABELS[family.toLowerCase()] ?? family}
+    </span>
+  );
+}
+
+function BolaVariantChip({ variant }: { variant: string }) {
+  const LABELS: Record<string, { label: string; tip: string }> = {
+    exact_hash:    { label: 'Exact-hash',    tip: 'Same record returned for substituted ID — fix with resource-level auth.' },
+    partial_leak:  { label: 'Partial-leak',  tip: 'Some fields leak across users — fix with field-level filtering.' },
+    list_endpoint: { label: 'List-endpoint', tip: 'List endpoint exposes records that should not be visible — fix at the DB-query layer.' },
+  };
+  const v = LABELS[variant.toLowerCase()] ?? { label: variant, tip: '' };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30"
+      title={v.tip || `BOLA variant: ${variant}`}
+    >
+      BOLA · {v.label}
+    </span>
+  );
+}
+
+function ImageCategoryChip({ category }: { category: 'sca' | 'misconfig' | 'secrets' }) {
+  const LABELS = {
+    sca:        { label: 'SCA',         tip: 'Engine PR #283 — CVE in installed packages (Trivy SCA).', cls: 'bg-sky-500/15 text-sky-200 ring-sky-400/30' },
+    misconfig:  { label: 'Misconfig',   tip: 'Engine PR #283 — Dockerfile / image config issue.',       cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30' },
+    secrets:    { label: 'Secret',      tip: 'Engine PR #283 — secret baked into image layers.',       cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30' },
+  } as const;
+  const info = LABELS[category];
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${info.cls}`}
+      title={info.tip}
+    >
+      Image · {info.label}
+    </span>
+  );
+}
+
+// ============== Wishlist §18 deeper panels ==========================
+//
+// These live inside the expanded body of the finding card. Each section
+// renders only when its source metadata is present, so non-cloud and
+// pre-engine-PR-#280-era findings keep their classic look.
+
+function DepthPanels({ finding }: { finding: Finding }) {
+  const proof = proofArtifactPath(finding);
+  const chain = pivotChainAncestors(finding);
+  const secretTrail = secretIntroductionTrail(finding);
+  const diff = massAssignmentDiff(finding);
+
+  const hasAnything = proof || chain.length > 0 || secretTrail || diff;
+  if (!hasAnything) return null;
+
+  return (
+    <>
+      {/* §18.1 — MOAK proof-of-exploit artifact download */}
+      {proof && (
+        <section className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200">
+              Proof of exploit
+            </h4>
+            <span className="text-[10.5px] text-emerald-200/60">
+              engine-captured PoC artifact
+            </span>
+          </div>
+          <p className="mt-1 text-[11.5px] text-emerald-100/85">
+            MOAK Phase B3 captured this artifact at exploit time (dumped row, cookie, IMDS
+            blob, captured flag). The file is content-addressable under the run directory —
+            include it in the auditor packet as direct proof.
+          </p>
+          <code className="mt-1.5 block break-all rounded bg-emerald-500/10 px-2 py-1 font-mono text-[10.5px] text-emerald-100">
+            {proof}
+          </code>
+        </section>
+      )}
+
+      {/* §18.1 — Pivot chain breadcrumb */}
+      {chain.length > 0 && (
+        <section className="rounded-lg border border-violet-500/20 bg-violet-500/[0.04] p-3">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-violet-200">
+            Pivot chain
+          </h4>
+          <p className="mt-1 text-[11px] text-violet-200/70">
+            This finding came from a multi-step exploit chain. Earlier findings in the
+            chain were what enabled this one.
+          </p>
+          <ol className="mt-2 flex flex-wrap items-center gap-1">
+            {chain.map((ancestorId, i) => (
+              <li key={ancestorId} className="flex items-center gap-1">
+                <a
+                  href={`#finding-${ancestorId}`}
+                  className="rounded bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] text-violet-200 ring-1 ring-violet-400/30 hover:bg-violet-500/25"
+                  title={`Earlier finding ${ancestorId}`}
+                >
+                  Step {i + 1}
+                </a>
+                <ChevronRight
+                  className="h-2.5 w-2.5 text-violet-300/60"
+                  strokeWidth={2.5}
+                />
+              </li>
+            ))}
+            <li>
+              <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-200 ring-1 ring-rose-400/30">
+                This finding
+              </span>
+            </li>
+          </ol>
+        </section>
+      )}
+
+      {/* §18.5 — Secret introduction trail */}
+      {secretTrail && (
+        <section className="rounded-lg border border-rose-500/20 bg-rose-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <Key className="h-3.5 w-3.5 text-rose-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-rose-200">
+              Secret introduction trail
+            </h4>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-rose-200/80">
+            First introduced in commit{' '}
+            {secretTrail.commit_url ? (
+              <a
+                href={secretTrail.commit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-rose-100 underline-offset-2 hover:underline"
+              >
+                {secretTrail.commit_sha.slice(0, 12)}
+              </a>
+            ) : (
+              <code className="font-mono text-rose-100">{secretTrail.commit_sha.slice(0, 12)}</code>
+            )}
+            {secretTrail.author && (
+              <> by <strong className="text-rose-100">{secretTrail.author}</strong></>
+            )}
+            {secretTrail.authored_at && (
+              <> on {new Date(secretTrail.authored_at).toLocaleDateString()}</>
+            )}
+            .
+          </p>
+          {secretTrail.current_state && (
+            <p className="mt-1.5 text-[11px] text-rose-200/70">
+              Current state in HEAD:{' '}
+              {secretTrail.current_state === 'still_present' ? (
+                <span className="font-semibold text-rose-100">
+                  still present — rotate immediately
+                </span>
+              ) : (
+                <span>
+                  removed in history — secret has been reverted, but the rotation conversation
+                  still applies (anything pushed to a public remote is leaked)
+                </span>
+              )}
+              .
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* §18.3 — Mass-assignment schema diff */}
+      {diff && (diff.schema_expected || diff.accepted_field) && (
+        <section className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <FileWarning className="h-3.5 w-3.5 text-amber-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-amber-200">
+              Schema diff
+            </h4>
+            <span className="text-[10.5px] text-amber-200/60">
+              engine PR #282 — schema-aware mass-assignment
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded border border-emerald-500/20 bg-emerald-500/[0.05] p-2">
+              <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wider text-emerald-300/80">
+                OpenAPI says
+              </div>
+              <code className="block whitespace-pre-wrap break-all font-mono text-[10.5px] text-emerald-100">
+                {diff.schema_expected ?? '—'}
+              </code>
+            </div>
+            <div className="rounded border border-rose-500/20 bg-rose-500/[0.05] p-2">
+              <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wider text-rose-300/80">
+                Server accepted
+              </div>
+              <code className="block whitespace-pre-wrap break-all font-mono text-[10.5px] text-rose-100">
+                {diff.accepted_field ?? '—'}
+              </code>
+            </div>
+          </div>
+          {diff.sample_payload && (
+            <details className="text-[11px]">
+              <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-amber-300/70">
+                Sample payload
+              </summary>
+              <pre className="mt-1.5 overflow-x-auto rounded bg-amber-500/[0.04] p-2 font-mono text-[10px] text-amber-100">
+                {diff.sample_payload}
+              </pre>
+            </details>
+          )}
+        </section>
+      )}
+    </>
+  );
 }
