@@ -8,7 +8,7 @@ import type { AiUrgency, Finding, FindingStatus } from '@/lib/supabase/types';
 import { AI_BRAND } from '@/lib/finding-theme';
 import { createClient } from '@/lib/supabase/client';
 import { resolveDriftClassification } from '@/lib/cloud-attack-path';
-import { imageCategory } from '@/lib/finding-depth';
+import { imageCategory, reachabilityInfo } from '@/lib/finding-depth';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
@@ -44,6 +44,14 @@ const SEVERITY_RANK: Record<string, number> = {
   low: 3,
   info: 4,
 };
+
+// Reachability rank. reachable outranks unknown outranks unreachable —
+// so a reachable medium beats an unreachable high in the sort.
+function reachabilityRank(tier: 'reachable' | 'unreachable' | 'unknown'): number {
+  if (tier === 'reachable') return 0;
+  if (tier === 'unknown') return 1;
+  return 2; // unreachable
+}
 
 type ViewMode = 'urgent' | 'open' | 'ai_dismissed' | 'all';
 
@@ -114,6 +122,11 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   const [imageCatFilter, setImageCatFilter] = useState<
     '__all__' | 'sca' | 'misconfig' | 'secrets'
   >('__all__');
+  // Reachability filter — when the engine emits taint analysis,
+  // operators want "show me only the reachable CVEs" as a one-click move.
+  const [reachFilter, setReachFilter] = useState<
+    '__all__' | 'reachable' | 'unreachable' | 'unknown'
+  >('__all__');
   // Phase B #1 — bulk selection state.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkInFlight, setBulkInFlight] = useState(false);
@@ -140,6 +153,16 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   const sorted = useMemo(() => {
     const arr = [...targetFiltered];
     arr.sort((a, b) => {
+      // Reachability rank: engine-proven reachable findings outrank
+      // unknown which outrank unreachable. Slots in front of urgency
+      // so a "high severity but proven unreachable" CVE doesn't beat
+      // a "medium severity but reachable" one for the operator's
+      // attention. Findings with no reachability metadata are
+      // treated as 'unknown' so engine-pre-reachability findings
+      // don't drop in priority.
+      const ra = reachabilityRank(reachabilityInfo(a)?.tier ?? 'unknown');
+      const rb = reachabilityRank(reachabilityInfo(b)?.tier ?? 'unknown');
+      if (ra !== rb) return ra - rb;
       const ua = URGENCY_RANK[a.ai_assessment?.urgency ?? 'monitor'];
       const ub = URGENCY_RANK[b.ai_assessment?.urgency ?? 'monitor'];
       if (ua !== ub) return ua - ub;
@@ -182,9 +205,22 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
       if (imageCatFilter !== '__all__') {
         if (imageCategory(f) !== imageCatFilter) return false;
       }
+      // Reachability filter. Findings with no reachability metadata
+      // are treated as 'unknown' when the user filters to 'unknown',
+      // so they don't disappear when the engine simply didn't emit
+      // the field. Filtering to 'reachable' / 'unreachable' is
+      // strict — only findings with the explicit tier match.
+      if (reachFilter !== '__all__') {
+        const r = reachabilityInfo(f);
+        if (reachFilter === 'unknown') {
+          if (r !== null && r.tier !== 'unknown') return false;
+        } else {
+          if (!r || r.tier !== reachFilter) return false;
+        }
+      }
       return true;
     });
-  }, [sorted, view, severityFilter, verificationFilter, driftFilter, imageCatFilter]);
+  }, [sorted, view, severityFilter, verificationFilter, driftFilter, imageCatFilter, reachFilter]);
 
   // Only render the drift filter row when at least one finding in
   // this dataset carries a drift classification. Keeps the toolbar
@@ -197,6 +233,14 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   // Wishlist §18.4 — same conditional render for image-category filter.
   const hasImageFindings = useMemo(
     () => findings.some((f) => imageCategory(f) !== null),
+    [findings],
+  );
+
+  // Reachability filter — only appears when at least one finding
+  // carries engine-emitted taint analysis. Keeps the toolbar clean
+  // for orgs that don't yet have engine reachability turned on.
+  const hasReachabilityFindings = useMemo(
+    () => findings.some((f) => reachabilityInfo(f) !== null),
     [findings],
   );
 
@@ -219,6 +263,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     setTargetFilter(ALL_TARGETS);
     setDriftFilter('__all__');
     setImageCatFilter('__all__');
+    setReachFilter('__all__');
   }
 
   // Phase B #1 — bulk-select helpers.
@@ -438,6 +483,44 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
                 className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
                   active
                     ? 'bg-sky-500/20 text-sky-100 ring-sky-400/40'
+                    : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Reachability filter — only appears when at least one finding
+          carries engine-emitted taint analysis. "Reachable only"
+          is the highest-leverage one-click move for an SCA review. */}
+      {hasReachabilityFindings && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-cyan-500/15 bg-cyan-500/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-cyan-200/80">
+            Reach:
+          </span>
+          {[
+            { value: '__all__',     label: 'All',         help: 'Show every finding regardless of reachability.' },
+            { value: 'reachable',   label: 'Reachable',   help: 'Only findings where engine taint analysis proved user input reaches the vuln.' },
+            { value: 'unreachable', label: 'Unreachable', help: 'Only findings the engine ruled unreachable — useful for "deprioritise these" review.' },
+            { value: 'unknown',     label: 'Unknown',     help: 'Findings the engine could not conclude on (includes findings with no reachability metadata).' },
+          ].map((opt) => {
+            const active = reachFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() =>
+                  setReachFilter(
+                    opt.value as '__all__' | 'reachable' | 'unreachable' | 'unknown',
+                  )
+                }
+                title={opt.help}
+                className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
+                  active
+                    ? 'bg-cyan-500/20 text-cyan-100 ring-cyan-400/40'
                     : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
                 }`}
               >

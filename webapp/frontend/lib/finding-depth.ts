@@ -202,6 +202,102 @@ export function secretIntroductionTrail(finding: Finding): SecretIntroductionTra
   };
 }
 
+// ============== SCA reachability ===================================
+//
+// Engine wishlist §17.6 follow-up — reachability scoring across the
+// dependency / call graph. The wrapper reads from
+// finding.features.reachability_* defensively so we render the moment
+// the engine starts emitting these fields, no schema change needed.
+//
+// Three signal layers, ordered most-specific to least:
+//
+//   reachability_tier      'reachable' / 'unreachable' / 'unknown'
+//                          The label the engine assigns after taint /
+//                          call-graph analysis. Drives the chip + sort.
+//
+//   reachability_score     0-100. Optional numeric refinement —
+//                          higher = more confidently reachable.
+//                          Surfaces as a tooltip on the chip.
+//
+//   reachable_paths        Array of {from, to, evidence?}. Optional
+//                          call-graph chain showing how user input
+//                          reaches the vulnerable function. Renders
+//                          as a breadcrumb in the expanded panel.
+
+export type ReachabilityTier = 'reachable' | 'unreachable' | 'unknown';
+
+export interface ReachablePathHop {
+  from: string;
+  to: string;
+  evidence?: string;
+}
+
+export interface ReachabilityInfo {
+  tier: ReachabilityTier;
+  score: number | null;
+  paths: ReachablePathHop[];
+  /** Where the engine's analysis terminated — useful for tooltip
+   *  context ("limited by missing source maps" / "no entrypoint found"). */
+  analysis_note: string | null;
+}
+
+/** Returns null when the engine emitted no reachability signal at all.
+ *  Renders the chip / panel only when this is non-null. */
+export function reachabilityInfo(finding: Finding): ReachabilityInfo | null {
+  const f = features(finding);
+  const rawTier = asString(f.reachability_tier);
+  const rawScore = f.reachability_score;
+  const rawPaths = f.reachable_paths;
+  const note = asString(f.reachability_note);
+
+  const tier: ReachabilityTier | null =
+    rawTier === 'reachable' || rawTier === 'unreachable' || rawTier === 'unknown'
+      ? rawTier
+      : null;
+  const score =
+    typeof rawScore === 'number' && Number.isFinite(rawScore)
+      ? Math.max(0, Math.min(100, rawScore))
+      : null;
+
+  // Defensive: if the engine emitted neither tier nor score nor paths,
+  // there's nothing reachability-related to render.
+  if (!tier && score === null && !Array.isArray(rawPaths)) return null;
+
+  const paths: ReachablePathHop[] = [];
+  if (Array.isArray(rawPaths)) {
+    for (const item of rawPaths) {
+      if (!item || typeof item !== 'object') continue;
+      const o = item as Record<string, unknown>;
+      const from = asString(o.from);
+      const to = asString(o.to);
+      if (!from || !to) continue;
+      paths.push({
+        from,
+        to,
+        evidence: asString(o.evidence) ?? undefined,
+      });
+    }
+  }
+
+  // Inferred tier when the engine only emitted a numeric score:
+  //   >= 70 = reachable
+  //   <= 20 = unreachable
+  //   middle = unknown
+  const inferredTier: ReachabilityTier =
+    tier ?? (score !== null && score >= 70
+      ? 'reachable'
+      : score !== null && score <= 20
+        ? 'unreachable'
+        : 'unknown');
+
+  return {
+    tier: inferredTier,
+    score,
+    paths,
+    analysis_note: note,
+  };
+}
+
 // ============== §18.6 — Compliance enrichment =====================
 
 /** Engine PR #285 — per-control evidence card metadata. */
