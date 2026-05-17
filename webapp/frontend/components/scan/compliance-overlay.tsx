@@ -1,14 +1,35 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronRight,
   Scale,
   AlertCircle,
   ShieldCheck,
+  Clock,
+  User,
+  Layers,
+  ExternalLink,
 } from 'lucide-react';
 import type { Finding, ComplianceControls } from '@/lib/supabase/types';
 import { SEVERITY_THEME } from '@/lib/finding-theme';
+import { createClient } from '@/lib/supabase/client';
+
+// Wishlist §18.6 — per-control evidence metadata shape.
+//
+// Engine PR #285 enriches compliance_evidence.detail with these fields.
+// We read defensively — every key is optional so the panel renders even
+// when only some fields are present.
+interface ControlEvidenceMeta {
+  probe_coverage?: number;
+  probes_run?: string[];
+  evidence_pointers?: string[];
+  remediation_deadline_days?: number;
+  control_owner?: string;
+  observed_at?: string;
+  verdict?: string;
+  evidence_summary?: string;
+}
 
 // Engine PR #103 + wishlist §14.4 row 4 — compliance overlay panel.
 //
@@ -135,6 +156,98 @@ export default function ComplianceOverlay({ findings }: { findings: Finding[] })
   const [activeFramework, setActiveFramework] =
     useState<keyof ComplianceControls | null>(null);
   const [expandedControls, setExpandedControls] = useState<Set<string>>(new Set());
+
+  // Wishlist §18.6 — per-control evidence metadata. Fetched lazily when
+  // the overlay first opens — keeps the page-load cost zero for scans
+  // the user never expands. Indexed by `<framework>::<control_id>`.
+  const [evidenceMeta, setEvidenceMeta] = useState<
+    Map<string, ControlEvidenceMeta>
+  >(new Map());
+  const [evidenceLoaded, setEvidenceLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!open || evidenceLoaded || findings.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      // Collect every (framework, control_id) referenced in the current
+      // finding set so we ask only for the rows we'll render. Avoids
+      // pulling the full compliance_evidence table for an org with
+      // thousands of evidence rows.
+      const wanted = new Set<string>();
+      const fwSet = new Set<string>();
+      const ctlSet = new Set<string>();
+      for (const f of findings) {
+        const cc = f.compliance_controls;
+        if (!cc) continue;
+        for (const fwKey of Object.keys(cc) as Array<keyof ComplianceControls>) {
+          const ids = cc[fwKey];
+          if (!Array.isArray(ids)) continue;
+          for (const ctl of ids) {
+            if (typeof ctl !== 'string') continue;
+            wanted.add(`${fwKey}::${ctl}`);
+            fwSet.add(fwKey);
+            ctlSet.add(ctl);
+          }
+        }
+      }
+      if (wanted.size === 0) {
+        setEvidenceLoaded(true);
+        return;
+      }
+      const { data } = await supabase
+        .from('compliance_evidence')
+        .select('framework, control_id, verdict, detail, evidence_summary, observed_at')
+        .in('framework', [...fwSet])
+        .in('control_id', [...ctlSet])
+        .order('observed_at', { ascending: false })
+        .limit(1000);
+      if (cancelled) return;
+      const map = new Map<string, ControlEvidenceMeta>();
+      for (const r of (data ?? []) as Array<{
+        framework: string;
+        control_id: string;
+        verdict: string | null;
+        detail: Record<string, unknown> | null;
+        evidence_summary: string | null;
+        observed_at: string | null;
+      }>) {
+        const key = `${r.framework}::${r.control_id}`;
+        // Only the most-recent row per key wins — query is ordered
+        // observed_at DESC so the first hit is the freshest.
+        if (map.has(key)) continue;
+        const d = (r.detail ?? {}) as Record<string, unknown>;
+        map.set(key, {
+          verdict: r.verdict ?? undefined,
+          evidence_summary: r.evidence_summary ?? undefined,
+          observed_at: r.observed_at ?? undefined,
+          probe_coverage:
+            typeof d.probe_coverage === 'number' ? d.probe_coverage : undefined,
+          probes_run: Array.isArray(d.probes_run)
+            ? (d.probes_run as unknown[]).filter(
+                (v): v is string => typeof v === 'string',
+              )
+            : undefined,
+          evidence_pointers: Array.isArray(d.evidence_pointers)
+            ? (d.evidence_pointers as unknown[]).filter(
+                (v): v is string => typeof v === 'string',
+              )
+            : undefined,
+          remediation_deadline_days:
+            typeof d.remediation_deadline_days === 'number'
+              ? d.remediation_deadline_days
+              : undefined,
+          control_owner:
+            typeof d.control_owner === 'string' ? d.control_owner : undefined,
+        });
+      }
+      setEvidenceMeta(map);
+      setEvidenceLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, evidenceLoaded, findings]);
 
   const populated = FRAMEWORK_ORDER.filter((fw) => (grouped.get(fw.key)?.length ?? 0) > 0);
 
@@ -265,7 +378,18 @@ export default function ComplianceOverlay({ findings }: { findings: Finding[] })
                     </button>
 
                     {expanded && (
-                      <ul className="space-y-1 border-t border-neutral-800/40 px-3 py-2">
+                      <div className="border-t border-neutral-800/40">
+                        {/* Wishlist §18.6 — per-control evidence card
+                            (engine PR #285). Renders when the engine
+                            stamped any of probe_coverage / evidence_
+                            pointers / remediation_deadline_days /
+                            control_owner on the compliance_evidence
+                            row's detail JSONB. Hidden otherwise so
+                            pre-#285 scans keep their classic look. */}
+                        <PerControlEvidence
+                          meta={evidenceMeta.get(`${String(currentFw)}::${g.control}`)}
+                        />
+                        <ul className="space-y-1 px-3 py-2">
                         {g.findings.map((f) => {
                           const fsev = SEVERITY_THEME[f.severity as keyof typeof SEVERITY_THEME]
                             ?? SEVERITY_THEME.info;
@@ -291,7 +415,8 @@ export default function ComplianceOverlay({ findings }: { findings: Finding[] })
                             </li>
                           );
                         })}
-                      </ul>
+                        </ul>
+                      </div>
                     )}
                   </li>
                 );
@@ -315,5 +440,130 @@ export default function ComplianceOverlay({ findings }: { findings: Finding[] })
         </div>
       )}
     </section>
+  );
+}
+
+// =================== §18.6 PerControlEvidence ====================
+//
+// Per-control auditor-grade evidence card. Reads from compliance_evidence
+// .detail JSONB (engine PR #285 stamps probe_coverage, evidence_pointers,
+// remediation_deadline_days, control_owner there). Renders only when at
+// least one of those fields is present — older engines + IaC-only scans
+// don't get an empty shell.
+
+function PerControlEvidence({ meta }: { meta: ControlEvidenceMeta | undefined }) {
+  if (!meta) return null;
+  const hasAny =
+    meta.probe_coverage !== undefined ||
+    (meta.evidence_pointers && meta.evidence_pointers.length > 0) ||
+    (meta.probes_run && meta.probes_run.length > 0) ||
+    meta.remediation_deadline_days !== undefined ||
+    meta.control_owner !== undefined ||
+    meta.evidence_summary;
+  if (!hasAny) return null;
+
+  return (
+    <div className="space-y-2 border-b border-neutral-800/40 bg-neutral-950/40 px-3 py-2.5 text-[11px]">
+      {meta.evidence_summary && (
+        <p className="leading-relaxed text-neutral-300">{meta.evidence_summary}</p>
+      )}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3">
+        {meta.probe_coverage !== undefined && (
+          <EvidenceMetric
+            Icon={Layers}
+            label="Probe coverage"
+            value={`${Math.round(meta.probe_coverage * 100) / 100}%`}
+            tone={meta.probe_coverage >= 80 ? 'emerald' : meta.probe_coverage >= 50 ? 'amber' : 'rose'}
+          />
+        )}
+        {meta.remediation_deadline_days !== undefined && (
+          <EvidenceMetric
+            Icon={Clock}
+            label="Remediation deadline"
+            value={`${meta.remediation_deadline_days}d`}
+            tone={
+              meta.remediation_deadline_days <= 7
+                ? 'rose'
+                : meta.remediation_deadline_days <= 30
+                  ? 'amber'
+                  : 'neutral'
+            }
+          />
+        )}
+        {meta.control_owner && (
+          <EvidenceMetric
+            Icon={User}
+            label="Owner"
+            value={meta.control_owner}
+            tone="neutral"
+          />
+        )}
+      </div>
+      {meta.probes_run && meta.probes_run.length > 0 && (
+        <div className="text-[10.5px] text-neutral-400">
+          <span className="font-semibold uppercase tracking-wider text-neutral-500">
+            Probes run:
+          </span>{' '}
+          <span className="font-mono">{meta.probes_run.join(', ')}</span>
+        </div>
+      )}
+      {meta.evidence_pointers && meta.evidence_pointers.length > 0 && (
+        <div className="space-y-0.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+            Evidence
+          </div>
+          <ul className="space-y-0.5">
+            {meta.evidence_pointers.slice(0, 8).map((p) => (
+              <li key={p}>
+                {/^https?:\/\//.test(p) ? (
+                  <a
+                    href={p}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-baseline gap-1 break-all text-[10.5px] text-cyan-300 underline-offset-2 hover:text-cyan-100 hover:underline"
+                  >
+                    {p}
+                    <ExternalLink className="h-2.5 w-2.5 opacity-70" strokeWidth={2.5} />
+                  </a>
+                ) : (
+                  <code className="break-all font-mono text-[10.5px] text-neutral-400">{p}</code>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {meta.observed_at && (
+        <div className="text-[10px] text-neutral-600">
+          Observed {new Date(meta.observed_at).toLocaleString()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceMetric({
+  Icon,
+  label,
+  value,
+  tone,
+}: {
+  Icon: typeof Clock;
+  label: string;
+  value: string;
+  tone: 'emerald' | 'amber' | 'rose' | 'neutral';
+}) {
+  const cls = {
+    emerald: 'text-emerald-300',
+    amber: 'text-amber-300',
+    rose: 'text-rose-300',
+    neutral: 'text-neutral-300',
+  }[tone];
+  return (
+    <div className="flex items-center gap-1.5">
+      <Icon className={`h-3 w-3 flex-shrink-0 ${cls}`} strokeWidth={2.5} />
+      <span className="text-neutral-500">{label}:</span>
+      <span className={`font-medium ${cls}`}>{value}</span>
+    </div>
   );
 }

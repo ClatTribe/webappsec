@@ -75,17 +75,43 @@ export default async function ReadinessPage() {
   }));
 
   // Full quarterly history for the sparkline. One round-trip vs N+1.
-  const { data: history } = await supabase
-    .from('compliance_snapshots')
-    .select('id, org_id, framework, quarter, score, breakdown, snapshot_at')
-    .order('quarter', { ascending: true })
-    .limit(200);
+  // Plus questionnaire-template control catalog for the coverage-gap
+  // surface (wishlist §18.6).
+  const [{ data: history }, { data: qtRows }, { data: ceRows }] = await Promise.all([
+    supabase
+      .from('compliance_snapshots')
+      .select('id, org_id, framework, quarter, score, breakdown, snapshot_at')
+      .order('quarter', { ascending: true })
+      .limit(200),
+    supabase
+      .from('compliance_questionnaire_templates')
+      .select('framework, control_ids'),
+    supabase
+      .from('compliance_evidence')
+      .select('framework, control_id, verdict'),
+  ]);
 
   const historyByFramework = new Map<string, ComplianceSnapshot[]>();
   for (const h of (history ?? []) as ComplianceSnapshot[]) {
     if (!historyByFramework.has(h.framework)) historyByFramework.set(h.framework, []);
     historyByFramework.get(h.framework)!.push(h);
   }
+
+  // Wishlist §18.6 — untested-controls coverage gap.
+  //
+  // Catalog: every distinct control_id mapped on a questionnaire template
+  // for each framework. (We deliberately use the seeded SAQ rows as the
+  // denominator rather than hardcoding catalog totals — keeps the
+  // denominators editable from migrations + accurate per-framework.)
+  //
+  // Attested: distinct control_ids with verdict ∈ {pass, warn} in
+  // compliance_evidence.
+  //
+  // Gap = catalog − attested.
+  const coverageGaps = computeCoverageGaps(
+    (qtRows ?? []) as Array<{ framework: string; control_ids: string[] | null }>,
+    (ceRows ?? []) as Array<{ framework: string; control_id: string; verdict: string }>,
+  );
 
   return (
     <div className="space-y-8">
@@ -140,7 +166,126 @@ export default async function ReadinessPage() {
           ))}
         </ul>
       )}
+
+      {coverageGaps.length > 0 && <CoverageGapsPanel gaps={coverageGaps} />}
     </div>
+  );
+}
+
+// =============== Wishlist §18.6 — coverage gaps ===================
+//
+// Per-framework "controls in the catalog that NO attestation maps to."
+// Read by /compliance/readiness; auditor-trust pillar — honest about
+// what we don't cover beats a 100% green dashboard.
+
+interface CoverageGapRow {
+  framework: string;
+  attested: number;
+  gap_count: number;
+  total: number;
+  gap_controls: string[];
+}
+
+function computeCoverageGaps(
+  qtRows: Array<{ framework: string; control_ids: string[] | null }>,
+  ceRows: Array<{ framework: string; control_id: string; verdict: string }>,
+): CoverageGapRow[] {
+  // Catalog = every distinct control_id appearing on any questionnaire
+  // template for this framework.
+  const catalogByFw = new Map<string, Set<string>>();
+  for (const t of qtRows) {
+    if (!Array.isArray(t.control_ids)) continue;
+    let bucket = catalogByFw.get(t.framework);
+    if (!bucket) {
+      bucket = new Set();
+      catalogByFw.set(t.framework, bucket);
+    }
+    for (const c of t.control_ids) {
+      if (typeof c === 'string' && c.trim()) bucket.add(c.trim());
+    }
+  }
+
+  // Attested = control_ids with pass/warn verdict in compliance_evidence.
+  const attestedByFw = new Map<string, Set<string>>();
+  for (const e of ceRows) {
+    if (!['pass', 'warn'].includes(e.verdict)) continue;
+    let bucket = attestedByFw.get(e.framework);
+    if (!bucket) {
+      bucket = new Set();
+      attestedByFw.set(e.framework, bucket);
+    }
+    bucket.add(e.control_id);
+  }
+
+  const rows: CoverageGapRow[] = [];
+  for (const [framework, catalog] of catalogByFw) {
+    const attested = attestedByFw.get(framework) ?? new Set<string>();
+    const gap = [...catalog].filter((c) => !attested.has(c)).sort();
+    if (catalog.size === 0) continue;
+    rows.push({
+      framework,
+      attested: attested.size,
+      gap_count: gap.length,
+      total: catalog.size,
+      gap_controls: gap,
+    });
+  }
+  // Most-gappy framework first — that's the one the operator should
+  // focus on / acknowledge to the auditor.
+  return rows.sort((a, b) => b.gap_count - a.gap_count);
+}
+
+function CoverageGapsPanel({ gaps }: { gaps: CoverageGapRow[] }) {
+  return (
+    <section className="space-y-3 rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-5">
+      <div className="flex items-center gap-2.5">
+        <AlertCircle className="h-4 w-4 text-amber-300" strokeWidth={2.25} />
+        <h2 className="text-sm font-medium uppercase tracking-wider text-amber-200">
+          Coverage gaps
+        </h2>
+        <span className="text-[10.5px] text-amber-200/70">
+          controls in the framework catalog that no scan attests yet
+        </span>
+      </div>
+      <p className="text-[11.5px] leading-relaxed text-amber-100/80">
+        Honest signal for the auditor: these controls live in the framework
+        catalog but no current scan produces an attestation for them. Either
+        a separate process attests these (policy / training / physical access),
+        or the org should acknowledge the gap. Auditors trust dashboards that
+        are honest about scope.
+      </p>
+      <ul className="space-y-2">
+        {gaps.map((g) => (
+          <li key={g.framework}>
+            <details className="rounded-lg border border-amber-500/15 bg-neutral-950/30 px-3 py-2">
+              <summary className="cursor-pointer text-[12px]">
+                <span className="font-medium text-amber-100">
+                  {FRAMEWORK_LABEL[g.framework] ?? g.framework}
+                </span>
+                <span className="ml-2 text-[10.5px] text-amber-200/70">
+                  {g.attested} attested · <strong>{g.gap_count} gap</strong> · {g.total} catalog
+                </span>
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {g.gap_controls.slice(0, 50).map((c) => (
+                  <code
+                    key={c}
+                    className="rounded bg-neutral-800/80 px-1.5 py-0.5 font-mono text-[10px] text-neutral-300"
+                  >
+                    {c}
+                  </code>
+                ))}
+                {g.gap_controls.length > 50 && (
+                  <span className="text-[10px] text-neutral-500">
+                    + {g.gap_controls.length - 50} more
+                  </span>
+                )}
+              </div>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
