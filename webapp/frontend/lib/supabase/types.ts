@@ -543,6 +543,40 @@ export interface ScanRecurrenceSummary {
 }
 
 /**
+ * Tier II #13 — org-declared compensating control for a failing
+ * framework control. Surfaces on the trust page next to the failing
+ * control with an amber "compensated" badge.
+ */
+export interface CompensatingControl {
+  id: string;
+  framework: string;
+  control_id: string;
+  title: string;
+  rationale: string;
+  evidence_links: string[];
+  effective_from: string;
+  expires_at: string | null;
+  created_by: string;
+  created_at: string;
+  /** True when expires_at is within 30 days — UI surfaces a "review
+   *  due soon" chip on the row. Only returned by the
+   *  compensating_controls_active() RPC. */
+  review_due_soon?: boolean;
+}
+
+/**
+ * Tier II #13 — one row of the static cross-framework equivalence
+ * table. Returned by `equivalent_controls(framework, control_id)`.
+ */
+export interface ControlMappingRow {
+  group_key: string;
+  group_name: string;
+  framework: string;
+  control_id: string;
+  control_label: string | null;
+}
+
+/**
  * Tier II #12 — Audit-readiness score for one framework.
  *
  * Returned by `compute_org_audit_readiness()`. The `prev_*` columns

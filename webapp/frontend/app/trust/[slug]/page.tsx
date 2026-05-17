@@ -111,9 +111,23 @@ interface TrustReadinessRow {
   prev_score: number | null;
 }
 
+// Tier II #13 — public-facing compensating control projection.
+interface TrustCompensatingControl {
+  framework: string;
+  control_id: string;
+  title: string;
+  rationale_excerpt: string;
+  effective_from: string;
+  expires_at: string | null;
+}
+
 async function fetchTrustPage(
   slug: string,
-): Promise<{ payload: TrustPagePayload | null; readiness: TrustReadinessRow[] }> {
+): Promise<{
+  payload: TrustPagePayload | null;
+  readiness: TrustReadinessRow[];
+  compensating: TrustCompensatingControl[];
+}> {
   // Anon-key client. Both RPCs are granted to anon; the publication
   // gates inside each function are the security boundary.
   const supabase = createClient(
@@ -122,15 +136,19 @@ async function fetchTrustPage(
     { auth: { persistSession: false } },
   );
 
-  const [{ data: payloadData, error: payloadErr }, { data: readinessRaw }] =
-    await Promise.all([
-      supabase.rpc('get_trust_page_payload', { p_slug: slug }),
-      supabase.rpc('get_audit_readiness_for_trust', { p_slug: slug }),
-    ]);
+  const [
+    { data: payloadData, error: payloadErr },
+    { data: readinessRaw },
+    { data: compensatingRaw },
+  ] = await Promise.all([
+    supabase.rpc('get_trust_page_payload', { p_slug: slug }),
+    supabase.rpc('get_audit_readiness_for_trust', { p_slug: slug }),
+    supabase.rpc('compensating_controls_for_trust', { p_slug: slug }),
+  ]);
 
   if (payloadErr) {
     console.error('[trust page] rpc error', payloadErr);
-    return { payload: null, readiness: [] };
+    return { payload: null, readiness: [], compensating: [] };
   }
 
   // RPC returns out_-prefixed columns to dodge plpgsql shadowing;
@@ -146,9 +164,21 @@ async function fetchTrustPage(
     }),
   );
 
+  const compensating: TrustCompensatingControl[] = (
+    (compensatingRaw ?? []) as Array<Record<string, unknown>>
+  ).map((r) => ({
+    framework: r.framework as string,
+    control_id: r.control_id as string,
+    title: r.title as string,
+    rationale_excerpt: r.rationale_excerpt as string,
+    effective_from: r.effective_from as string,
+    expires_at: r.expires_at as string | null,
+  }));
+
   return {
     payload: (payloadData as unknown as TrustPagePayload | null) ?? null,
     readiness,
+    compensating,
   };
 }
 
@@ -164,13 +194,21 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default async function TrustPage({ params }: { params: { slug: string } }) {
-  const { payload: data, readiness } = await fetchTrustPage(params.slug);
+  const { payload: data, readiness, compensating } = await fetchTrustPage(params.slug);
   if (!data) notFound();
 
   // Index readiness by framework key for fast lookup inside the
   // existing per-framework card loop below.
   const readinessByFramework = new Map<string, TrustReadinessRow>();
   for (const r of readiness) readinessByFramework.set(r.framework, r);
+
+  // Tier II #13 — index compensating controls by framework so the
+  // per-framework card can show "+ 2 compensated" inline.
+  const compensatingByFramework = new Map<string, TrustCompensatingControl[]>();
+  for (const c of compensating) {
+    if (!compensatingByFramework.has(c.framework)) compensatingByFramework.set(c.framework, []);
+    compensatingByFramework.get(c.framework)!.push(c);
+  }
 
   const monitoringStart = new Date(data.org.monitoring_since);
   const monthsMonitored = Math.max(
@@ -230,6 +268,7 @@ export default async function TrustPage({ params }: { params: { slug: string } }
                   audit?.composite_pct !== undefined && audit?.prev_score !== null
                     ? (audit.composite_pct as number) - (audit.prev_score as number)
                     : null;
+                const comp = compensatingByFramework.get(fw.framework) ?? [];
                 return (
                   <div
                     key={fw.framework}
@@ -292,6 +331,47 @@ export default async function TrustPage({ params }: { params: { slug: string } }
                         <div className="mt-0.5 text-[9px] uppercase tracking-wider text-neutral-500">Untested</div>
                       </div>
                     </div>
+                    {/* Tier II #13 — Compensating controls roll-up.
+                        Auditor-visible attestations the org has accepted
+                        responsibility for. Renders only when the
+                        framework has at least one active compensating
+                        row. Truncated rationale_excerpt comes from the
+                        server-side RPC (280-char public projection). */}
+                    {comp.length > 0 && (
+                      <details className="border-t border-current/10 px-4 py-2 text-[11px]">
+                        <summary className="cursor-pointer text-amber-300/90">
+                          <span className="font-semibold">+{comp.length}</span>{' '}
+                          compensating control{comp.length === 1 ? '' : 's'} accepted
+                        </summary>
+                        <ul className="mt-2 space-y-2">
+                          {comp.map((c) => (
+                            <li
+                              key={`${c.framework}:${c.control_id}:${c.effective_from}`}
+                              className="rounded-md bg-neutral-950/40 px-2.5 py-1.5"
+                            >
+                              <div className="flex flex-wrap items-baseline gap-1.5">
+                                <span className="font-mono text-[10.5px] text-amber-200">
+                                  {c.control_id}
+                                </span>
+                                <span className="text-neutral-200">{c.title}</span>
+                              </div>
+                              <div className="mt-0.5 leading-relaxed text-neutral-400">
+                                {c.rationale_excerpt}
+                              </div>
+                              <div className="mt-0.5 text-[10px] text-neutral-500">
+                                accepted {new Date(c.effective_from).toLocaleDateString()}
+                                {c.expires_at && (
+                                  <span>
+                                    {' '}
+                                    · reviewed by {new Date(c.expires_at).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                     <FreshnessFooter
                       latestObservedAt={fw.latest_observed_at}
                       staleControls={fw.stale_controls}
