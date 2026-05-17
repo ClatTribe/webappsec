@@ -35,13 +35,21 @@ const FRAMEWORK_ORDER: Array<{
   label: string;
   short: string;
 }> = [
-  { key: 'pci_dss',      label: 'PCI DSS',      short: 'PCI' },
-  { key: 'soc2',         label: 'SOC 2',        short: 'SOC2' },
-  { key: 'hipaa',        label: 'HIPAA',        short: 'HIPAA' },
-  { key: 'iso_27001',    label: 'ISO 27001',    short: 'ISO' },
-  { key: 'nist_800_53',  label: 'NIST 800-53',  short: 'NIST' },
-  { key: 'gdpr',         label: 'GDPR',         short: 'GDPR' },
-  { key: 'owasp',        label: 'OWASP',        short: 'OWASP' },
+  { key: 'pci_dss',        label: 'PCI DSS',                       short: 'PCI' },
+  { key: 'soc2',           label: 'SOC 2',                         short: 'SOC2' },
+  { key: 'hipaa',          label: 'HIPAA',                         short: 'HIPAA' },
+  { key: 'iso_27001',      label: 'ISO 27001',                     short: 'ISO' },
+  { key: 'nist_800_53',    label: 'NIST 800-53',                   short: 'NIST' },
+  { key: 'gdpr',           label: 'GDPR',                          short: 'GDPR' },
+  { key: 'owasp',          label: 'OWASP',                         short: 'OWASP' },
+  // Engine PR #289 — CIS Cloud benchmarks (CSPM + IaC scans). Listed
+  // last so existing app-side scans render unchanged; the CSPM tabs
+  // appear only when the underlying findings carry their keys.
+  { key: 'cis_aws',        label: 'CIS AWS Foundations',           short: 'CIS AWS' },
+  { key: 'cis_gcp',        label: 'CIS GCP',                       short: 'CIS GCP' },
+  { key: 'cis_azure',      label: 'CIS Azure',                     short: 'CIS Azure' },
+  { key: 'cis_kubernetes', label: 'CIS Kubernetes',                short: 'CIS K8s' },
+  { key: 'cis_docker',     label: 'CIS Docker',                    short: 'CIS Docker' },
 ];
 
 interface ControlGroup {

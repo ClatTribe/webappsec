@@ -14,6 +14,7 @@ import {
   Calendar,
   Plug,
   Container,
+  Cloud,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ScanFrequency } from '@/lib/supabase/types';
@@ -63,6 +64,14 @@ const TYPES: {
       'OCI image reference (registry path + tag, or sha256 digest). Runs Trivy for OS + language-package CVEs, emits an SBOM, and feeds MOAK so new CVEs against your image packages auto-fire exploit synthesis. DAST tools are skipped — a registry artefact has no live surface.',
   },
   {
+    value: 'cloud_account',
+    label: 'Cloud account',
+    example: 'aws/123456789012',
+    Icon: Cloud,
+    blurb:
+      'AWS account (more clouds coming). CSPM posture scan against the live account — 14 boto3 checks across S3 / EC2 / IAM / RDS / EBS / CloudTrail / VPC mapped to CIS AWS Foundations Benchmark v3.0. Requires an AWS integration first (Integrations → New → AWS). Pair with a repository target containing Terraform to get IaC↔drift correlation.',
+  },
+  {
     value: 'domain',
     label: 'Domain',
     example: 'myapp.com',
@@ -88,6 +97,10 @@ const TYPES: {
 function inferType(value: string): TargetType {
   if (/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//.test(value) || /^git@/.test(value))
     return 'repository';
+  // CSPM (engine PRs #290 / #291) — `<provider>/<account_id>` shape.
+  // Surfaces before the URL checks so `aws/123…` doesn't drop to domain.
+  // Provider list mirrors CloudAccountConfig in target-config.ts.
+  if (/^(aws|gcp|azure|kubernetes)\/[A-Za-z0-9_\-]+$/.test(value)) return 'cloud_account';
   if (/^https?:\/\//.test(value)) {
     // Best-effort `api` heuristic: api.* hostname, or a path that looks
     // like spec discovery (/openapi.json, /swagger.json, /v3/api-docs)
@@ -123,6 +136,11 @@ const EMPTY_FIELDS: AllFields = {
   // Engine PR #274 — container_image config fields.
   imageSeverityFloor: '',
   imagePrivateRegistry: false,
+  // Engine PRs #290 / #291 — cloud_account config fields.
+  cloudProvider: '',
+  cloudRoleArn: '',
+  cloudExternalId: '',
+  cloudRegion: '',
   subdomainExcludes: [],
   portSpec: '',
   protocols: '',
@@ -551,6 +569,19 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
       const out: Record<string, unknown> = {};
       if (raw.imageSeverityFloor) out.severity_floor = raw.imageSeverityFloor;
       if (raw.imagePrivateRegistry) out.private_registry = true;
+      return out;
+    }
+    case 'cloud_account': {
+      // Engine PRs #290 / #291 — CSPM target. provider is required so
+      // the engine knows which specialist to dispatch (boto3 path for
+      // AWS, Prowler for the rest). role_arn / external_id are
+      // forwarded into the worker's STS AssumeRole path in
+      // credentials.py when set.
+      const out: Record<string, unknown> = {};
+      if (raw.cloudProvider) out.provider = raw.cloudProvider;
+      if (raw.cloudRoleArn.trim()) out.role_arn = raw.cloudRoleArn.trim();
+      if (raw.cloudExternalId.trim()) out.external_id = raw.cloudExternalId.trim();
+      if (raw.cloudRegion.trim()) out.region = raw.cloudRegion.trim();
       return out;
     }
     case 'domain': {

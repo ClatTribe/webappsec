@@ -97,6 +97,51 @@ export const LocalCodeConfig = z.object({
   language_hints: z.array(NonEmptyStr).max(20).optional(),
 });
 
+// Engine PRs #290 / #291 — `cloud_account` target type for CSPM.
+// PR #290 ships an AWS-native boto3 scanner; PR #291 ships a Prowler
+// wrapper that adds GCP + Azure + Kubernetes (and richer AWS coverage).
+//
+// The engine's standard credential chain picks up `AWS_ACCESS_KEY_ID` /
+// `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` env vars set by the worker, OR
+// (for cross-account) a `role_arn` it can assume with the worker's own
+// IAM identity. v1 ships AWS only; GCP/Azure follow once their auth
+// adapters land in the worker.
+//
+// CLI contract (per engine PR #271): `--target cloud_account:<provider>/<id>`
+// e.g. `--target cloud_account:aws/123456789012`. The provider half is
+// REQUIRED so the engine knows which specialist to dispatch.
+export const CloudAccountConfig = z.object({
+  // Which CSPM specialist to invoke. v1 wires only `aws`; the others
+  // round-trip through the worker as no-ops with a clear error so we
+  // can roll them out per-provider without a schema change.
+  provider: z.enum(['aws', 'gcp', 'azure', 'kubernetes']),
+  // CIS-mapped checks to emphasise. When unset, the engine runs the
+  // full default rule pack (~15 checks for the boto3 path, ~500 via
+  // Prowler). Useful for "I just want Identity / Encryption / Logging"
+  // narrowed scans.
+  rule_filters: z.array(NonEmptyStr).max(50).optional(),
+  // Engine PR #290 supports cross-account scanning via STS assume-role.
+  // When set, the engine forwards `role_arn=` to scan_aws_account_tool
+  // and AssumeRole runs from the integration's base credentials. When
+  // omitted, the integration's direct keys are used unchanged.
+  role_arn: z
+    .string()
+    .trim()
+    .max(2048)
+    .regex(/^arn:aws:iam::\d{12}:role\/.+$/, { message: 'must be a valid IAM role ARN' })
+    .optional(),
+  // Used in the STS trust policy as a second factor. Forwarded only
+  // when role_arn is set.
+  external_id: z.string().trim().max(256).optional(),
+  // Optional override of the integration's stored region.
+  region: z
+    .string()
+    .trim()
+    .max(50)
+    .regex(/^[a-z]{2,4}-[a-z]+-\d+$/, { message: 'AWS region like us-east-1' })
+    .optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Discriminated union — typed by `targets.type`
 // ---------------------------------------------------------------------------
@@ -111,6 +156,7 @@ export type TargetType =
   | 'web_application'
   | 'api'
   | 'container_image'
+  | 'cloud_account'
   | 'domain'
   | 'ip_address'
   | 'local_code';
@@ -125,6 +171,8 @@ export function configSchemaFor(type: TargetType) {
       return ApiConfig;
     case 'container_image':
       return ContainerImageConfig;
+    case 'cloud_account':
+      return CloudAccountConfig;
     case 'domain':
       return DomainConfig;
     case 'ip_address':
@@ -142,13 +190,15 @@ export type TargetConfigOf<T extends TargetType> = T extends 'repository'
       ? z.infer<typeof ApiConfig>
       : T extends 'container_image'
         ? z.infer<typeof ContainerImageConfig>
-        : T extends 'domain'
-          ? z.infer<typeof DomainConfig>
-          : T extends 'ip_address'
-            ? z.infer<typeof IpAddressConfig>
-            : T extends 'local_code'
-              ? z.infer<typeof LocalCodeConfig>
-              : never;
+        : T extends 'cloud_account'
+          ? z.infer<typeof CloudAccountConfig>
+          : T extends 'domain'
+            ? z.infer<typeof DomainConfig>
+            : T extends 'ip_address'
+              ? z.infer<typeof IpAddressConfig>
+              : T extends 'local_code'
+                ? z.infer<typeof LocalCodeConfig>
+                : never;
 
 /** Shape-validate `config` for the given target type. Throws ZodError on bad
  *  data; returns the parsed object on success. */

@@ -10,6 +10,7 @@ import {
   Plug,
   Clock,
   Container,
+  Cloud,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
@@ -20,6 +21,7 @@ const TYPE_ICON: Record<TargetType, LucideIcon> = {
   web_application: Globe,
   api: Plug,
   container_image: Container,
+  cloud_account: Cloud,
   domain: Globe,
   ip_address: Network,
   local_code: Folder,

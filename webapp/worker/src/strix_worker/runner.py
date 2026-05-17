@@ -1066,7 +1066,13 @@ def _build_cmd(
     # engine would reject it (the URL parses as `repository`). Letting
     # those types fall through to the bare form keeps the engine's
     # own inference as the safety net.
-    _PREFIXED_TYPES = ("api", "container_image")
+    # `cloud_account` added 2026-05-17 for engine PRs #290/#291. Same
+    # contract as container_image — the value carries `<provider>/<id>`
+    # (e.g. `aws/123456789012`) and the engine routes to the right
+    # CSPM specialist (boto3 path for AWS, Prowler for everything else).
+    # AWS creds are already plumbed via materialize_credentials → env;
+    # boto3's standard chain inside the engine picks them up.
+    _PREFIXED_TYPES = ("api", "container_image", "cloud_account")
     for target in targets:
         t_value = target["value"]
         t_type = target.get("type")
