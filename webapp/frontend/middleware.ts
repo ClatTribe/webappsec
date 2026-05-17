@@ -25,9 +25,19 @@ const PUBLIC_PREFIXES = [
   '/privacy',
   '/terms',
   '/contact',
-  '/changelog',
   '/blog',
   '/.well-known',
+  // Public Living Trust Page (migration 047). Each org opts in via
+  // organizations.trust_page_enabled; the page payload comes from a
+  // SECURITY DEFINER RPC that enforces the opt-in gate. Without this
+  // prefix, /trust/<slug> would be redirected to /login and the page
+  // would never reach an unauthenticated visitor.
+  '/trust',
+  // Auditor share-links (migration 054). /audit/<token> — the token is
+  // the access control; the SECURITY DEFINER lookup function rejects
+  // unknown / revoked / expired tokens. Same allowlist pattern as
+  // /trust above.
+  '/audit',
 ];
 
 export async function middleware(request: NextRequest) {

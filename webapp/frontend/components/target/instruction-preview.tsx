@@ -79,12 +79,22 @@ function augmentLines(type: TargetType, config: Record<string, unknown>): string
       return augmentRepository(config);
     case 'web_application':
       return augmentWebApplication(config);
+    case 'api':
+      return augmentApi(config);
+    case 'container_image':
+      return augmentContainerImage(config);
     case 'domain':
       return augmentDomain(config);
     case 'ip_address':
       return augmentIpAddress(config);
     case 'local_code':
       return augmentLocalCode(config);
+    case 'cloud_account':
+      // Engine PRs #290 / #291 — CSPM target. The wrapper-side
+      // augmenter mirrors the worker's instruction.py: provider +
+      // optional role_arn/region show up as a hint line so the
+      // engine's planning agent picks the right specialist.
+      return augmentCloudAccount(config);
   }
 }
 
@@ -113,6 +123,63 @@ function augmentWebApplication(c: Record<string, unknown>): string[] {
     out.push(
       `Do not exceed ${qps} requests per second total — this is production traffic, treat it accordingly.`,
     );
+  }
+  return out;
+}
+
+function augmentApi(c: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const spec = asNonEmptyStr(c.spec_url);
+  if (spec) {
+    out.push(
+      `Ingest the OpenAPI / Swagger spec at \`${spec}\` before probing — it's the endpoint inventory source.`,
+    );
+  }
+  const qps = c.rate_limit_qps;
+  if (typeof qps === 'number' && Number.isInteger(qps) && qps > 0) {
+    out.push(
+      `Do not exceed ${qps} requests per second total — this is production traffic, treat it accordingly.`,
+    );
+  }
+  return out;
+}
+
+function augmentContainerImage(c: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const floor = asNonEmptyStr(c.severity_floor);
+  if (floor) {
+    out.push(
+      `When invoking scan_container_image, pass severity_floor=\`${floor}\` to Trivy so the inbox doesn't drown in LOW noise.`,
+    );
+  }
+  if (c.private_registry === true) {
+    out.push(
+      'This image lives in a private registry — the worker must have credentials configured (per-org auth is on the roadmap; v1 relies on the worker host\'s docker config).',
+    );
+  }
+  return out;
+}
+
+function augmentCloudAccount(c: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const provider = asNonEmptyStr(c.provider);
+  if (provider) {
+    out.push(
+      `CSPM target — invoke scan_cloud_account against provider=\`${provider}\`. ` +
+        `For AWS the engine prefers the boto3 path (scan_aws_account_tool, ~14 CIS-mapped checks); ` +
+        `for everything else it falls back to Prowler (~500 checks).`,
+    );
+  }
+  const roleArn = asNonEmptyStr(c.role_arn);
+  if (roleArn) {
+    out.push(
+      `Cross-account scan — STS AssumeRole using \`${roleArn}\` at scan-start. ` +
+        `Short-lived credentials are wired into AWS_* env vars by the worker.`,
+    );
+  }
+  const region = asNonEmptyStr(c.region);
+  if (region) {
+    out.push(`Region override: \`${region}\` (most CSPM checks scan all regions regardless).`);
   }
   return out;
 }

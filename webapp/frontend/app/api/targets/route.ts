@@ -6,7 +6,15 @@ import { configSchemaFor, type TargetType } from '@/lib/target-config';
 
 const Body = z.object({
   name: z.string().min(1).max(120),
-  type: z.enum(['local_code', 'repository', 'web_application', 'domain', 'ip_address']),
+  type: z.enum([
+    'local_code',
+    'repository',
+    'web_application',
+    'api',
+    'container_image',
+    'domain',
+    'ip_address',
+  ]),
   value: z.string().min(1).max(500),
   description: z.string().max(1000).optional(),
   scan_frequency: z.enum(['manual', 'daily', 'weekly', 'monthly']).default('manual'),
@@ -18,6 +26,11 @@ const Body = z.object({
   // because the shape is discriminated on it (zod can't do field-dependent
   // discrimination natively). Default: empty object.
   config: z.record(z.string(), z.unknown()).default({}),
+  // Phase A / migration 061 — repository targets can be bound to a
+  // GitHub / GitLab / Bitbucket integration so the worker clones with
+  // that integration's OAuth token. Only honoured for repo targets;
+  // silently dropped for other types.
+  integration_id: z.string().uuid().nullable().optional(),
 });
 
 export async function POST(req: Request) {
@@ -66,6 +79,9 @@ export async function POST(req: Request) {
       // also force-clear it here for non-domain types so a malformed UI can't
       // accidentally store auto_discover=true on, say, an IP address.
       auto_discover: parsed.data.type === 'domain' ? parsed.data.auto_discover : false,
+      // Phase A — bind to integration only on repository targets.
+      integration_id:
+        parsed.data.type === 'repository' ? parsed.data.integration_id ?? null : null,
       config: cfgParse.data,
       created_by: user.id,
     })

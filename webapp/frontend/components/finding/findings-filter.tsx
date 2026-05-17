@@ -2,10 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ScanLine, Sparkles, Target as TargetIcon } from 'lucide-react';
+import { ScanLine, Sparkles, Target as TargetIcon, Loader2, X } from 'lucide-react';
 import FindingCard from './finding-card';
-import type { AiUrgency, Finding } from '@/lib/supabase/types';
+import type { AiUrgency, Finding, FindingStatus } from '@/lib/supabase/types';
 import { AI_BRAND } from '@/lib/finding-theme';
+import { createClient } from '@/lib/supabase/client';
+import { resolveDriftClassification } from '@/lib/cloud-attack-path';
+import { imageCategory } from '@/lib/finding-depth';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
@@ -67,9 +70,54 @@ const VIEW_MODES: { value: ViewMode; label: string; help: string }[] = [
   },
 ];
 
+// Phase B #1 — multi-axis filter chips. Each axis is independent; a
+// finding shows only when it passes ALL active filters (AND
+// semantics). Empty set on an axis = no filter (everything passes).
+const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'] as const;
+const VERIFICATION_OPTIONS = ['exploited', 'verified', 'pattern_match'] as const;
+
+const SEVERITY_CHIP_TONE: Record<string, string> = {
+  critical: 'bg-red-500/15 text-red-200 ring-red-500/30',
+  high: 'bg-orange-500/15 text-orange-200 ring-orange-500/30',
+  medium: 'bg-amber-500/15 text-amber-200 ring-amber-500/30',
+  low: 'bg-lime-500/15 text-lime-200 ring-lime-500/30',
+  info: 'bg-neutral-700/40 text-neutral-200 ring-neutral-600/40',
+};
+
+// Wishlist §17.4 — drift classification filter row. Only renders when
+// the page has at least one drift-classified finding (engine PR #292).
+// `__all__` is the no-filter sentinel mirroring ALL_TARGETS.
+type DriftFilterValue =
+  | '__all__'
+  | 'iac_root_cause'
+  | 'drift'
+  | 'iac_unfollowed'
+  | 'uncorrelated_cspm';
+
+const DRIFT_FILTER_OPTIONS: { value: DriftFilterValue; label: string; help: string }[] = [
+  { value: '__all__',          label: 'All',            help: 'Show every finding regardless of drift state.' },
+  { value: 'drift',            label: 'Drift only',     help: 'CSPM-only: resource drifted out of IaC. Fix by realigning IaC.' },
+  { value: 'iac_root_cause',   label: 'IaC root cause', help: 'Both IaC and live agree — fix the IaC and re-apply.' },
+  { value: 'iac_unfollowed',   label: 'IaC unfollowed', help: 'IaC declares the misconfig but live is clean — IaC un-applied.' },
+  { value: 'uncorrelated_cspm', label: 'CSPM-only',     help: 'Live-only attestation; no IaC analog.' },
+];
+
 export default function FindingsFilter({ findings }: { findings: FindingWithScan[] }) {
   const [view, setView] = useState<ViewMode>('open');
   const [targetFilter, setTargetFilter] = useState<string>(ALL_TARGETS);
+  // Phase B #1 — multi-axis filter state.
+  const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set());
+  const [verificationFilter, setVerificationFilter] = useState<Set<string>>(new Set());
+  // Wishlist §17.4 — drift classification filter.
+  const [driftFilter, setDriftFilter] = useState<DriftFilterValue>('__all__');
+  // Wishlist §18.4 — container image category filter (engine PR #283).
+  const [imageCatFilter, setImageCatFilter] = useState<
+    '__all__' | 'sca' | 'misconfig' | 'secrets'
+  >('__all__');
+  // Phase B #1 — bulk selection state.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkInFlight, setBulkInFlight] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   // Distinct targets present in this list, name-sorted, for the filter dropdown.
   const targetOptions = useMemo(() => {
@@ -105,26 +153,129 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   const visible = useMemo(() => {
     return sorted.filter((f) => {
       const isResolved = RESOLVED_STATUSES.has(f.status);
-      if (view === 'all') return true;
-      if (view === 'ai_dismissed') return f.status === 'dismissed_by_ai';
-      if (view === 'open') return !isResolved;
-      // 'urgent': AI says fix_now or fix_soon AND not resolved.
-      const u = f.ai_assessment?.urgency;
-      if (u && (u === 'fix_now' || u === 'fix_soon')) return !isResolved;
-      // No AI assessment yet → fall back to severity, surface critical/high.
-      if (!f.ai_assessment && (f.severity === 'critical' || f.severity === 'high'))
-        return !isResolved;
-      return false;
+      // View-mode gate.
+      if (view === 'ai_dismissed') {
+        if (f.status !== 'dismissed_by_ai') return false;
+      } else if (view === 'open') {
+        if (isResolved) return false;
+      } else if (view === 'urgent') {
+        const u = f.ai_assessment?.urgency;
+        const isUrgent =
+          (u && (u === 'fix_now' || u === 'fix_soon')) ||
+          (!f.ai_assessment && (f.severity === 'critical' || f.severity === 'high'));
+        if (!isUrgent || isResolved) return false;
+      }
+      // Phase B #1 — multi-axis chip filters (AND).
+      if (severityFilter.size > 0 && !severityFilter.has(f.severity)) return false;
+      if (verificationFilter.size > 0) {
+        const v = f.verification_status ?? '';
+        if (!verificationFilter.has(v)) return false;
+      }
+      // Wishlist §17.4 — drift classification (AND with other filters).
+      // Reads via the same helper FindingCard uses, so the filter row
+      // matches the badges 1:1.
+      if (driftFilter !== '__all__') {
+        const { classification } = resolveDriftClassification(f);
+        if (classification !== driftFilter) return false;
+      }
+      // Wishlist §18.4 — container image three-category filter.
+      if (imageCatFilter !== '__all__') {
+        if (imageCategory(f) !== imageCatFilter) return false;
+      }
+      return true;
     });
-  }, [sorted, view]);
+  }, [sorted, view, severityFilter, verificationFilter, driftFilter, imageCatFilter]);
 
-  // A single, calm count — what's currently visible. No 5-pill strip.
+  // Only render the drift filter row when at least one finding in
+  // this dataset carries a drift classification. Keeps the toolbar
+  // clean for non-cloud scans.
+  const hasDriftFindings = useMemo(
+    () => findings.some((f) => resolveDriftClassification(f).classification !== null),
+    [findings],
+  );
+
+  // Wishlist §18.4 — same conditional render for image-category filter.
+  const hasImageFindings = useMemo(
+    () => findings.some((f) => imageCategory(f) !== null),
+    [findings],
+  );
+
+  // A single, calm count — what's currently visible.
   const totalForView = visible.length;
   const totalAll = findings.length;
+  const activeFilterChips =
+    severityFilter.size + verificationFilter.size + (targetFilter !== ALL_TARGETS ? 1 : 0);
+
+  function toggleInSet(setter: (next: Set<string>) => void, current: Set<string>, value: string) {
+    const next = new Set(current);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setter(next);
+  }
+
+  function clearAllFilters() {
+    setSeverityFilter(new Set());
+    setVerificationFilter(new Set());
+    setTargetFilter(ALL_TARGETS);
+    setDriftFilter('__all__');
+    setImageCatFilter('__all__');
+  }
+
+  // Phase B #1 — bulk-select helpers.
+  function toggleSelect(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  }
+
+  function selectAllVisible() {
+    if (visible.length === selected.size && visible.every((f) => selected.has(f.id))) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(visible.map((f) => f.id)));
+    }
+  }
+
+  async function bulkTriage(newStatus: FindingStatus) {
+    if (bulkInFlight || selected.size === 0) return;
+    setBulkInFlight(true);
+    setBulkError(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const update: Record<string, unknown> = {
+      status: newStatus,
+      triaged_by: newStatus === 'open' ? null : user?.id ?? null,
+      triaged_at: newStatus === 'open' ? null : new Date().toISOString(),
+    };
+    // Clear acceptance metadata when bulk-moving out of wont_fix.
+    if (newStatus !== 'wont_fix') {
+      update.wont_fix_reason = null;
+      update.risk_acceptance_expires_at = null;
+    }
+    const { error } = await supabase
+      .from('findings')
+      .update(update)
+      .in('id', Array.from(selected));
+    setBulkInFlight(false);
+    if (error) {
+      setBulkError(error.message);
+      return;
+    }
+    // Best-effort: reload to pick up server-truth + drop the
+    // selection. A future enhancement could optimistically update the
+    // in-memory list without a full reload.
+    if (typeof window !== 'undefined') window.location.reload();
+  }
+
+  const allVisibleSelected =
+    visible.length > 0 && visible.every((f) => selected.has(f.id));
 
   return (
     <div className="space-y-5">
-      {/* Filter row — one line, no badges. The cards themselves carry signal. */}
+      {/* Filter row — view-mode pills + target dropdown + count */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg bg-neutral-900/60 p-0.5 ring-1 ring-neutral-800/80">
           {VIEW_MODES.map((m) => (
@@ -171,6 +322,132 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
         </span>
       </div>
 
+      {/* Phase B #1 — multi-axis filter chip row. Severity + verification
+          stay on their own line so users can stack filters without the
+          view-mode pills jumping around. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[10.5px]">
+        <span className="font-semibold uppercase tracking-wider text-neutral-500">Severity:</span>
+        {SEVERITY_OPTIONS.map((s) => {
+          const active = severityFilter.has(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => toggleInSet(setSeverityFilter, severityFilter, s)}
+              className={`rounded-md px-2 py-0.5 font-medium uppercase tracking-wider ring-1 transition-colors ${
+                active
+                  ? SEVERITY_CHIP_TONE[s]
+                  : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+              }`}
+            >
+              {s}
+            </button>
+          );
+        })}
+        <span className="ml-3 font-semibold uppercase tracking-wider text-neutral-500">
+          Verification:
+        </span>
+        {VERIFICATION_OPTIONS.map((v) => {
+          const active = verificationFilter.has(v);
+          return (
+            <button
+              key={v}
+              type="button"
+              onClick={() => toggleInSet(setVerificationFilter, verificationFilter, v)}
+              className={`rounded-md px-2 py-0.5 font-medium uppercase tracking-wider ring-1 transition-colors ${
+                active
+                  ? v === 'exploited'
+                    ? 'bg-red-500/20 text-red-100 ring-red-400/40'
+                    : v === 'verified'
+                      ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30'
+                      : 'bg-amber-500/10 text-amber-200 ring-amber-400/30'
+                  : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+              }`}
+            >
+              {v.replace(/_/g, ' ')}
+            </button>
+          );
+        })}
+        {activeFilterChips > 0 && (
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium text-neutral-400 hover:text-neutral-100"
+          >
+            <X className="h-3 w-3" strokeWidth={2.5} />
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Wishlist §17.4 — drift classification filter row. Conditional
+          so this row never appears on the typical web-app-only scan;
+          shows up the moment a CSPM + IaC mixed scan produces drift-
+          classified findings. */}
+      {hasDriftFindings && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-orange-500/15 bg-orange-500/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-orange-200/80">
+            Drift:
+          </span>
+          {DRIFT_FILTER_OPTIONS.map((opt) => {
+            const active = driftFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setDriftFilter(opt.value)}
+                title={opt.help}
+                className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
+                  active
+                    ? 'bg-orange-500/20 text-orange-100 ring-orange-400/40'
+                    : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Wishlist §18.4 — container image three-category filter row
+          (engine PR #283). Same conditional-render discipline as the
+          drift row: only appears when the current dataset contains
+          at least one image finding, so non-container scans render
+          unchanged. */}
+      {hasImageFindings && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-sky-500/15 bg-sky-500/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-sky-200/80">
+            Image:
+          </span>
+          {[
+            { value: '__all__',  label: 'All',       help: 'Show every finding regardless of image category.' },
+            { value: 'sca',      label: 'SCA',       help: 'CVE in installed packages (Trivy SCA path).' },
+            { value: 'misconfig', label: 'Misconfig', help: 'Dockerfile / image config issue.' },
+            { value: 'secrets',  label: 'Secrets',   help: 'Secret baked into image layers.' },
+          ].map((opt) => {
+            const active = imageCatFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() =>
+                  setImageCatFilter(opt.value as '__all__' | 'sca' | 'misconfig' | 'secrets')
+                }
+                title={opt.help}
+                className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
+                  active
+                    ? 'bg-sky-500/20 text-sky-100 ring-sky-400/40'
+                    : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* AI explainer — the only thing on the page that uses the AI gradient. */}
       <div className="flex items-start gap-2 px-1 text-[11px] text-neutral-500">
         <Sparkles className={`mt-0.5 h-3 w-3 flex-shrink-0 ${AI_BRAND.iconColor}`} strokeWidth={2.25} />
@@ -179,6 +456,69 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
           impact. Switch to <em>All</em> to see everything.
         </p>
       </div>
+
+      {/* Phase B #1 — bulk action bar. Hidden when nothing is selected.
+          Sticky-on-scroll keeps it accessible across long inbox views. */}
+      {visible.length > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800/80 bg-neutral-950/80 px-3 py-2 backdrop-blur">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-neutral-400">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={selectAllVisible}
+              className="h-3.5 w-3.5 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+            />
+            {allVisibleSelected ? 'Deselect all' : 'Select all visible'}
+          </label>
+          {selected.size > 0 && (
+            <>
+              <span className="text-[11px] text-neutral-300">
+                <strong className="text-neutral-100">{selected.size}</strong> selected
+              </span>
+              <span className="text-neutral-700">·</span>
+              <button
+                type="button"
+                disabled={bulkInFlight}
+                onClick={() => bulkTriage('fixed')}
+                className="rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-200 ring-1 ring-emerald-400/30 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+              >
+                Mark fixed
+              </button>
+              <button
+                type="button"
+                disabled={bulkInFlight}
+                onClick={() => bulkTriage('false_positive')}
+                className="rounded-md bg-rose-500/15 px-2 py-1 text-[11px] font-medium text-rose-200 ring-1 ring-rose-400/30 transition-colors hover:bg-rose-500/25 disabled:opacity-50"
+              >
+                False positive
+              </button>
+              <button
+                type="button"
+                disabled={bulkInFlight}
+                onClick={() => bulkTriage('open')}
+                className="rounded-md bg-neutral-800 px-2 py-1 text-[11px] font-medium text-neutral-200 ring-1 ring-neutral-700 transition-colors hover:bg-neutral-700 disabled:opacity-50"
+              >
+                Reopen
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="ml-auto text-[11px] text-neutral-400 hover:text-neutral-100"
+              >
+                Clear selection
+              </button>
+              {bulkInFlight && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" strokeWidth={2.5} />
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {bulkError && (
+        <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">
+          Bulk triage failed: {bulkError}
+        </div>
+      )}
 
       <div className="space-y-3">
         {visible.length === 0 ? (
@@ -204,34 +544,47 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
           </div>
         ) : (
           visible.map((f) => (
-            <div key={f.id}>
-              {(f.targets || f.scans?.run_name) && (
-                <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px] text-neutral-500">
-                  {f.targets && f.target_id && (
-                    <span className="inline-flex items-center gap-1">
-                      <TargetIcon className="h-3 w-3 text-cyan-400/70" strokeWidth={2.25} />
-                      <Link
-                        href={`/targets/${f.target_id}`}
-                        className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
-                      >
-                        {f.targets.name}
-                      </Link>
-                    </span>
-                  )}
-                  {f.scans?.run_name && (
-                    <span className="inline-flex items-center gap-1">
-                      <ScanLine className="h-3 w-3" strokeWidth={2} />
-                      <Link
-                        href={`/scans/${f.scan_id}`}
-                        className="text-neutral-400 transition-colors hover:text-cyan-300"
-                      >
-                        {f.scans.run_name}
-                      </Link>
-                    </span>
-                  )}
-                </div>
-              )}
-              <FindingCard finding={f} />
+            <div key={f.id} className="flex items-start gap-2">
+              {/* Phase B #1 — per-card select checkbox. Stays outside
+                  the card so it doesn't compete with the card's own
+                  click affordances (expand, triage buttons). */}
+              <label className="mt-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.has(f.id)}
+                  onChange={() => toggleSelect(f.id)}
+                  className="h-3.5 w-3.5 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+                />
+              </label>
+              <div className="min-w-0 flex-1">
+                {(f.targets || f.scans?.run_name) && (
+                  <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px] text-neutral-500">
+                    {f.targets && f.target_id && (
+                      <span className="inline-flex items-center gap-1">
+                        <TargetIcon className="h-3 w-3 text-cyan-400/70" strokeWidth={2.25} />
+                        <Link
+                          href={`/targets/${f.target_id}`}
+                          className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
+                        >
+                          {f.targets.name}
+                        </Link>
+                      </span>
+                    )}
+                    {f.scans?.run_name && (
+                      <span className="inline-flex items-center gap-1">
+                        <ScanLine className="h-3 w-3" strokeWidth={2} />
+                        <Link
+                          href={`/scans/${f.scan_id}`}
+                          className="text-neutral-400 transition-colors hover:text-cyan-300"
+                        >
+                          {f.scans.run_name}
+                        </Link>
+                      </span>
+                    )}
+                  </div>
+                )}
+                <FindingCard finding={f} />
+              </div>
             </div>
           ))
         )}

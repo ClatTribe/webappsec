@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { BrandLockup } from '@/components/marketing/marketing-shell';
+import OnboardingDialog from '@/components/onboarding/onboarding-dialog';
 import {
   LayoutDashboard,
+  MessageSquare,
   Target,
   ScanLine,
   ShieldAlert,
@@ -10,13 +13,16 @@ import {
   Users,
   Settings,
   LogOut,
+  FileLock,
 } from 'lucide-react';
 
 const NAV = [
+  { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/targets', label: 'Targets', icon: Target },
   { href: '/scans', label: 'Scans', icon: ScanLine },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
+  { href: '/compliance', label: 'Compliance', icon: FileLock },
   { href: '/integrations', label: 'Integrations', icon: Plug },
   { href: '/team', label: 'Team', icon: Users },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -32,6 +38,32 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: orgs } = await supabase.from('organizations').select('*').limit(5);
   const org = orgs?.[0];
+
+  // Tier II #9 — onboarding wizard.
+  // Only fetch the integration list when the wizard is actually going
+  // to show. Saves a round-trip on every page load for the 99% of
+  // users who are past onboarding. The migration 067 backfill marks
+  // existing users as 'completed' so this is mostly a new-signup path.
+  const onboardingState =
+    (profile as { onboarding_state?: string } | null)?.onboarding_state ?? 'completed';
+  const showOnboarding =
+    onboardingState === 'pending' || onboardingState === 'in_progress';
+
+  let onboardingIntegrations: Array<{
+    id: string;
+    type: string;
+    status: string;
+    name: string;
+    metadata?: { login?: string };
+  }> = [];
+  if (showOnboarding) {
+    const { data } = await supabase
+      .from('integrations')
+      .select('id, type, status, name, metadata')
+      .eq('type', 'github')
+      .eq('status', 'active');
+    onboardingIntegrations = (data ?? []) as typeof onboardingIntegrations;
+  }
   const initials = (profile?.full_name ?? user.email ?? '?')
     .split(/[\s@]+/)
     .filter(Boolean)
@@ -44,15 +76,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-neutral-800/80 bg-neutral-950/40 backdrop-blur-xl">
         <Link
           href="/dashboard"
-          className="flex items-center gap-2.5 px-5 pb-3 pt-6"
+          className="px-5 pb-3 pt-6"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 font-mono text-sm font-semibold text-white shadow-lg shadow-cyan-500/20">
-            y.
-          </div>
-          <span className="text-sm font-semibold tracking-tight leading-tight">
-            your <span className="text-cyan-300">AI</span><br />
-            security engineer
-          </span>
+          <BrandLockup />
         </Link>
 
         {org && (
@@ -112,6 +138,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="flex-1 px-10 py-8">
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
+
+      {/* Tier II #9 — onboarding wizard. Rendered only when the
+          server-side profile state is pending/in_progress so we never
+          flash the modal to users who've completed it or dismissed
+          it on a prior visit. The component fetches integration data
+          via the prop list passed here. */}
+      {showOnboarding && <OnboardingDialog initialIntegrations={onboardingIntegrations} />}
     </div>
   );
 }

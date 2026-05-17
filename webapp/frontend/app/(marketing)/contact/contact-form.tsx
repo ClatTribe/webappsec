@@ -27,8 +27,8 @@ const CHANNELS: Channel[] = [
     title: 'Sales & general',
     body: 'Pricing questions, custom plans, design-partner asks, anything else. We answer within 1 business day.',
     cta: {
-      label: 'hello@youraisecurityengineer.com',
-      href: 'mailto:hello@youraisecurityengineer.com',
+      label: 'hello@tensorshield.ai',
+      href: 'mailto:hello@tensorshield.ai',
     },
   },
   {
@@ -36,8 +36,8 @@ const CHANNELS: Channel[] = [
     title: 'Support',
     body: 'Bugs, things that look broken, or "is this supposed to work?". Free-tier replies within 3 business days; Team and Business priority.',
     cta: {
-      label: 'support@youraisecurityengineer.com',
-      href: 'mailto:support@youraisecurityengineer.com',
+      label: 'support@tensorshield.ai',
+      href: 'mailto:support@tensorshield.ai',
     },
   },
   {
@@ -51,8 +51,8 @@ const CHANNELS: Channel[] = [
     title: 'Enterprise & design partners',
     body: 'Need SSO, SCIM, custom deployment, or a procurement-friendly contract? Let\'s talk.',
     cta: {
-      label: 'enterprise@youraisecurityengineer.com',
-      href: 'mailto:enterprise@youraisecurityengineer.com',
+      label: 'enterprise@tensorshield.ai',
+      href: 'mailto:enterprise@tensorshield.ai',
     },
   },
 ];
@@ -157,8 +157,8 @@ function MessageForm() {
           <h4 className="text-sm font-semibold text-white">Got it. We'll be in touch.</h4>
           <p className="mt-1 text-sm text-neutral-300">
             Reply will land in your inbox within 1 business day. Reach us at{' '}
-            <a href="mailto:hello@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              hello@youraisecurityengineer.com
+            <a href="mailto:hello@tensorshield.ai" className="text-cyan-300 hover:underline">
+              hello@tensorshield.ai
             </a>{' '}
             if you don't hear back.
           </p>

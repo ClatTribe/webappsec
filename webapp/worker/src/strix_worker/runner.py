@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
 import hashlib
 import json
 import logging
 import os
 import re
 import shlex
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -257,10 +261,16 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             # whole scan.
             staged_imports = _download_imports(sb, scan_id, scan.get("imports"), workdir)
 
+            # Phase A / migration 061 — per-scan auth credentials.
+            # Falls back to the parent target's default when the scan
+            # row has no override. Both may be None (no auth).
+            auth_method, auth_plaintext = sb.decrypt_scan_auth(scan_id)
+
             env = _build_env(
                 cfg, scan, creds.env, llm_provider, llm_api_key,
                 feedback_path=feedback_path, fp_policy=fp_policy,
                 org_strix_keys=org_strix_keys,
+                auth_method=auth_method, auth_plaintext=auth_plaintext,
             )
             cmd = _build_cmd(
                 cfg, scan, targets,
@@ -426,6 +436,22 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 )
         except Exception:  # noqa: BLE001
             logger.exception("scan %s: Slack notification dispatch crashed", scan_id)
+
+        # Tier II #7 — GitHub PR sticky comment (migration 066).
+        # If this scan was created by the /api/webhooks/github
+        # receiver, the row carries `github_pull_request_number` and
+        # the dispatch nudges the wrapper to (re)post the sticky
+        # comment on the PR. No-op for non-PR-driven scans.
+        # Best-effort: errors logged, never block scan finalisation.
+        try:
+            from .pr_comment_dispatch import dispatch_pr_comment  # local import
+            dispatch_pr_comment(
+                sb,
+                scan_id=scan_id,
+                wrapper_origin=cfg.wrapper_origin,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: PR comment dispatch crashed", scan_id)
 
 
 def cancel_running_scan(scan_id: str) -> bool:
@@ -824,13 +850,42 @@ def _build_env(
     feedback_path: str | None = None,
     fp_policy: str | None = None,
     org_strix_keys: dict[str, str] | None = None,
+    auth_method: str | None = None,
+    auth_plaintext: str | None = None,
 ) -> dict[str, str]:
     env = {
         "STRIX_LLM": llm_provider,
         "LLM_API_KEY": llm_api_key,
+        # Belt-and-braces: litellm's per-provider adapters look for the
+        # provider-specific env var (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+        # GEMINI_API_KEY) directly when the strix-level LLM_API_KEY isn't
+        # threaded through the call path. The strix wrapper-integration
+        # doc claimed "strix does not read ANTHROPIC_API_KEY" — technically
+        # true at strix's Config layer, but practically false at the
+        # actual API-call layer, where missing keys produced:
+        #     litellm.AuthenticationError: Missing Anthropic API Key
+        # Source: ClatTribe/strix PR #226. We set all three to the same
+        # value rather than parsing the provider prefix — bulletproof and
+        # only costs three extra env-var assignments.
+        "ANTHROPIC_API_KEY": llm_api_key,
+        "OPENAI_API_KEY": llm_api_key,
+        "GEMINI_API_KEY": llm_api_key,
         "STRIX_IMAGE": cfg.strix_image,
         # Disable cli-config persistence — we never want a server worker to write ~/.strix/cli-config.json
         "STRIX_PERSIST_CONFIG": "false",
+        # Default to the single-lead architecture (engine roadmap §8.5 Phase 3).
+        # Engine accepts the literal `single-lead` (case-insensitive); any
+        # other value, including unset, falls back to the legacy
+        # parent-spawns-N pattern. We default to single-lead so wrapper
+        # behaviour is deterministic across engine version bumps, and so
+        # specialist-dispatch + cost-cap accounting match what the engine's
+        # roadmap PR series targets. An operator who wants the legacy
+        # behaviour can set `STRIX_AGENT_ARCHITECTURE=legacy` (or any non-
+        # `single-lead` value) in the worker's own environment — the
+        # pass-through below picks that up.
+        "STRIX_AGENT_ARCHITECTURE": os.environ.get(
+            "STRIX_AGENT_ARCHITECTURE", "single-lead"
+        ),
         # Run logs directory; we'll harvest after exit.
         "PYTHONUNBUFFERED": "1",
     }
@@ -841,6 +896,14 @@ def _build_env(
     # without --dns-only keep working unchanged.
     if scan.get("dns_only"):
         env["STRIX_DNS_ONLY"] = "1"
+    # Wishlist §18.7 / engine PR #278 — MOAK live-probe consent.
+    # When the parent target's config has allow_live_probe=true the
+    # wrapper forwards STRIX_MOAK_LIVE_PROBE=1, gating the engine's
+    # LiveProbe stage. Default off; the engine's safety policy
+    # (PR #278) further restricts which findings are eligible.
+    parent_cfg = (scan.get("targets") or {}).get("config") or {}
+    if isinstance(parent_cfg, dict) and parent_cfg.get("allow_live_probe") is True:
+        env["STRIX_MOAK_LIVE_PROBE"] = "1"
     # FP feedback loop (engine PR #142). The wrapper writes the org's
     # accumulated labels to feedback.jsonl; engine reads via --feedback-from
     # AND/OR STRIX_FEEDBACK_FROM. We forward both for belt-and-braces.
@@ -856,6 +919,71 @@ def _build_env(
         for key, value in org_strix_keys.items():
             if key in _ALLOWED_ORG_STRIX_KEYS and isinstance(value, str) and value:
                 env[key] = value
+
+    # Phase A / migration 061 — scan auth credentials. Engine env vars
+    # (per wrapper-integration.md §1):
+    #   STRIX_AUTH_BEARER / STRIX_AUTH_COOKIE / STRIX_AUTH_BASIC /
+    #   STRIX_HEADERS (newline-joined). We use env rather than CLI flag
+    #   for these because the engine treats both as identical and env
+    #   keeps the value out of argv / process listings.
+    #
+    # `header` is the multi-value case — plaintext is JSON
+    # {"headers": [...]} (see migration 061 docstring). We join with
+    # newlines to match the engine's STRIX_HEADERS expectation.
+    # `login_creds` rides the existing instruction text path — engine
+    # accepts the literal as part of `--instruction` per PR #156.
+    if auth_method and auth_plaintext:
+        if auth_method == "bearer":
+            env["STRIX_AUTH_BEARER"] = auth_plaintext
+        elif auth_method == "cookie":
+            env["STRIX_AUTH_COOKIE"] = auth_plaintext
+        elif auth_method == "basic":
+            env["STRIX_AUTH_BASIC"] = auth_plaintext
+        elif auth_method == "header":
+            try:
+                parsed = json.loads(auth_plaintext)
+                headers = parsed.get("headers") if isinstance(parsed, dict) else None
+                if isinstance(headers, list):
+                    cleaned = [h for h in headers if isinstance(h, str) and h.strip()]
+                    if cleaned:
+                        env["STRIX_HEADERS"] = "\n".join(cleaned)
+            except (json.JSONDecodeError, AttributeError):
+                logger.warning("scan %s: malformed header auth plaintext", scan.get("id"))
+        elif auth_method == "login_creds":
+            # Engine PR #156 — tenant-supplied login credentials for the
+            # `scan_auth_flow` specialist. Plaintext is a JSON list of
+            # {username, password} objects; engine reads STRIX_LOGIN_CREDS
+            # in that shape directly. Wrapper validates JSON-ness before
+            # forwarding so a malformed string can't break the agent loop.
+            try:
+                parsed = json.loads(auth_plaintext)
+                if isinstance(parsed, list) and parsed:
+                    env["STRIX_LOGIN_CREDS"] = json.dumps(parsed)
+            except json.JSONDecodeError:
+                logger.warning("scan %s: malformed login_creds plaintext", scan.get("id"))
+
+    # Phase A — outbound rate limit. Engine reads STRIX_RATE_LIMIT or
+    # --rate-limit; we forward via env so the value isn't part of argv.
+    rate_limit_qps = scan.get("rate_limit_qps")
+    if isinstance(rate_limit_qps, int) and rate_limit_qps > 0:
+        env["STRIX_RATE_LIMIT"] = str(rate_limit_qps)
+
+    # Phase A — exclude paths. Newline-joined; engine accepts
+    # STRIX_EXCLUDE_PATHS or repeated --exclude-path. We use env to
+    # keep argv compact when there are many.
+    exclude_paths = scan.get("exclude_paths")
+    if isinstance(exclude_paths, list) and exclude_paths:
+        cleaned = [p for p in exclude_paths if isinstance(p, str) and p.strip()]
+        if cleaned:
+            env["STRIX_EXCLUDE_PATHS"] = "\n".join(cleaned)
+
+    # Phase A — seed URLs (web_application targets). Newline-joined
+    # for STRIX_SEED_URLS; engine accepts the env or repeated --seed-url.
+    seed_urls = scan.get("seed_urls")
+    if isinstance(seed_urls, list) and seed_urls:
+        cleaned = [u for u in seed_urls if isinstance(u, str) and u.strip()]
+        if cleaned:
+            env["STRIX_SEED_URLS"] = "\n".join(cleaned)
     env.update(cred_env)
     return env
 
@@ -914,8 +1042,71 @@ def _build_cmd(
     if compliance_pack_path:
         cmd += ["--compliance-pack", compliance_pack_path]
 
+    # Phase A — direct GRC exports. The engine writes
+    # `grc_export_<platform>.json` next to vulnerabilities.json for
+    # each --export-format the user picked. Wrapper API + frontend
+    # restrict to the engine's enum
+    # {vanta, drata, hyperproof, secureframe, servicenow, generic}.
+    export_formats = scan.get("export_formats")
+    if isinstance(export_formats, list):
+        for fmt in export_formats:
+            if isinstance(fmt, str) and fmt.strip():
+                cmd += ["--export-format", fmt.strip()]
+
+    # Engine PR #271 / PR #274 — `<type>:<value>` prefix on `--target`.
+    # We use the prefix for two types whose values the engine's URL-
+    # shape inference cannot disambiguate:
+    #   - `api:` (PR #267-#271) — a JSON API at `https://api.example.com`
+    #      looks identical to a web app at `https://example.com`, but the
+    #      two should run different tool catalogs (the api catalog drops
+    #      browser / DOM / scan_xss / bfs_crawl).
+    #   - `container_image:` (PR #274) — image refs like `nginx:1.25` are
+    #      syntactically ambiguous with `host:port` strings. The engine's
+    #      `_infer_container_image_value` validator REQUIRES the prefix
+    #      and rejects URL-shaped values; without the prefix the engine
+    #      would never route to scan_container_image.
+    #
+    # All other target types travel as bare `--target <value>` so older
+    # Strix versions (pre-PR-#271) keep working unchanged AND so we
+    # don't trigger the engine's strict-match check — if the wrapper
+    # DB classified a github URL as `web_application` (operator error)
+    # and we passed `web_application:https://github.com/...`, the
+    # engine would reject it (the URL parses as `repository`). Letting
+    # those types fall through to the bare form keeps the engine's
+    # own inference as the safety net.
+    # `cloud_account` added 2026-05-17 for engine PRs #290/#291. Same
+    # contract as container_image — the value carries `<provider>/<id>`
+    # (e.g. `aws/123456789012`) and the engine routes to the right
+    # CSPM specialist (boto3 path for AWS, Prowler for everything else).
+    # AWS creds are already plumbed via materialize_credentials → env;
+    # boto3's standard chain inside the engine picks them up.
+    _PREFIXED_TYPES = ("api", "container_image", "cloud_account")
     for target in targets:
-        cmd += ["-t", target["value"]]
+        t_value = target["value"]
+        t_type = target.get("type")
+        if t_type in _PREFIXED_TYPES:
+            cmd += ["-t", f"{t_type}:{t_value}"]
+        else:
+            cmd += ["-t", t_value]
+
+    # Engine PRs #267 + #271 — when the parent target is `api`-typed
+    # and the tenant supplied an OpenAPI / Swagger spec URL in its
+    # config, forward it as `--openapi <url>`. The engine otherwise
+    # probes 11 standard publishing paths automatically
+    # (`/openapi.json`, `/swagger.json`, `/v3/api-docs`, etc.) — this
+    # just short-circuits discovery when the spec lives elsewhere.
+    #
+    # The parent target config lives at `scan["targets"]["config"]` via
+    # the supabase_client.fetch_scan() FK join; the per-scan
+    # scan_targets rows (the `targets` argument) don't carry config.
+    # We honour spec_url only when the parent target type is `api` to
+    # keep the contract clean — a web_application target with a stray
+    # spec_url in its config is silently ignored.
+    parent_target = scan.get("targets") or {}
+    if parent_target.get("type") == "api":
+        spec_url = (parent_target.get("config") or {}).get("spec_url")
+        if isinstance(spec_url, str) and spec_url.strip():
+            cmd += ["--openapi", spec_url.strip()]
 
     # Combine the user's free-form instruction with augmented text derived
     # from `targets.config` (per-target-type configuration). See
@@ -1137,6 +1328,11 @@ async def _upload_compliance_pack(
     uploads are still useful for auditors. A whole-step failure is
     swallowed so a misconfigured storage bucket can't take down the
     scan finalisation.
+
+    After uploading: scans the pack for `compliance_evidence.json`
+    (engine PR #219 §4b) and calls the wrapper's ingest RPC so the
+    chat handler + trust page can answer "how ready am I for SOC 2?"
+    with real data. Ingest failures don't fail the upload.
     """
     pack_root = pack_root or _compliance_pack_root(scan_id)
     if not pack_root.exists():
@@ -1172,6 +1368,72 @@ async def _upload_compliance_pack(
             logger.exception(
                 "scan %s: failed to flip compliance_pack_uploaded", scan_id
             )
+
+    # Compliance-evidence ingest. Runs whether or not the storage upload
+    # succeeded — the structured ingest is independent of the auditor-pack
+    # zip and useful on its own (chat + trust page query the DB, not S3).
+    try:
+        _ingest_compliance_evidence_from_pack(sb, scan_id, pack_root)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "scan %s: compliance_evidence.json ingest failed", scan_id
+        )
+
+
+def _ingest_compliance_evidence_from_pack(
+    sb: WorkerSupabase,
+    scan_id: str,
+    pack_root: Path,
+) -> None:
+    """Find + parse + ingest compliance_evidence.json (engine PR #219 §4b).
+
+    The engine writes per-control verdicts into
+    `<compliance_pack>/<run_id>/compliance_evidence.json`. We rglob
+    because the run_id directory layer is part of the engine's layout
+    and we don't want to hardcode it. First match wins — multi-run
+    packs are not expected.
+
+    Older engines that don't emit this file leave it absent and we
+    silently skip — the chat handler answers "no evidence yet" until
+    the engine version that emits it lands in the operator's sandbox.
+    """
+    matches = list(pack_root.rglob("compliance_evidence.json"))
+    if not matches:
+        logger.info(
+            "scan %s: no compliance_evidence.json in pack; skipping ingest",
+            scan_id,
+        )
+        return
+
+    evidence_path = matches[0]
+    try:
+        with evidence_path.open("r", encoding="utf-8") as f:
+            evidence = json.load(f)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "scan %s: compliance_evidence.json at %s unreadable: %s",
+            scan_id, evidence_path, e,
+        )
+        return
+
+    if not isinstance(evidence, dict) or not evidence:
+        logger.info(
+            "scan %s: compliance_evidence.json is empty / non-dict; nothing to ingest",
+            scan_id,
+        )
+        return
+
+    try:
+        count = sb.ingest_compliance_evidence(scan_id, evidence)
+        logger.info(
+            "scan %s: ingested %d compliance controls from %s",
+            scan_id, count, evidence_path,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "scan %s: ingest RPC failed: %s",
+            scan_id, e,
+        )
 
 
 async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -> None:
@@ -1212,6 +1474,40 @@ async def _upload_run_artifacts(sb: WorkerSupabase, scan_id: str, org_id: str) -
         # "agent gave up early"; coverage tells you which. The UI's
         # amber "coverage incomplete" banner keys off this column.
         _persist_coverage(sb, scan_id, run_dir)
+
+        # Engine kg.json — typed knowledge graph
+        # (strix PRs #240/#265/#266 / migration 058). Powers the
+        # "Discovered" panel on scan detail: assets, surfaces,
+        # secrets, credentials, dependencies, threat-intel
+        # observations, synthesised exploits + the relationships
+        # between them. Best-effort; older engines without §3 typed
+        # KG leave the file absent and we silently skip.
+        try:
+            _ingest_kg_from_run_dir(sb, scan_id, scan["org_id"], run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: kg.json ingest failed", scan_id)
+
+        # Engine patches.jsonl — Patcher specialist proposals
+        # (strix PRs #243/#250 / migration 058). One row per patch
+        # the engine proposed for a verified finding; we attach the
+        # diff + status to the matching findings row. Best-effort;
+        # older engines without the Patcher leave the file absent.
+        try:
+            _ingest_patches_from_run_dir(sb, scan_id, run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: patches.jsonl ingest failed", scan_id)
+
+        # Phase A #5 / migration 062 — SARIF upload to GitHub Code
+        # Scanning. Only fires when (a) the parent target is a
+        # repository, (b) it has integration_id set to a GitHub OAuth
+        # integration, and (c) the engine wrote *.sarif files in the
+        # run dir. Anything else (no sarif, non-github host, no
+        # integration, API failure) is a silent skip — the wrapper UI
+        # gates the "View in Code Scanning" link on the row's URL.
+        try:
+            _upload_sarif_to_code_scanning(sb, scan_id, scan, run_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: SARIF Code Scanning upload failed", scan_id)
 
         # CycloneDX SBOM (engine PR #131 / §19.4 Tier 4 row 3,
         # migration 032). The file itself was already uploaded by the
@@ -1343,6 +1639,417 @@ def _persist_run_meta(sb: WorkerSupabase, scan_id: str, run_dir: Path) -> None:
         sb.set_run_meta(scan_id, data)
     except Exception:  # noqa: BLE001
         logger.exception("scan %s: failed to persist run_meta", scan_id)
+
+
+_KG_NODE_TYPES = frozenset({
+    "Surface", "Asset", "Vuln", "Credential", "Secret",
+    "Dependency", "Role", "ThreatIntel", "Exploit",
+})
+_KG_EDGE_TYPES = frozenset({
+    "AFFECTS", "REACHABLE_FROM", "LEAKS", "GRANTS_ACCESS_TO",
+    "CHAINS_TO", "RUNS_ON", "USES", "OBSERVED",
+    "PIVOTED_FROM", "EXPLOITS",
+})
+
+
+def _ingest_kg_from_run_dir(
+    sb: WorkerSupabase, scan_id: str, org_id: str, run_dir: Path
+) -> None:
+    """Read <run_dir>/kg.json (strix PRs #240/#265/#266) and bulk-insert
+    its nodes + edges into kg_nodes / kg_edges (migration 058).
+
+    The engine serialises a process-global singleton KG to disk at scan
+    end. Schema (from strix/agents/knowledge_graph.py):
+
+      { "version": 1,
+        "nodes": [ { "id": "N-001", "type": "Surface", "props": {...},
+                     "created_at": float, "updated_at": float } ],
+        "edges": [ { "id": "E-001", "type": "AFFECTS",
+                     "source": "N-001", "target": "N-002",
+                     "props": {...}, "created_at": float } ] }
+
+    Best-effort across the board: missing file, parse error, unknown
+    node/edge type — log and skip. An unknown type is the most likely
+    "engine added a new node kind faster than the wrapper bumped its
+    CHECK constraint" case; preferable to surface a partial KG than
+    fail the whole ingest.
+    """
+    path = run_dir / "kg.json"
+    if not path.exists():
+        logger.info("scan %s: no kg.json — skipping KG ingest", scan_id)
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to parse kg.json", scan_id)
+        return
+    if not isinstance(data, dict):
+        logger.warning("scan %s: kg.json is not a JSON object", scan_id)
+        return
+
+    raw_nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+    raw_edges = data.get("edges") if isinstance(data.get("edges"), list) else []
+
+    node_rows: list[dict[str, Any]] = []
+    skipped_unknown_types: set[str] = set()
+    for n in raw_nodes:
+        if not isinstance(n, dict):
+            continue
+        node_id = n.get("id")
+        node_type = n.get("type")
+        if not isinstance(node_id, str) or not isinstance(node_type, str):
+            continue
+        if node_type not in _KG_NODE_TYPES:
+            # Skip but track so we can flag engine drift in one log line.
+            skipped_unknown_types.add(node_type)
+            continue
+        node_rows.append({
+            "org_id": org_id,
+            "scan_id": scan_id,
+            "node_id": node_id,
+            "node_type": node_type,
+            "props": n.get("props") or {},
+        })
+
+    edge_rows: list[dict[str, Any]] = []
+    skipped_unknown_edge_types: set[str] = set()
+    for e in raw_edges:
+        if not isinstance(e, dict):
+            continue
+        edge_id = e.get("id")
+        edge_type = e.get("type")
+        source = e.get("source")
+        target = e.get("target")
+        if not all(isinstance(v, str) for v in (edge_id, edge_type, source, target)):
+            continue
+        if edge_type not in _KG_EDGE_TYPES:
+            skipped_unknown_edge_types.add(edge_type)
+            continue
+        edge_rows.append({
+            "org_id": org_id,
+            "scan_id": scan_id,
+            "edge_id": edge_id,
+            "edge_type": edge_type,
+            "source_node_id": source,
+            "target_node_id": target,
+            "props": e.get("props") or {},
+        })
+
+    if skipped_unknown_types:
+        logger.warning(
+            "scan %s: KG ingest skipped %d nodes with unknown types: %s "
+            "— engine likely added a new NodeType ahead of the wrapper's "
+            "CHECK constraint; add the type to migration 058 to surface "
+            "them in the UI.",
+            scan_id, sum(1 for n in raw_nodes if isinstance(n, dict) and n.get("type") in skipped_unknown_types),
+            sorted(skipped_unknown_types),
+        )
+    if skipped_unknown_edge_types:
+        logger.warning(
+            "scan %s: KG ingest skipped edges with unknown types: %s",
+            scan_id, sorted(skipped_unknown_edge_types),
+        )
+
+    try:
+        n_nodes = sb.insert_kg_nodes(node_rows) if node_rows else 0
+        n_edges = sb.insert_kg_edges(edge_rows) if edge_rows else 0
+        logger.info(
+            "scan %s: ingested KG — %d nodes / %d edges",
+            scan_id, n_nodes, n_edges,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: KG bulk-insert failed", scan_id)
+
+
+def _ingest_patches_from_run_dir(
+    sb: WorkerSupabase, scan_id: str, run_dir: Path
+) -> None:
+    """Read <run_dir>/patches.jsonl (strix PRs #243/#250) and update the
+    matching findings rows with patch_* columns (migration 058).
+
+    One JSON object per line; schema mirrors PatchProposal in
+    strix/agents/patcher.py:
+
+      { "patch_id":  "PATCH-abc123",
+        "finding_id": "<engine finding id>",
+        "diff":       "<unified diff>",
+        "commit_message": "<conventional commit summary>",
+        "diff_hash":  "<sha1[:12]>",
+        "applied":    bool,
+        "status":     "proposed" | "applied" | "verified" | "failed",
+        "created_at": float,
+        "verified_at": float | null,
+        "last_failure_reason": str }
+
+    We map by `finding_id` — engine's identifier matches the value the
+    wrapper stored on the findings row at ingest time. Findings without
+    a matching row (proposed for a vuln that didn't make it into our
+    DB) are logged + skipped. Multiple patches per finding (re-proposal
+    after a verify-fail) keep last-write-wins — final state is what the
+    UI shows.
+    """
+    path = run_dir / "patches.jsonl"
+    if not path.exists():
+        logger.info("scan %s: no patches.jsonl — skipping patch ingest", scan_id)
+        return
+
+    proposals: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "scan %s: patches.jsonl line %d: malformed JSON, skipping",
+                        scan_id, line_no,
+                    )
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if not isinstance(obj.get("finding_id"), str) or not obj["finding_id"]:
+                    continue
+                if not isinstance(obj.get("diff"), str):
+                    continue
+                proposals.append(obj)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to read patches.jsonl", scan_id)
+        return
+
+    if not proposals:
+        logger.info("scan %s: patches.jsonl present but empty — nothing to ingest", scan_id)
+        return
+
+    # Last write wins per finding_id — the engine appends; the most
+    # recent line is the latest state.
+    by_finding: dict[str, dict[str, Any]] = {}
+    for obj in proposals:
+        by_finding[obj["finding_id"]] = obj
+
+    try:
+        applied = sb.attach_patches_to_findings(scan_id, by_finding)
+        logger.info(
+            "scan %s: attached %d patches to findings (%d in file, %d unique)",
+            scan_id, applied, len(proposals), len(by_finding),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: patch attach failed", scan_id)
+
+
+def _upload_sarif_to_code_scanning(
+    sb: WorkerSupabase,
+    scan_id: str,
+    scan: dict[str, Any],
+    run_dir: Path,
+) -> None:
+    """Phase A #5 — push SARIF artefacts to GitHub Code Scanning.
+
+    Preconditions for a non-skip path (all must be true):
+      1. The parent target is a `repository`.
+      2. The parent target carries an `integration_id` (migration 061).
+      3. The integration is a github.com OAuth integration.
+      4. The engine wrote at least one `*.sarif` file in run_dir.
+
+    Failure modes are all log-and-skip:
+      - No SARIF in run_dir → silent (older engines or scans that
+        didn't run SAST).
+      - No integration_id → silent.
+      - Non-GitHub host → silent (we only know how to hit
+        api.github.com today; gitlab + bitbucket have analogous
+        surfaces we don't yet integrate).
+      - GitHub API rejects (auth scope insufficient, repo not opted
+        in to Code Scanning, etc.) → log the response body so the
+        operator can fix it; the scan still finalises clean.
+
+    GitHub Code Scanning API: POST /repos/{owner}/{repo}/code-scanning/
+    sarifs. Body shape:
+      { commit_sha, ref, sarif (base64+gzip), tool_name, started_at }
+    Response: 202 + {id, url}. The result is asynchronously processed;
+    we stamp the row right away and the user-visible URL is the
+    repo's `/security/code-scanning` surface (works even before the
+    server-side processing completes).
+    """
+    sarif_files = list(run_dir.rglob("*.sarif"))
+    if not sarif_files:
+        return
+
+    parent = scan.get("targets") or {}
+    if parent.get("type") != "repository":
+        return
+    integration_id = parent.get("integration_id")
+    if not integration_id:
+        logger.info(
+            "scan %s: SARIF found but target has no integration_id — skipping upload",
+            scan_id,
+        )
+        return
+
+    repo_url = parent.get("value") or ""
+    parsed = _parse_github_repo_url(repo_url)
+    if parsed is None:
+        logger.info(
+            "scan %s: SARIF found but target value %r isn't a GitHub URL — "
+            "Code Scanning upload only supports github.com today",
+            scan_id, repo_url,
+        )
+        return
+
+    try:
+        token_blob = sb.decrypt_integration(scan_id, integration_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: failed to decrypt github integration", scan_id)
+        return
+    try:
+        token = json.loads(token_blob).get("access_token")
+    except (json.JSONDecodeError, AttributeError):
+        logger.warning("scan %s: integration token isn't JSON", scan_id)
+        return
+    if not token:
+        return
+
+    owner, repo = parsed
+    # Engine PR #117 — `--branch` ref. Worker sends `null` when the
+    # user didn't pick a branch and the engine clones the repo's
+    # default. We GET /repos/<o>/<r> to discover the default if
+    # needed, then resolve the head SHA for the right ref.
+    branch = scan.get("branch") or None
+    ref_name, commit_sha = _resolve_github_ref(token, owner, repo, branch)
+    if not commit_sha:
+        logger.warning(
+            "scan %s: couldn't resolve head SHA for github.com/%s/%s@%s — skipping",
+            scan_id, owner, repo, branch or "default",
+        )
+        return
+
+    # GitHub accepts one SARIF per request. Most strix scans produce
+    # 0 or 1 file (one combined SAST run). We iterate defensively.
+    for sarif_path in sarif_files:
+        try:
+            with sarif_path.open("rb") as f:
+                raw = f.read()
+            payload = base64.b64encode(gzip.compress(raw)).decode("ascii")
+        except OSError:
+            logger.exception("scan %s: couldn't read SARIF at %s", scan_id, sarif_path)
+            continue
+
+        body = {
+            "commit_sha": commit_sha,
+            "ref": f"refs/heads/{ref_name}",
+            "sarif": payload,
+            "tool_name": "tensorshield",
+            "started_at": (scan.get("started_at") or "")[:19] + "Z"
+            if scan.get("started_at")
+            else None,
+        }
+        # Strip None — GitHub rejects nulls on some fields.
+        body = {k: v for k, v in body.items() if v is not None}
+
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/code-scanning/sarifs",
+                data=json.dumps(body).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "tensorshield-worker",
+                    "Content-Type": "application/json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                resp_body = resp.read().decode("utf-8", errors="replace")
+                logger.info(
+                    "scan %s: SARIF upload accepted by github.com/%s/%s (%d): %s",
+                    scan_id, owner, repo, resp.status, resp_body[:200],
+                )
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+            logger.warning(
+                "scan %s: SARIF upload to github.com/%s/%s rejected (%s): %s",
+                scan_id, owner, repo, e.code, err[:500],
+            )
+            return  # bail on first hard failure; don't try more files
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: SARIF upload network failure", scan_id)
+            return
+
+    # All uploads succeeded — stamp the row. The URL we surface is the
+    # repo's Code Scanning landing page (the per-upload URL works too
+    # but only after server-side ingest completes, which is async).
+    url = f"https://github.com/{owner}/{repo}/security/code-scanning"
+    try:
+        sb.set_code_scanning_uploaded(scan_id, url)
+        logger.info(
+            "scan %s: stamped code_scanning_url=%s for %d SARIF file(s)",
+            scan_id, url, len(sarif_files),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "scan %s: failed to stamp code_scanning_url (upload still happened)",
+            scan_id,
+        )
+
+
+def _parse_github_repo_url(value: str) -> tuple[str, str] | None:
+    """Pull (owner, repo) out of a GitHub URL. Returns None for non-
+    github.com URLs or SSH paths — we only support github.com Code
+    Scanning today (gitlab + bitbucket have analogous APIs we'll wire
+    later)."""
+    import re
+    cleaned = value.strip()
+    m = re.match(
+        r"^https?://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$",
+        cleaned,
+    )
+    if m:
+        return m.group(1), m.group(2)
+    m = re.match(r"^git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?$", cleaned)
+    if m:
+        return m.group(1), m.group(2)
+    return None
+
+
+def _resolve_github_ref(
+    token: str, owner: str, repo: str, branch: str | None
+) -> tuple[str, str | None]:
+    """Look up the head SHA of a branch via GitHub. Returns
+    (resolved_branch_name, commit_sha). When `branch` is None we ask
+    GitHub for the repo's default_branch first, then resolve the head
+    of that.
+    """
+    base = f"https://api.github.com/repos/{owner}/{repo}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "tensorshield-worker",
+    }
+
+    resolved_branch = branch
+    if not resolved_branch:
+        try:
+            req = urllib.request.Request(base, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                meta = json.loads(resp.read())
+                resolved_branch = meta.get("default_branch") or "main"
+        except Exception:  # noqa: BLE001
+            resolved_branch = "main"  # last-resort fallback
+
+    try:
+        req = urllib.request.Request(
+            f"{base}/git/ref/heads/{resolved_branch}",
+            headers=headers,
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            ref_obj = json.loads(resp.read())
+            sha = ref_obj.get("object", {}).get("sha")
+            return resolved_branch, sha
+    except Exception:  # noqa: BLE001
+        return resolved_branch, None
 
 
 def _load_trajectories(run_dir: Path) -> dict[str, dict[str, Any]]:

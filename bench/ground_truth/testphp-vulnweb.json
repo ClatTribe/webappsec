@@ -1,0 +1,58 @@
+{
+  "target": "testphp-vulnweb",
+  "source": "Acunetix public documentation",
+  "vulns": [
+    {
+      "id": "tpv-sqli-listproducts",
+      "cwe": "CWE-89",
+      "title": "SQL injection in listproducts.php",
+      "endpoint": "/listproducts.php",
+      "title_keywords": ["sql injection", "sqli"]
+    },
+    {
+      "id": "tpv-sqli-artists",
+      "cwe": "CWE-89",
+      "title": "SQL injection in artists.php",
+      "endpoint": "/artists.php",
+      "title_keywords": ["sql injection", "sqli"]
+    },
+    {
+      "id": "tpv-xss-search",
+      "cwe": "CWE-79",
+      "title": "Reflected XSS in search",
+      "endpoint": "/search.php",
+      "title_keywords": ["xss", "reflected"]
+    },
+    {
+      "id": "tpv-xss-guestbook",
+      "cwe": "CWE-79",
+      "title": "Stored XSS in guestbook",
+      "endpoint": "/guestbook.php",
+      "title_keywords": ["xss", "stored", "persistent"]
+    },
+    {
+      "id": "tpv-lfi",
+      "cwe": "CWE-22",
+      "title": "Local file inclusion via include parameter",
+      "title_keywords": ["file inclusion", "lfi", "path traversal"]
+    },
+    {
+      "id": "tpv-dir-listing",
+      "cwe": "CWE-548",
+      "title": "Directory listing enabled (/admin, /pictures)",
+      "title_keywords": ["directory listing", "directory traversal", "directory enumeration"]
+    },
+    {
+      "id": "tpv-server-info",
+      "cwe": "CWE-200",
+      "title": "Server / framework info disclosure via headers",
+      "title_keywords": ["server banner", "server version", "header disclosure"]
+    },
+    {
+      "id": "tpv-missing-headers",
+      "cwe": "CWE-693",
+      "title": "Missing security headers (X-Frame-Options, CSP, HSTS)",
+      "title_keywords": ["missing header", "x-frame-options", "csp", "hsts"]
+    }
+  ]
+}

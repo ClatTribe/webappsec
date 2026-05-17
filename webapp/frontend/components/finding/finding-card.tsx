@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronDown,
+  ChevronRight,
   CheckCircle2,
   XCircle,
   Eye,
@@ -17,6 +18,8 @@ import {
   RefreshCw,
   Brain,
   Footprints,
+  Key,
+  FileWarning,
 } from 'lucide-react';
 import type {
   Finding,
@@ -30,6 +33,26 @@ import type {
   TriagePrediction,
 } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
+import PatchPreview from '@/components/finding/patch-preview';
+import AffectedFiles from '@/components/finding/affected-files';
+import CloudAttackPathCasefile from '@/components/finding/cloud-attack-path-casefile';
+import {
+  isAttackPathFinding,
+  resolveDriftClassification,
+} from '@/lib/cloud-attack-path';
+import {
+  isVerifiedLive,
+  proofArtifactPath,
+  pivotChainAncestors,
+  xssContext,
+  ssrfFamily,
+  bolaVariant,
+  massAssignmentDiff,
+  secretIntroductionTrail,
+  imageCategory,
+} from '@/lib/finding-depth';
+import AssigneePicker from '@/components/finding/assignee-picker';
+import CommentThread from '@/components/finding/comment-thread';
 import {
   AI_BRAND,
   REACHABILITY_THEME,
@@ -101,6 +124,13 @@ export type FindingForCard = Finding & {
     reopened: boolean;
     scans?: { run_name: string } | null;
   }[] | null;
+  // Phase A — parent target join used to build repo-blob deeplinks for
+  // each entry in `affected_files`. Populated by the findings page
+  // query (`targets(name, value, type)`).
+  targets?: { name?: string | null; value?: string | null; type?: string | null } | null;
+  // Branch the scan ran against (engine PR #117). Joined in by the
+  // scans-side query when present.
+  scans?: { run_name?: string | null; status?: string | null; branch?: string | null } | null;
 };
 
 interface Props {
@@ -112,9 +142,28 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
   const [finding, setFinding] = useState<FindingForCard>(initial);
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [updating, setUpdating] = useState(false);
+  // Phase B #7 — risk-acceptance dialog state. When the user clicks
+  // "Won't fix", we collect a reason + optional expiry before
+  // actually writing the status. Lets the auditor pack carry the
+  // rationale next to the dismissal.
+  const [showRiskDialog, setShowRiskDialog] = useState(false);
+  const [riskReason, setRiskReason] = useState(finding.wont_fix_reason ?? '');
+  const [riskExpiry, setRiskExpiry] = useState(
+    finding.risk_acceptance_expires_at
+      ? finding.risk_acceptance_expires_at.slice(0, 10)
+      : '',
+  );
 
   const sev = SEVERITY_THEME[finding.severity];
   const statusTheme = STATUS_THEME[finding.status];
+
+  // Engine PR #292 emits drift findings with `[drift:foo]` title
+  // prefix. Resolve preferring the dedicated TS field (forward-compat
+  // for when the engine adds a column) and falling back to the
+  // prefix parse. `displayTitle` is the user-facing title with the
+  // prefix stripped so we don't show `[drift:drift] xyz`.
+  const { classification: driftClassification, cleanedTitle: displayTitle } =
+    resolveDriftClassification(finding);
   const ai = finding.ai_assessment ?? null;
   const urgencyTheme = ai ? URGENCY_THEME[ai.urgency] : null;
   const reachTheme = ai ? REACHABILITY_THEME[ai.reachability] : null;
@@ -227,18 +276,31 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
     && prediction.p_false_positive >= 0.4
     && prediction.p_false_positive <= 0.6;
 
-  async function setStatus(newStatus: FindingStatus) {
-    if (updating || newStatus === finding.status) return;
+  async function setStatus(
+    newStatus: FindingStatus,
+    riskMeta?: { reason: string; expires_at: string | null },
+  ) {
+    if (updating || (newStatus === finding.status && !riskMeta)) return;
     setUpdating(true);
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const update = {
+    const update: Record<string, unknown> = {
       status: newStatus,
       triaged_by: newStatus === 'open' ? null : user?.id ?? null,
       triaged_at: newStatus === 'open' ? null : new Date().toISOString(),
     };
+    // Phase B #7 — write reason + expiry only when going to wont_fix.
+    // Going from wont_fix to anything else clears them so a reopen-
+    // and-fix history doesn't carry stale acceptance metadata.
+    if (newStatus === 'wont_fix' && riskMeta) {
+      update.wont_fix_reason = riskMeta.reason;
+      update.risk_acceptance_expires_at = riskMeta.expires_at;
+    } else if (newStatus !== 'wont_fix') {
+      update.wont_fix_reason = null;
+      update.risk_acceptance_expires_at = null;
+    }
     const { error, data } = await supabase
       .from('findings')
       .update(update)
@@ -246,11 +308,18 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
       .select()
       .single();
     setUpdating(false);
-    // Preserve joined fields (last_seen_scan, finding_occurrences) — the
-    // .select() above only returns columns from the `findings` table.
     if (!error && data) {
       setFinding((prev) => ({ ...prev, ...(data as Finding) }));
     }
+  }
+
+  async function confirmWontFix() {
+    if (!riskReason.trim()) return;
+    await setStatus('wont_fix', {
+      reason: riskReason.trim(),
+      expires_at: riskExpiry ? new Date(riskExpiry).toISOString() : null,
+    });
+    setShowRiskDialog(false);
   }
 
   return (
@@ -289,7 +358,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                   isResolved ? 'text-neutral-300 line-through decoration-neutral-700' : 'text-neutral-50'
                 }`}
               >
-                <span className="line-clamp-2">{finding.title}</span>
+                <span className="line-clamp-2">{displayTitle}</span>
               </h3>
               <div className="flex flex-shrink-0 items-center gap-1.5">
                 {urgencyTheme && (() => {
@@ -340,7 +409,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 Open status is implied — we don't badge it. The recurrence
                 pill is the calm signal that this finding has cross-scan
                 history; full timeline is in the expanded view. */}
-            {(finding.status !== 'open' || isRecurring) && (
+            {(finding.status !== 'open' || isRecurring || driftClassification) && (
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 {finding.status !== 'open' && (
                   <span
@@ -350,6 +419,10 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                     {statusTheme.label}
                   </span>
                 )}
+                {/* Engine PR #292 — drift correlation badge. Resolved
+                    from `[drift:foo]` title prefix OR the dedicated
+                    drift_classification TS field. */}
+                {driftClassification && <DriftBadge classification={driftClassification} />}
                 {reopenedCount > 0 && (
                   <span
                     className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30"
@@ -546,18 +619,33 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               <span className="text-neutral-400">{sev.label}</span>
             </span>
             {/* Engine signals (migration 024). Verification status + confidence
-                are the headline trust signals from PR #137; render them prominently. */}
+                are the headline trust signals from PR #137; render them prominently.
+                `exploited` was added in strix PR #255 — the agent didn't just verify
+                the bug, it actually ran the exploit and captured proof of impact.
+                Strictly more severe than `verified`; render red + bold to match the
+                "stop reading the inbox, fix this one first" treatment. */}
             {finding.verification_status && (
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wider ring-1 ${
-                  finding.verification_status === 'verified'
-                    ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30'
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider ring-1 ${
+                  finding.verification_status === 'exploited'
+                    ? 'bg-red-500/20 text-red-100 ring-red-400/40 shadow-sm shadow-red-500/20'
+                    : finding.verification_status === 'verified'
+                    ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/30 font-medium'
                     : finding.verification_status === 'pattern_match'
-                    ? 'bg-amber-500/10 text-amber-200 ring-amber-400/30'
-                    : 'bg-zinc-700/40 text-zinc-300 ring-zinc-600/40'
+                    ? 'bg-amber-500/10 text-amber-200 ring-amber-400/30 font-medium'
+                    : 'bg-zinc-700/40 text-zinc-300 ring-zinc-600/40 font-medium'
                 }`}
-                title="Engine verification — verified means the agent ran the exploit and confirmed; pattern_match is signature-only (PR #137)."
+                title={
+                  finding.verification_status === 'exploited'
+                    ? 'Engine exploited this finding — proof-of-impact captured (strix PR #255). The agent ran the exploit and confirmed real-world impact, not just reachability.'
+                    : 'Engine verification — verified means the agent ran the exploit and confirmed; pattern_match is signature-only (PR #137).'
+                }
               >
+                {finding.verification_status === 'exploited' && (
+                  <span className="text-[11px] leading-none" aria-hidden>
+                    ⚡
+                  </span>
+                )}
                 {finding.verification_status.replace(/_/g, ' ')}
               </span>
             )}
@@ -602,6 +690,22 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
             {finding.cwe && (
               <span className="font-mono text-neutral-400">{finding.cwe}</span>
             )}
+            {/* Wishlist §17.2 — per-namespace rule-source badge for cloud
+                findings. The vuln_id prefix tells us which engine path
+                produced the row: boto3 CSPM (AWS_*), Prowler (prowler:*),
+                IaC parser (TF_AWS_*), attack-path graph (cap_*). Lets
+                operators tell "live state" from "declared state" findings
+                at a glance. */}
+            {finding.vuln_id && <RuleSourceBadge vulnId={finding.vuln_id} />}
+            {/* Wishlist §18 — per-target-type depth chips. Each helper
+                returns null when the engine didn't emit its field, so
+                the chip row stays clean on web/repo scans that didn't
+                cross MOAK / XSS-context / SSRF-family paths. */}
+            {isVerifiedLive(finding) && <VerifiedLiveChip />}
+            {xssContext(finding) && <XssContextChip context={xssContext(finding)!} />}
+            {ssrfFamily(finding) && <SsrfFamilyChip family={ssrfFamily(finding)!} />}
+            {bolaVariant(finding) && <BolaVariantChip variant={bolaVariant(finding)!} />}
+            {imageCategory(finding) && <ImageCategoryChip category={imageCategory(finding)!} />}
             {finding.target && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-neutral-600">target</span>
@@ -878,7 +982,21 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               migration 029). */}
           {finding.trajectory && <TrajectorySection trajectory={finding.trajectory} />}
 
-          {sections.length === 0 && finding.description_md && (
+          {/* Wishlist §17.2 / §17.4 — Cloud attack-path casefile.
+              Renders the hop-chain + narrative + remediation when the
+              finding's category is cloud_attack_path (engine PRs
+              #293/#294). The casefile replaces the default markdown
+              description block for these findings — the hop chain IS
+              the description for an attack-path. */}
+          {isAttackPathFinding(finding) && <CloudAttackPathCasefile finding={finding} />}
+
+          {/* Wishlist §18 — depth panels keyed off engine-emitted
+              metadata. Each panel hides itself when its field is
+              absent so non-cloud / non-MOAK / non-secret findings
+              render unchanged. */}
+          <DepthPanels finding={finding} />
+
+          {sections.length === 0 && finding.description_md && !isAttackPathFinding(finding) && (
             <Markdown body={finding.description_md} />
           )}
 
@@ -890,6 +1008,38 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               <Markdown body={s.body} />
             </section>
           ))}
+
+          {/* Phase A — affected_files repo deeplinks. Only meaningful
+              for repository-typed targets (the engine emits code-line
+              locations only for code findings). Falls through to a
+              flat list when there's no repo URL or the host isn't
+              recognised. */}
+          {finding.targets?.type === 'repository' && (
+            <AffectedFiles
+              affectedFiles={finding.affected_files}
+              repoUrl={finding.targets?.value ?? null}
+              branch={finding.scans?.branch ?? null}
+            />
+          )}
+
+          {/* Suggested fix (engine PRs #243 / #250 — Patcher specialist).
+              Unified-diff renderer keyed off findings.patch_* columns
+              (migration 058). Renders nothing when the engine didn't
+              propose a patch. Verified patches get an emerald accent;
+              failed verifications get an amber warning. */}
+          <PatchPreview
+            findingId={finding.id}
+            patch={{
+              patch_id: finding.patch_id ?? null,
+              patch_diff: finding.patch_diff ?? null,
+              patch_commit_message: finding.patch_commit_message ?? null,
+              patch_status: finding.patch_status ?? null,
+              patch_verified_at: finding.patch_verified_at ?? null,
+              patch_proposed_at: finding.patch_proposed_at ?? null,
+              patch_pr_url: finding.patch_pr_url ?? null,
+              patch_applied_at: finding.patch_applied_at ?? null,
+            }}
+          />
 
           {/* Triage controls */}
           <section className="space-y-2.5 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4">
@@ -933,13 +1083,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 False positive
               </TriageButton>
               <TriageButton
-                onClick={() => setStatus('wont_fix')}
+                onClick={() => setShowRiskDialog(true)}
                 active={finding.status === 'wont_fix'}
                 tone="neutral"
                 Icon={XCircle}
                 disabled={updating}
               >
-                Won't fix
+                Won&apos;t fix
               </TriageButton>
               {finding.status !== 'open' && (
                 <TriageButton
@@ -970,7 +1120,122 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 Triaged {new Date(finding.triaged_at).toLocaleString()}
               </div>
             )}
+
+            {/* Tier I #6 — assignee + due-date controls. Sits inside the
+                triage section because "who owns this" is a triage
+                decision, not a separate concept. The picker auto-fills
+                due_at from severity SLA on first assignment. */}
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wider text-neutral-500">
+                Owner
+              </span>
+              <AssigneePicker
+                findingId={finding.id}
+                orgId={finding.org_id}
+                initialAssigneeId={finding.assignee_id ?? null}
+                initialDueAt={finding.due_at ?? null}
+              />
+            </div>
+
+            {/* Phase B #7 — risk-acceptance receipt. Surfaces on
+                wont_fix findings so the rationale + expiry are
+                visible without expanding any sub-panel. Auditor pack
+                can pull this same data via the findings RPC. */}
+            {finding.status === 'wont_fix' && finding.wont_fix_reason && (
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2 text-[11.5px] text-amber-100">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/80">
+                  Risk acceptance
+                </div>
+                <div className="mt-1 leading-relaxed">{finding.wont_fix_reason}</div>
+                {finding.risk_acceptance_expires_at && (
+                  <div className="mt-1.5 text-[10.5px] text-amber-200/70">
+                    Expires{' '}
+                    {new Date(finding.risk_acceptance_expires_at).toLocaleDateString()}{' '}
+                    {(() => {
+                      const days = Math.floor(
+                        (new Date(finding.risk_acceptance_expires_at).getTime() -
+                          Date.now()) /
+                          86400000,
+                      );
+                      return days <= 0
+                        ? '· EXPIRED — re-review'
+                        : days <= 14
+                          ? `· in ${days}d`
+                          : `· in ${days}d`;
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
+
+          {/* Tier I #6 — comment thread for security-team discussion.
+              Sits beneath the Triage section so the per-finding
+              discussion sits with the rest of the per-finding
+              metadata. Soft-deleted comments render as "[redacted]"
+              so the audit pack stays intact (migration 065). */}
+          <CommentThread findingId={finding.id} />
+        </div>
+      )}
+
+      {/* Phase B #7 — risk-acceptance dialog. Inline modal because we
+          want the surrounding finding context still visible while the
+          user composes the rationale. Reason required; expiry is
+          optional (no expiry = accept indefinitely). */}
+      {showRiskDialog && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md space-y-3 rounded-xl border border-neutral-700 bg-neutral-900 p-5 shadow-2xl">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-100">
+                Accept this risk
+              </h3>
+              <p className="mt-0.5 text-[11.5px] text-neutral-400">
+                The auditor pack carries this reason next to the dismissal. Optional expiry
+                turns it into a time-boxed exception.
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-400">
+                Reason <span className="text-rose-300">*</span>
+              </div>
+              <textarea
+                value={riskReason}
+                onChange={(e) => setRiskReason(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="e.g. Mitigated by WAF rule X; full fix tracked in JIRA-1234."
+                className="w-full rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-neutral-400">
+                Expires (optional)
+              </div>
+              <input
+                type="date"
+                value={riskExpiry}
+                onChange={(e) => setRiskExpiry(e.target.value)}
+                className="rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowRiskDialog(false)}
+                className="rounded-md px-3 py-1.5 text-[12px] text-neutral-300 hover:bg-neutral-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!riskReason.trim() || updating}
+                onClick={confirmWontFix}
+                className="rounded-md bg-amber-500/20 px-3 py-1.5 text-[12px] font-medium text-amber-100 ring-1 ring-amber-400/40 transition-colors hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Accept risk
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1508,4 +1773,399 @@ function formatTrajectoryDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
   return `${mins}m ${secs}s`;
+}
+
+// Engine PR #292 — drift correlation badge. Renders one of four
+// classifications inline in the finding-card title row. We choose tone
+// (and copy) to match what the auditor cares about per bucket:
+//
+//   drift           rose, alarming — live ≠ IaC, operational signal
+//   iac_root_cause  amber, actionable — fix the source, drift clears
+//   iac_unfollowed  amber, hygiene — IaC declares a misconfig, live is
+//                    clean; next apply will reintroduce it
+//   uncorrelated_cspm  neutral — no IaC analog, judge on its own merits
+const DRIFT_THEME: Record<
+  NonNullable<Finding['drift_classification']>,
+  { cls: string; label: string; title: string }
+> = {
+  drift: {
+    cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    label: 'Drift',
+    title:
+      "Live cloud state diverges from your Terraform/IaC. Resource was created or modified outside IaC, OR someone hand-edited after the last `terraform apply`.",
+  },
+  iac_root_cause: {
+    cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    label: 'IaC root cause',
+    title:
+      "Both IaC and live state flag the same issue. Fix the Terraform / Helm / K8s YAML and re-apply — the live finding will clear automatically.",
+  },
+  iac_unfollowed: {
+    cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    label: 'IaC unfollowed',
+    title:
+      "Your IaC declares this misconfig but live state is currently clean. Either IaC hasn't been applied yet, or someone hand-fixed live and the next apply will reintroduce the issue.",
+  },
+  uncorrelated_cspm: {
+    cls: 'bg-neutral-700/60 text-neutral-300 ring-neutral-600/40',
+    label: 'CSPM-only',
+    title:
+      "Live-only attestation with no IaC analog (e.g., root MFA, password policy). No drift to compute — judge on its own merits.",
+  },
+};
+
+function DriftBadge({
+  classification,
+}: {
+  classification: NonNullable<Finding['drift_classification']>;
+}) {
+  const theme = DRIFT_THEME[classification];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ${theme.cls}`}
+      title={theme.title}
+    >
+      {theme.label}
+    </span>
+  );
+}
+
+// Wishlist §17.2 — rule-source badge for cloud-track findings.
+//
+// vuln_id prefix → source tag mapping:
+//   cap_*       → ATTACK PATH (engine PRs #293/#294)
+//   AWS_*       → CSPM-AWS    (boto3 path, engine PR #290)
+//   prowler:*   → CSPM        (Prowler wrapper, engine PR #291)
+//   TF_AWS_*    → IAC         (Terraform parser, engine PR #287)
+//   K8S_*       → IAC         (Kubernetes YAML parser, engine PR #287)
+//   HELM_*      → IAC         (Helm parser, engine PR #287)
+//
+// Returns null for any vuln_id that doesn't match — keeps the chip
+// row clean for the dominant case (web/api/repo findings without
+// cloud prefixes).
+function RuleSourceBadge({ vulnId }: { vulnId: string }) {
+  const tag = classifyRuleSource(vulnId);
+  if (!tag) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${tag.cls}`}
+      title={tag.title}
+    >
+      {tag.label}
+    </span>
+  );
+}
+
+function classifyRuleSource(
+  vulnId: string,
+): { label: string; title: string; cls: string } | null {
+  const v = vulnId.trim();
+  if (v.toLowerCase().startsWith('cap_')) {
+    return {
+      label: 'Attack path',
+      title: 'Engine PRs #293/#294 — graph-traversal toxic combination chained from CSPM findings.',
+      cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    };
+  }
+  if (/^AWS_/i.test(v)) {
+    return {
+      label: 'CSPM · AWS',
+      title: 'Engine PR #290 — live-state attestation from the boto3 CSPM scanner.',
+      cls: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    };
+  }
+  if (/^prowler:/i.test(v)) {
+    return {
+      label: 'CSPM',
+      title: 'Engine PR #291 — live-state attestation from the Prowler wrapper (multi-cloud).',
+      cls: 'bg-orange-500/15 text-orange-200 ring-orange-400/30',
+    };
+  }
+  if (/^(TF_AWS|TF)_/i.test(v)) {
+    return {
+      label: 'IaC · Terraform',
+      title: 'Engine PR #287 — declared-state finding from the Terraform parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  if (/^K8S_/i.test(v)) {
+    return {
+      label: 'IaC · Kubernetes',
+      title: 'Engine PR #287 — declared-state finding from the Kubernetes YAML parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  if (/^HELM_/i.test(v)) {
+    return {
+      label: 'IaC · Helm',
+      title: 'Engine PR #287 — declared-state finding from the Helm chart parser.',
+      cls: 'bg-violet-500/15 text-violet-200 ring-violet-400/30',
+    };
+  }
+  return null;
+}
+
+// ============== Wishlist §18 chips ==================================
+//
+// Each chip is a tiny presentational component fed by lib/finding-depth.
+// They render inline in the FindingCard metadata row. Per the wishlist:
+//   - VerifiedLiveChip (§18.1) — the single most powerful credibility cue
+//   - XssContextChip (§18.2) — drives the encoding fix recommendation
+//   - SsrfFamilyChip (§18.2) — distinguishes 6 SSRF families at a glance
+//   - BolaVariantChip (§18.3) — drives the auth-fix path choice
+//   - ImageCategoryChip (§18.4) — Trivy: sca vs misconfig vs secrets
+
+function VerifiedLiveChip() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-200 ring-1 ring-emerald-400/30"
+      title="Engine PR #278 — MOAK LiveProbe verified this finding against the production target (not just the sandbox). Strongest credibility cue available."
+    >
+      <CheckCircle2 className="h-2.5 w-2.5" strokeWidth={2.75} />
+      Live-probed
+    </span>
+  );
+}
+
+function XssContextChip({ context }: { context: string }) {
+  const LABELS: Record<string, { label: string; tip: string }> = {
+    html_body:  { label: 'HTML body',   tip: 'XSS landed in raw HTML body — encode with HTML-entity escapes.' },
+    attribute:  { label: 'HTML attr',   tip: 'XSS landed in an HTML attribute — quote attributes + escape quotes.' },
+    js:         { label: 'JS context',  tip: 'XSS landed in a <script> block — use JS-encoded escapes or strict CSP.' },
+    url:        { label: 'URL context', tip: 'XSS landed in a URL attribute — use a URL-allowlist or schemeless rejection.' },
+    template:   { label: 'Template',    tip: 'XSS landed via a template engine — switch the variable to the auto-escaped variant.' },
+  };
+  const ctx = LABELS[context.toLowerCase()] ?? { label: context, tip: '' };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-rose-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-rose-200 ring-1 ring-rose-400/30"
+      title={ctx.tip || `XSS context: ${context}`}
+    >
+      XSS · {ctx.label}
+    </span>
+  );
+}
+
+function SsrfFamilyChip({ family }: { family: string }) {
+  const LABELS: Record<string, string> = {
+    aws_imds:      'AWS IMDS',
+    gcp_metadata:  'GCP metadata',
+    azure_imds:    'Azure IMDS',
+    internal_dns:  'Internal DNS',
+    filter_bypass: 'Filter bypass',
+    redirect_chain: 'Redirect chain',
+  };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-orange-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-orange-200 ring-1 ring-orange-400/30"
+      title={`SSRF family: ${family} — engine PR #281 ships 29 probes across 6 families.`}
+    >
+      SSRF · {LABELS[family.toLowerCase()] ?? family}
+    </span>
+  );
+}
+
+function BolaVariantChip({ variant }: { variant: string }) {
+  const LABELS: Record<string, { label: string; tip: string }> = {
+    exact_hash:    { label: 'Exact-hash',    tip: 'Same record returned for substituted ID — fix with resource-level auth.' },
+    partial_leak:  { label: 'Partial-leak',  tip: 'Some fields leak across users — fix with field-level filtering.' },
+    list_endpoint: { label: 'List-endpoint', tip: 'List endpoint exposes records that should not be visible — fix at the DB-query layer.' },
+  };
+  const v = LABELS[variant.toLowerCase()] ?? { label: variant, tip: '' };
+  return (
+    <span
+      className="inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30"
+      title={v.tip || `BOLA variant: ${variant}`}
+    >
+      BOLA · {v.label}
+    </span>
+  );
+}
+
+function ImageCategoryChip({ category }: { category: 'sca' | 'misconfig' | 'secrets' }) {
+  const LABELS = {
+    sca:        { label: 'SCA',         tip: 'Engine PR #283 — CVE in installed packages (Trivy SCA).', cls: 'bg-sky-500/15 text-sky-200 ring-sky-400/30' },
+    misconfig:  { label: 'Misconfig',   tip: 'Engine PR #283 — Dockerfile / image config issue.',       cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30' },
+    secrets:    { label: 'Secret',      tip: 'Engine PR #283 — secret baked into image layers.',       cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30' },
+  } as const;
+  const info = LABELS[category];
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ring-1 ${info.cls}`}
+      title={info.tip}
+    >
+      Image · {info.label}
+    </span>
+  );
+}
+
+// ============== Wishlist §18 deeper panels ==========================
+//
+// These live inside the expanded body of the finding card. Each section
+// renders only when its source metadata is present, so non-cloud and
+// pre-engine-PR-#280-era findings keep their classic look.
+
+function DepthPanels({ finding }: { finding: Finding }) {
+  const proof = proofArtifactPath(finding);
+  const chain = pivotChainAncestors(finding);
+  const secretTrail = secretIntroductionTrail(finding);
+  const diff = massAssignmentDiff(finding);
+
+  const hasAnything = proof || chain.length > 0 || secretTrail || diff;
+  if (!hasAnything) return null;
+
+  return (
+    <>
+      {/* §18.1 — MOAK proof-of-exploit artifact download */}
+      {proof && (
+        <section className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200">
+              Proof of exploit
+            </h4>
+            <span className="text-[10.5px] text-emerald-200/60">
+              engine-captured PoC artifact
+            </span>
+          </div>
+          <p className="mt-1 text-[11.5px] text-emerald-100/85">
+            MOAK Phase B3 captured this artifact at exploit time (dumped row, cookie, IMDS
+            blob, captured flag). The file is content-addressable under the run directory —
+            include it in the auditor packet as direct proof.
+          </p>
+          <code className="mt-1.5 block break-all rounded bg-emerald-500/10 px-2 py-1 font-mono text-[10.5px] text-emerald-100">
+            {proof}
+          </code>
+        </section>
+      )}
+
+      {/* §18.1 — Pivot chain breadcrumb */}
+      {chain.length > 0 && (
+        <section className="rounded-lg border border-violet-500/20 bg-violet-500/[0.04] p-3">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-violet-200">
+            Pivot chain
+          </h4>
+          <p className="mt-1 text-[11px] text-violet-200/70">
+            This finding came from a multi-step exploit chain. Earlier findings in the
+            chain were what enabled this one.
+          </p>
+          <ol className="mt-2 flex flex-wrap items-center gap-1">
+            {chain.map((ancestorId, i) => (
+              <li key={ancestorId} className="flex items-center gap-1">
+                <a
+                  href={`#finding-${ancestorId}`}
+                  className="rounded bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] text-violet-200 ring-1 ring-violet-400/30 hover:bg-violet-500/25"
+                  title={`Earlier finding ${ancestorId}`}
+                >
+                  Step {i + 1}
+                </a>
+                <ChevronRight
+                  className="h-2.5 w-2.5 text-violet-300/60"
+                  strokeWidth={2.5}
+                />
+              </li>
+            ))}
+            <li>
+              <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-200 ring-1 ring-rose-400/30">
+                This finding
+              </span>
+            </li>
+          </ol>
+        </section>
+      )}
+
+      {/* §18.5 — Secret introduction trail */}
+      {secretTrail && (
+        <section className="rounded-lg border border-rose-500/20 bg-rose-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <Key className="h-3.5 w-3.5 text-rose-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-rose-200">
+              Secret introduction trail
+            </h4>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-rose-200/80">
+            First introduced in commit{' '}
+            {secretTrail.commit_url ? (
+              <a
+                href={secretTrail.commit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-rose-100 underline-offset-2 hover:underline"
+              >
+                {secretTrail.commit_sha.slice(0, 12)}
+              </a>
+            ) : (
+              <code className="font-mono text-rose-100">{secretTrail.commit_sha.slice(0, 12)}</code>
+            )}
+            {secretTrail.author && (
+              <> by <strong className="text-rose-100">{secretTrail.author}</strong></>
+            )}
+            {secretTrail.authored_at && (
+              <> on {new Date(secretTrail.authored_at).toLocaleDateString()}</>
+            )}
+            .
+          </p>
+          {secretTrail.current_state && (
+            <p className="mt-1.5 text-[11px] text-rose-200/70">
+              Current state in HEAD:{' '}
+              {secretTrail.current_state === 'still_present' ? (
+                <span className="font-semibold text-rose-100">
+                  still present — rotate immediately
+                </span>
+              ) : (
+                <span>
+                  removed in history — secret has been reverted, but the rotation conversation
+                  still applies (anything pushed to a public remote is leaked)
+                </span>
+              )}
+              .
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* §18.3 — Mass-assignment schema diff */}
+      {diff && (diff.schema_expected || diff.accepted_field) && (
+        <section className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3">
+          <div className="flex items-center gap-2">
+            <FileWarning className="h-3.5 w-3.5 text-amber-300" strokeWidth={2.5} />
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-amber-200">
+              Schema diff
+            </h4>
+            <span className="text-[10.5px] text-amber-200/60">
+              engine PR #282 — schema-aware mass-assignment
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded border border-emerald-500/20 bg-emerald-500/[0.05] p-2">
+              <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wider text-emerald-300/80">
+                OpenAPI says
+              </div>
+              <code className="block whitespace-pre-wrap break-all font-mono text-[10.5px] text-emerald-100">
+                {diff.schema_expected ?? '—'}
+              </code>
+            </div>
+            <div className="rounded border border-rose-500/20 bg-rose-500/[0.05] p-2">
+              <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wider text-rose-300/80">
+                Server accepted
+              </div>
+              <code className="block whitespace-pre-wrap break-all font-mono text-[10.5px] text-rose-100">
+                {diff.accepted_field ?? '—'}
+              </code>
+            </div>
+          </div>
+          {diff.sample_payload && (
+            <details className="text-[11px]">
+              <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-amber-300/70">
+                Sample payload
+              </summary>
+              <pre className="mt-1.5 overflow-x-auto rounded bg-amber-500/[0.04] p-2 font-mono text-[10px] text-amber-100">
+                {diff.sample_payload}
+              </pre>
+            </details>
+          )}
+        </section>
+      )}
+    </>
+  );
 }

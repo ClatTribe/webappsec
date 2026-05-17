@@ -15,7 +15,14 @@ from unittest.mock import patch
 
 import pytest
 
-from strix_worker.notifier import notify_scan_completion, _compose_message, _headline
+from strix_worker.notifier import (
+    notify_scan_completion,
+    _compose_message,
+    _headline,
+    forward_agent_message_to_slack,
+    _compose_chat_bridge_payload,
+    _strip_markdown_for_fallback,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -309,3 +316,183 @@ def test_notify_swallows_request_exception():
 @pytest.fixture(scope="session", autouse=True)
 def _no_cleanup() -> None:
     return None
+
+
+# ---------------------------------------------------------------------------
+# Phase D v1 — chat-bridge: forward_agent_message_to_slack
+# ---------------------------------------------------------------------------
+
+
+class _BridgeFakeTable:
+    """Minimal table fake for the chat-bridge path — returns a single
+    agent_messages row by id when .single().execute() is called."""
+
+    def __init__(self, row: dict[str, Any] | None) -> None:
+        self._row = row
+
+    def select(self, _cols: str) -> "_BridgeFakeTable":
+        return self
+
+    def eq(self, _col: str, _val: Any) -> "_BridgeFakeTable":
+        return self
+
+    def single(self) -> "_BridgeFakeTable":
+        return self
+
+    def execute(self) -> Any:
+        from types import SimpleNamespace
+        return SimpleNamespace(data=self._row)
+
+
+class _BridgeFakeClient:
+    def __init__(self, msg_row: dict[str, Any] | None) -> None:
+        self._msg_row = msg_row
+
+    def table(self, name: str) -> _BridgeFakeTable:
+        if name == "agent_messages":
+            return _BridgeFakeTable(self._msg_row)
+        return _BridgeFakeTable(None)
+
+
+class _BridgeFakeSb:
+    def __init__(
+        self,
+        msg_row: dict[str, Any] | None,
+        webhook: str | None,
+    ) -> None:
+        self.client = _BridgeFakeClient(msg_row)
+        self._webhook = webhook
+
+    def decrypt_org_slack_webhook_by_org(self, org_id: str) -> str | None:
+        return self._webhook
+
+
+def test_compose_chat_bridge_payload_renders_text_block_with_strix_attribution():
+    """First text block becomes Slack body + a context line."""
+    msg = {
+        "id": "m1",
+        "blocks": [
+            {"type": "text", "markdown": "🛑 **Critical** — SQL injection at /api/login"},
+            {"type": "finding_ref", "finding_id": "f1"},
+        ],
+    }
+    payload = _compose_chat_bridge_payload(msg)
+    assert payload is not None
+    # mrkdwn body carries the text + the finding_ref context line
+    section = payload["blocks"][0]["text"]["text"]
+    assert "Critical" in section
+    assert "SQL injection" in section
+    assert "finding_ref" in section
+    # context block carries the Strix attribution
+    ctx = payload["blocks"][1]["elements"][0]["text"]
+    assert "Strix" in ctx
+    # fallback text is plain — markdown stripped
+    assert "**" not in payload["text"]
+    assert "Critical" in payload["text"]
+
+
+def test_compose_chat_bridge_payload_returns_none_for_empty_blocks():
+    assert _compose_chat_bridge_payload({"id": "m1", "blocks": []}) is None
+    assert _compose_chat_bridge_payload({"id": "m1", "blocks": None}) is None
+    assert _compose_chat_bridge_payload({"id": "m1"}) is None
+
+
+def test_compose_chat_bridge_payload_skips_opaque_unrenderable_blocks():
+    msg = {
+        "id": "m1",
+        "blocks": [
+            {"type": "future_unknown_block", "weird": "data"},
+        ],
+    }
+    assert _compose_chat_bridge_payload(msg) is None
+
+
+def test_strip_markdown_for_fallback_removes_decorators_and_truncates():
+    raw = "**bold** _ital_ `code` " + ("x" * 250)
+    out = _strip_markdown_for_fallback(raw)
+    assert "**" not in out
+    assert "`" not in out
+    assert len(out) <= 201  # 200 + ellipsis
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_message_skips_when_no_webhook():
+    """An org with slack_bridge_enabled but a missing/decryptable webhook
+    silently no-ops (no POST attempted)."""
+    msg_row = {
+        "id": "m1", "org_id": "o1", "thread_id": "t1", "role": "agent",
+        "blocks": [{"type": "text", "markdown": "hello"}],
+        "citations": [], "created_at": "now",
+    }
+    sb = _BridgeFakeSb(msg_row=msg_row, webhook=None)
+    with patch("strix_worker.notifier.httpx.Client") as mock_client:
+        await forward_agent_message_to_slack(sb, "m1")
+        mock_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_message_posts_to_webhook():
+    """End-to-end: message + webhook → Slack POST happens with the
+    composed payload."""
+    msg_row = {
+        "id": "m1", "org_id": "o1", "thread_id": "t1", "role": "agent",
+        "blocks": [{"type": "text", "markdown": "🛑 Dismissed"}],
+        "citations": [], "created_at": "now",
+    }
+    sb = _BridgeFakeSb(
+        msg_row=msg_row,
+        webhook="https://hooks.slack.com/services/T1/B1/secret",
+    )
+
+    posts: list[Any] = []
+
+    class _MockClient:
+        def __init__(self, *_a, **_kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): pass
+        def post(self, url: str, json: dict) -> Any:
+            posts.append((url, json))
+            from types import SimpleNamespace
+            return SimpleNamespace(status_code=200, text="ok")
+
+    with patch("strix_worker.notifier.httpx.Client", _MockClient):
+        await forward_agent_message_to_slack(sb, "m1")
+
+    assert len(posts) == 1
+    url, body = posts[0]
+    assert url.startswith("https://hooks.slack.com/services/")
+    assert "blocks" in body
+    assert "Dismissed" in body["text"]
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_message_swallows_http_errors():
+    msg_row = {
+        "id": "m1", "org_id": "o1", "thread_id": "t1", "role": "agent",
+        "blocks": [{"type": "text", "markdown": "hi"}],
+        "citations": [], "created_at": "now",
+    }
+    sb = _BridgeFakeSb(
+        msg_row=msg_row,
+        webhook="https://hooks.slack.com/services/T/B/x",
+    )
+
+    class _ExplodingClient:
+        def __init__(self, *_a, **_kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): pass
+        def post(self, *_a, **_kw):
+            raise RuntimeError("network down")
+
+    with patch("strix_worker.notifier.httpx.Client", _ExplodingClient):
+        # Must not raise — bridge is best-effort.
+        await forward_agent_message_to_slack(sb, "m1")
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_message_skips_when_message_vanished():
+    """Message id pointing at a deleted row — silent no-op."""
+    sb = _BridgeFakeSb(msg_row=None, webhook="https://hooks.slack.com/services/T/B/x")
+    with patch("strix_worker.notifier.httpx.Client") as mock_client:
+        await forward_agent_message_to_slack(sb, "m1")
+        mock_client.assert_not_called()

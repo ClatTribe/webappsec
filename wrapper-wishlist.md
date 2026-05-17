@@ -757,3 +757,151 @@ The §15 components are the building blocks. This section sketches the operator-
 | ⬜ | **"Trust the engine progressively" UX.** New users start with auto-dismiss in `off` mode (visibility), graduate to `conservative` (default), power users opt into `aggressive`. UI nudges the upgrade as the labeler's TP/FP queue stabilises. | Engine ships the policy primitives (§15.1); wrapper handles progressive rollout. |
 | ⬜ | **"This finding has a stable identity" cross-scan view.** Use `fingerprint` + `reproducibility_token` to thread findings across scans. Operator sees: "this finding was first reported on Jan 5, has been observed in every scan since, was labeled FP once on Feb 12, and was force-shown via re-promote on Feb 14." A continuous casefile, not 47 separate scan reports. | All primitives shipped engine-side; pure wrapper persistence + UI. |
 | ⬜ | **"Coverage receipt" on every report.** Final report ends with a coverage receipt: phases run × categories covered × ingested traffic × hypotheses resolved × auto-dismissals × FP-loop labels written. The operator hands this to compliance: "here's evidence the engine did its job." | Engine emits all the primitives (§15.1, 15.2, 15.4); wrapper aggregates. |
+
+---
+
+## 17. Wrapper-side companions to engine PRs #290–#294 (CSPM + cloud attack paths)
+
+The engine just shipped the fifth target type — `cloud_account` — plus IaC↔CSPM
+drift correlation and graph-based cloud-attack-path detection. Together they're
+the CNAPP-capability slice that closes the biggest gap vs. Wiz/Orca at the
+dev-tier price point.
+
+**Breaking-shape changes**: zero. Every new finding rides the existing
+`findings` table with a new `category` value (`misconfig` / `drift` /
+`cloud_attack_path`) and a new `rule_id` namespace (`AWS_*`,
+`prowler:<check_id>`, `cap_*`). Per `CLAUDE.md` mirror-engine-shape doctrine,
+no schema migration is required for findings ingestion.
+
+**Engine PRs that landed**:
+- **[#290]** boto3-backed AWS CSPM scanner — 14 checks across S3, EC2 SG, IAM, RDS, EBS, CloudTrail, VPC; hermetic-testable via DI'd client factory.
+- **[#291]** Prowler wrapper as primary engine — Apache 2.0, multi-cloud (AWS/Azure/GCP/K8s), 500+ checks; built-in boto3 stays as offline / minimal-install fallback.
+- **[#292]** IaC ↔ CSPM drift correlator — classifies every finding as `iac_root_cause` / `drift` / `iac_unfollowed` / `uncorrelated_cspm`.
+- **[#293]** Cloud attack-path graph — five built-in patterns (public storage credentials risk, internet-exposed compute with IAM, wildcard admin attached, root unsafe, world-assumable role); pluggable via custom-pattern functions for org-specific scenarios.
+- **[#294]** Attack-path emission threaded through `scan_cloud_account` by default — wrapper gets toxic-combination findings for free with zero integration work.
+
+### 17.1 New target type wiring (already done in `cspm_cloud_account_target` migration)
+
+The migration `20260617000072_cspm_cloud_account_target.sql` already extends the
+DB CHECK constraints; the frontend target-config (`lib/target-config.ts`) and
+the worker instruction augmenter (`worker/src/strix_worker/instruction.py`)
+were updated alongside. **Done — listed here so future contributors can find
+the precedent.**
+
+### 17.2 New finding categories the wrapper must render
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **`category=misconfig` rendering for CSPM findings.** CSPM rule IDs come in three namespaces: `AWS_*` (boto3 path), `prowler:<check_id>` (Prowler path), and `TF_AWS_*` (IaC layer — was already there). Findings carry `compliance_controls.cis_aws` / `cis_azure` / `cis_gcp` / `cis_docker` / `cis_kubernetes` arrays the existing compliance panel renders. | Without explicit per-namespace styling the dashboard treats CSPM findings as generic "Other". |
+| ⬜ | **`category=drift` rendering with classification pill.** Drift findings carry `rule_id`, `iac_rule_id`, `cspm_rule_id`, plus a classification label rendered via the title prefix `[drift:iac_root_cause]` / `[drift:drift]` / `[drift:iac_unfollowed]`. The wrapper should render the classification as a chip + filter pill — auditors group by classification. | Drift findings are operationally distinct from CSPM findings; a single classification chip turns the "is my Terraform authoritative?" answer into a one-glance dashboard widget. |
+| ⬜ | **`category=cloud_attack_path` rendering with a `casefile` shape.** Attack-path findings carry `narrative`, `hops` (ordered node-key chain), `evidence_edges`, `mitre_techniques`, `remediation`. Treat them as Wiz-style attack-path cards: hop-chain diagram (or numbered list) at top, narrative below, remediation accordion. | This is the single highest-impact UI affordance — attack-path findings are the headline number in a CNAPP product; a flat list hides their value. |
+
+### 17.3 Cloud-account target picker + creds form
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Cloud-account "Add target" form.** Provider selector (AWS / Azure / GCP), AWS-side fields for profile name OR assume-role ARN OR access-key pair, optional region filter, optional Prowler `--compliance` pack. Same secret-handling pattern as `--auth-*` flags (forwarded as env, never logged). | The migration ships the DB shape; the form is the operator-facing surface. |
+| ⬜ | **"Scan now" + scheduled-scan toggle.** CSPM is the canonical schedule-it target — most customers want a nightly account scan. Reuse the existing scheduler. | Cloud accounts don't change minute-to-minute; daily is the right cadence and the engine's already idempotent. |
+| ⬜ | **Read-only contract notice.** Banner reminding the operator the scan is read-only (`Describe*` / `Get*` / `List*` only, AWS-managed `SecurityAudit` role is the recommended grant). | Customers' security teams ask before granting cloud creds; the banner pre-empts the question. |
+
+### 17.4 Attack-path dashboard
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Top-of-dashboard "Critical Attack Paths" card.** Aggregate count of `cloud_attack_path` findings with severity ≥ high, grouped by `pattern_id`. Click drills into the per-path casefile. | First thing the CISO looks at. The single number "5 critical attack paths" is more legible than "127 CSPM findings". |
+| ⬜ | **Per-path casefile view.** Hop-chain diagram (resource → identity → policy → ...), narrative paragraph, MITRE technique chips, remediation accordion, "Show constituent CSPM findings" expander linking back to the underlying single findings. | Attack-path findings reference multiple constituent CSPM findings; the wrapper should show the relationship — operator wants to see "fixing this one IaC line clears these 3 attack paths". |
+| ⬜ | **Drift filter row.** Toggle group above the findings table: `All / iac_root_cause / drift / iac_unfollowed / uncorrelated_cspm`. Reads from the `[drift:*]` title prefix on the underlying tracer record. | Dev-team workflow: "show me only the drift" → fix in Terraform; "show me only iac_unfollowed" → re-apply pipeline. |
+
+### 17.5 Compliance-overlay polish for cloud findings
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Per-framework filter for CIS Docker / Kubernetes / AWS / Azure / GCP.** Engine ships per-finding `compliance_controls.cis_<provider>` arrays via the `RULE_ID_TO_CONTROLS` map. Wrapper renders the filter pill set so "show me everything that violates CIS AWS 2.1.5" works one click. | Auditor-facing question shape; the data's there, just needs the UI. |
+| ⬜ | **Compliance dashboard rollup: "X of Y CIS AWS controls attested by latest scan."** Engine's `covered_controls()` + `untested_controls()` from `strix.compliance.mappings` give the denominator; tracer findings give the numerator. | Procurement / SOC 2 prep ask. Same shape as the engine-side `compliance_evidence.json` already shipped. |
+
+### 17.6 Tools-wishlist follow-ups (recorded for future engine PRs)
+
+These aren't wrapper work — they're engine work the wrapper would consume next:
+
+- **Live PoC probes for cloud attack paths** — anonymous S3 GET / RDS TCP handshake / SQS SendMessage / Lambda invoke to verify exploitability of detected paths. Closes the loop on "is this actually exploitable?".
+- **Asset discovery via Prowler enumeration / boto3** — currently the attack-path graph is built from CSPM findings only; a richer graph needs an enumeration pass. Wrapper would then have a more complete picture of the cloud account.
+- **Reachability scoring across the cloud graph** — Wiz's noise-reduction moat. The strix KG architecture is built for it; needs cloud edges plugged into the existing §99 reachability scorer.
+- **CLI surface** — `strix cspm scan --provider aws --profile prod` for operator CLI use outside the agent loop. Today the wrapper composes this via the agent-call path, which is fine, but a direct CLI mode would let CI users run cloud scans without an LLM bill.
+
+---
+
+## 18. Wrapper-side companions to engine PRs #270–#289 (per-target-type depth)
+
+§17 covers the cloud-account / CSPM slice (engine PRs #290–#294). This section
+covers everything else the engine shipped in the same arc — per-target-type
+depth across `web_application` / `api` / `repository` / `container_image`,
+plus the cross-target compliance enrichment that all four feed through.
+
+**Breaking-shape changes**: zero. Every new finding shape, rule_id namespace,
+and metadata field is additive. Old wrapper code keeps rendering; the items
+below describe polish that makes the new data legible.
+
+### 18.1 Web / API target — MOAK exploit synthesis (engine #270, #275–#280)
+
+The engine now runs the MOAK pipeline against web/api targets:
+fingerprinted product detection → CVE candidate → environment build →
+exploit attempt → judge → live probe against the production target (when
+the live-probe safety policy permits). Findings that go through MOAK carry
+fields the wrapper should surface verbatim.
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Render `proof_artifact_path` as a downloadable file.** When `verification_status="exploited"`, the engine writes the PoC artifact (cookie, dumped row, IMDS blob, captured flag) under the run dir. Surface a download link in the finding card — auditors want the proof, not just the description. | Closes the "what's the actual proof?" loop. The path is content-addressable; the wrapper just needs to render the link. |
+| ⬜ | **Render `pivot_chain_ancestors` as a chain breadcrumb.** When a finding came from `pivot_orchestrator.run_pivot_chain`, the list of parent finding IDs is on the report. Render as `Root finding → Pivot 1 → Pivot 2 → this finding` so the post-exploit narrative is visible. | Without this, every pivot finding looks like an isolated event; the chain is what distinguishes a real attack story. |
+| ⬜ | **"Verified live" badge.** Findings emitted by MOAK Phase B3 (LiveProbe) carry the canonical `verified_live: true` signal. Render a green "Live-probed" chip distinct from the regular `verified` chip — those went through the in-sandbox environment build AND the live target. | The single most powerful credibility cue we have. Wiz / Snyk / etc. can't show this. |
+| ⬜ | **MOAK Phase A "fingerprinted-products" coverage card.** Engine #275/#277 expanded the corpus to 14 high-version products. Add a "products fingerprinted" panel on the run summary — operator sees which versions were detected and which had CVE candidates surfaced. | Demonstrates depth: even when no exploit fires, the operator can see what the engine looked at. |
+
+### 18.2 Web / API target — XSS / SSRF / nuclei depth (engine #272, #273, #281)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **XSS context tag on findings.** `scan_xss` now emits the context that triggered the payload (HTML body / attribute / JS / URL / template). Render as a chip on the finding row — operator immediately knows which encoding to fix. | Without the context tag, every XSS finding looks the same; the context is the actionable signal. |
+| ⬜ | **SSRF family chip.** `scan_ssrf` cohort expanded 6 → 29 probes (engine #281): filter-bypass + multi-cloud metadata + redirect chain. Findings carry the family label (`aws_imds`, `gcp_metadata`, `azure_imds`, `internal_dns`, `filter_bypass`, ...). Render as a chip. | A single SSRF finding with the family chip is more useful than three separate findings in the same category. |
+| ⬜ | **Nuclei-tag-filtered run rows in events.** Engine #272 routes nuclei alongside deterministic specialists. `tool.execution.started` events for nuclei carry the tag filter — render them in the live scan view so operators see "nuclei is running with tag=xss" alongside `scan_xss`. | Demystifies the pipeline. Today a nuclei run is opaque from the dashboard. |
+
+### 18.3 Web / API target — schema-aware API depth (engine #282, #284)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Mass-assignment finding shape with schema diff.** Engine #282 made `scan_mass_assignment` schema-aware: it pulls the request-body schema from OpenAPI (when present) and emits a finding only when a field the schema rejects is accepted. Findings carry `{schema_expected, accepted_field, sample_payload}`. Render as a side-by-side diff: "OpenAPI says ✗ — server accepted ✓". | Akto's whole differentiator was this exact shape. The data's there; the diff renderer is the polish. |
+| ⬜ | **BOLA variant chip.** Engine #284 split BOLA detection into three variants: `exact_hash` (same record returned for substituted ID), `partial_leak` (some fields leak), `list_endpoint` (list contains records that shouldn't be visible). Findings carry the variant label. Render as a chip. | The variant changes the remediation path — exact_hash needs auth at the resource level; list_endpoint needs filter-at-the-DB-query layer. |
+| ⬜ | **OpenAPI ingest UI.** Engine reads OpenAPI specs via `STRIX_OPENAPI_URL` env. Wrapper should accept either a URL or an upload on the target-create form, persist it, and pass through on every scan. | Without an OpenAPI spec, schema-aware checks degrade to inference; with it they're surgical. |
+
+### 18.4 Container_image target (engine #274, #283, #286)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **`container_image` target picker.** The migration that added the type wired the DB; the UI side needs the option in the target-create form. Accepts `nginx:1.25` / `registry.example.com/foo/bar:tag` / `nginx@sha256:...` shapes (validated engine-side; mirror the validation in the form for fast feedback). | First-class target type with no UI affordance to create one is the worst UX state — operator hits the API instead. |
+| ⬜ | **Three finding classes from one scan.** Engine #283 makes a single Trivy invocation emit three categories: `sca` (CVE in installed packages), `misconfig` (Dockerfile / image config issues), `secrets` (secrets baked into layers). Render with a category tab group on the image's report page. | Operators expect to see all three from "scan this image" — without tabs the wrapper buries 2/3 of the value. |
+| ⬜ | **Cosign signature + SLSA provenance card.** Engine #286 runs `cosign verify` against the image's signature (keyless via Fulcio when configured) AND extracts SLSA provenance from the image's referrers. Findings carry `signature_status` (`signed_by_trusted`, `signed_unknown_issuer`, `unsigned`), `slsa_level` (0/1/2/3/L3), and `builder_uri`. Render as a top-of-page card: "Image is **signed by GitHub Actions** (SLSA L2)." | Supply-chain integrity is a CISO-visible metric; the card answers "do we trust this image's origin" in one glance. |
+| ⬜ | **CIS Docker control roll-up.** Container findings carry `compliance_controls.cis_docker` via the rule_id mapping. Show "X of Y CIS Docker controls attested by latest image scan" on the image's report page (mirrors the §17.5 cloud rollup pattern). | Same auditor-facing question shape as cloud, scoped to images. |
+
+### 18.5 Repository target — IaC + secrets git-history (engine #287, #288)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **IaC finding namespace pills.** Engine #287 ships rule packs for Terraform / Kubernetes / Helm. Rule IDs are stable namespaced: `TF_AWS_*`, `K8S_*`, `HELM_*`. Render as a colored namespace chip on the finding row; group findings by namespace in the repository's report sidebar. | Without this, an operator with 50 IaC findings stares at a flat list; pills turn it into "8 Terraform + 12 K8s + 30 Helm". |
+| ⬜ | **IaC file:line link** with branch / commit awareness. IaC findings carry `file` + `line` against the scanned repo. Link to `github.com/<org>/<repo>/blob/<sha>/<file>#L<line>` (or GitLab equivalent). Already a pattern for SAST findings; extend to IaC. | "Click to source" is the single biggest dev-UX win. |
+| ⬜ | **Git-history secrets: "first introduced in commit X" trail.** Engine #288 made `secrets_scan` default to scanning the full git history; findings now carry the commit that introduced the secret. Render the commit hash with a link to GitHub's history view + the author + the date. The remediation copy already references `git log -p` — surface the commit directly so the operator doesn't have to run it. | "Committed secret" findings are useless without provenance — you need to know who, when, and where to start the rotation conversation. |
+| ⬜ | **IaC ↔ CSPM drift correlation (already in §17.4).** Cross-reference: the repository's IaC findings carry the `category=drift` / `iac_unfollowed` classification when a paired CSPM run was available. The wrapper renders the classification chip on the IaC findings page, linking to the corresponding cloud-account scan. | Closes the "is my Terraform authoritative?" loop at the *repo* page (not just the cloud-account page). |
+
+### 18.6 Cross-target — audit-grade compliance enrichment (engine #285, #289)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Per-control evidence card.** Engine #285 enriches each `compliance_controls.<framework>` entry with `{probe_coverage, evidence_pointers, remediation_deadline_days, control_owner}`. Render as a per-control accordion under the framework filter: "PCI 6.5.1 — probed by `scan_sqli`, `scan_nosqli` (87% coverage); remediation deadline 30 days; owner @appsec-team." | This is the auditor-facing artifact. Today the wrapper renders the control IDs but not the evidence cards; the data is there. |
+| ⬜ | **`compliance_evidence.json` artifact download.** The engine writes the auditor-grade JSON bundle to the run dir. Surface a "Download compliance evidence pack" button on the run page. Same UX as the existing `report.md` download. | Customers handing this to SOC 2 / ISO auditors want the file, not a screenshot. |
+| ⬜ | **CIS Docker / Kubernetes / AWS framework filters** (already in §17.5 for cloud, completed here for cross-target). Engine #289 added per-rule_id CIS mappings for the container + repo IaC findings too. The framework filter pill set should also apply on the repository + container_image report pages. | Same auditor-question shape, scoped to repos and images. |
+| ⬜ | **Untested-controls coverage gap surface.** Engine's `untested_controls(frameworks=[...])` enumerates controls in the catalog that NO rule in the corpus maps to. Render as a "Coverage gaps" panel on the compliance dashboard — operator sees "SOC 2 CC6.3 (access removal) is not attested by any AppSec scan; you need other tooling for this control." | Honest about what we don't cover. Auditors trust honest more than they trust 100% green dashboards. |
+
+### 18.7 Cross-target — agent / pipeline visibility (engine #270)
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **MOAK pipeline-phase live view.** Engine #270 ships production agent bodies for the full pipeline (Collector → Researcher → EnvironmentBuilder → Exploiter → Judge → LiveProbe). Each stage emits `tool.execution.*` events. Render the pipeline as a step-by-step progress bar in the live scan view: "Researcher: 3 CVE candidates → Builder: 1 environment built → Exploiter: 1 working PoC → Judge: ✓ → LiveProbe: ✓ verified." | This IS the AI-security-engineer storyboard from §16 in concrete form. Today the operator sees finding count but not the pipeline that produced them. |
+| ⬜ | **MOAK feature-flag visibility on the target page.** Engine #278 added `STRIX_MOAK_LIVE_PROBE` feature flag for live-probe runs. Surface as an org/target setting toggle: "Allow MOAK to issue verified-live probes against this target" with a per-target consent capture. | Live probes against prod are an operational decision, not a default. The toggle protects the customer from running them by accident.

@@ -18,9 +18,27 @@ export type FindingStatus =
   // policy) so it's auditable and one-click-reversible. See migration 020.
   | 'dismissed_by_ai';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
-export type TargetType = 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
+export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'cloud_account' | 'domain' | 'ip_address';
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
 export type TargetStatus = 'active' | 'archived';
+
+export interface TargetSchedule {
+  kind: 'manual' | 'daily' | 'weekly' | 'monthly' | 'on_push' | 'cron';
+  time?: string;            // ISO time-of-day, e.g. '03:00Z' — for daily/weekly/monthly
+  expr?: string;            // cron expression — for kind='cron'
+  on_branches?: string[];   // for kind='on_push'
+}
+
+export interface TargetPosture {
+  critical?: number;
+  high?: number;
+  medium?: number;
+  low?: number;
+  info?: number;
+  coverage_percent?: number;
+  last_scan_status?: ScanStatus;
+  last_scan_at?: string;
+}
 
 export interface Target {
   id: string;
@@ -37,6 +55,165 @@ export interface Target {
   status: TargetStatus;
   auto_discover: boolean;
   config: Record<string, unknown>;
+  // Added in migration 040 (target registry extension).
+  // Optional/null on rows written before the migration.
+  schedule: TargetSchedule | null;
+  posture: TargetPosture | null;
+  archived_at: string | null;
+}
+
+// ---------------- Per-org agent memory (migration 041) ----------------
+//
+// The wrapper's continuity-of-context layer. The chat agent reads from
+// + writes to these on every meaningful turn.
+//
+// All three tables are RLS-scoped by org_id and never cross-tenanted.
+
+export type AgentMemoryFactSource =
+  | 'told_by_user'
+  | 'inferred_from_repo'
+  | 'inferred_from_scan'
+  | 'derived_from_audit'
+  | 'agent_decision';
+
+export interface AgentMemoryFact {
+  id: string;
+  org_id: string;
+  scope: string;        // 'stack' | 'team' | 'compliance' | 'suppression' | ...
+  key: string;
+  value: Record<string, unknown> | unknown[] | string | number | boolean | null;
+  source: AgentMemoryFactSource;
+  confidence: number;   // 0.0 - 1.0
+  superseded_by: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AgentMemoryEpisode {
+  id: string;
+  org_id: string;
+  thread_id: string | null;   // FK to agent_threads added in follow-up migration
+  user_id: string | null;
+  agent_action: string;       // 'finding_dismissed' | 'fix_applied' | 'scan_run' | 'rule_added' | ...
+  payload: Record<string, unknown>;
+  rationale: string | null;
+  created_at: string;
+}
+
+export interface AgentAutonomyPrefs {
+  default: 'ask_before_act' | 'autopilot' | string;
+  auto_fix_severity: Severity | null;   // fix without asking at this severity and above
+  auto_dismiss: boolean;
+  slack_notify: 'always' | 'critical_only' | 'never' | string;
+  // Per-category overrides — additive, future-extensible
+  [category: string]: unknown;
+}
+
+export interface AgentVoicePrefs {
+  tone: 'professional_friendly' | 'terse' | 'verbose' | string;
+  verbosity: 'low' | 'mid' | 'high' | string;
+  name: string;
+}
+
+export interface AgentChannelPrefs {
+  slack_channel_id?: string | null;
+  github_app_installation_id?: string | null;
+  // Future: linear_team_id, jira_project_key, etc.
+  [k: string]: unknown;
+}
+
+export interface AgentSchedulePrefs {
+  daily_digest_time?: string;        // ISO time-of-day, e.g. '09:00Z'
+  digest_channels?: string[];        // ['in_app', 'slack', 'email']
+  [k: string]: unknown;
+}
+
+export interface AgentMemoryPreferences {
+  org_id: string;
+  autonomy: AgentAutonomyPrefs;
+  voice: AgentVoicePrefs;
+  channels: AgentChannelPrefs;
+  schedule: AgentSchedulePrefs;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+// ---------------- Conversational shell (migration 042) ----------------
+//
+// AgentBlock — the typed schema the agent emits and the wrapper renders.
+// Unknown block types fall through to a collapsed-JSON renderer so
+// adding a new type doesn't require a frontend deploy.
+
+export type AgentBlock =
+  | { type: 'text'; markdown: string }
+  | { type: 'table'; columns: string[]; rows: unknown[][]; caption?: string }
+  | { type: 'chart'; kind: 'line' | 'bar' | 'pie'; data: unknown; caption?: string }
+  | { type: 'diff'; file: string; before: string; after: string; language?: string }
+  | { type: 'code'; language: string; content: string; caption?: string }
+  | { type: 'screenshot'; url: string; alt: string; caption?: string }
+  | {
+      type: 'timeline';
+      events: { at: string; label: string; evidence?: unknown }[];
+    }
+  | { type: 'finding_ref'; finding_id: string }
+  | { type: 'scan_ref'; scan_id: string }
+  | { type: 'asset_ref'; target_id: string }
+  | {
+      type: 'pr_ref';
+      provider: 'github' | 'gitlab' | 'bitbucket';
+      url: string;
+      title: string;
+      status: string;
+    };
+
+export interface AgentCitation {
+  kind: 'finding' | 'scan' | 'scan_event' | 'episode' | 'asset' | 'compliance_evidence';
+  id: string;
+  label?: string;
+}
+
+export interface AgentSuggestion {
+  label: string;
+  action: string;                         // 'apply_fix' | 'see_diff' | 'snooze' | …
+  payload?: Record<string, unknown>;
+}
+
+export interface AgentAction {
+  kind: string;                            // 'finding_dismissed' | 'fix_applied' | …
+  target?: string;                         // generic id reference
+  at: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface AgentThread {
+  id: string;
+  org_id: string;
+  user_id: string | null;
+  title: string | null;
+  /**
+   * Soft binding to a finding/scan/asset/onboarding the thread is about.
+   * Examples: {kind:'finding', id:'<uuid>'} | {kind:'primary'} |
+   * {kind:'onboarding'} | {kind:'daily_digest', date:'2026-05-23'}.
+   */
+  context: Record<string, unknown> | null;
+  archived: boolean;
+  created_at: string;
+  last_message_at: string;
+}
+
+export interface AgentMessage {
+  id: string;
+  thread_id: string;
+  org_id: string;
+  role: 'user' | 'agent' | 'system' | 'tool';
+  blocks: AgentBlock[];
+  citations: AgentCitation[];
+  suggestions: AgentSuggestion[] | null;
+  reasoning_trace: string[] | null;
+  confidence: number | null;
+  acted_on: AgentAction[] | null;
+  parent_id: string | null;
+  created_at: string;
 }
 
 export interface Profile {
@@ -54,6 +231,14 @@ export interface Organization {
   plan: 'free' | 'pro' | 'enterprise';
   llm_provider: string | null;
   created_at: string;
+  // Public Trust Page (migration 047). Default false; flipped from
+  // settings UI or directly via the trust-page API route.
+  trust_page_enabled?: boolean;
+  trust_page_subtitle?: string | null;
+  trust_page_published_at?: string | null;
+  // Slack chat-bridge opt-in (migration 048). Forwards agent_messages
+  // to the org's configured Slack webhook.
+  slack_bridge_enabled?: boolean;
 }
 
 export interface OrgMember {
@@ -144,6 +329,27 @@ export interface Scan {
    *  `<org>/<scan>/sbom.cdx.json` (migration 032). UI keys the
    *  "View SBOM" / "Download CycloneDX" CTAs off this column. */
   sbom_uploaded?: boolean;
+  /** Phase A #5 / migration 062 — SARIF auto-pushed to GitHub Code
+   *  Scanning at scan-finalize. URL is the repo's Code Scanning
+   *  landing page; null means the worker didn't upload (no SARIF
+   *  artefact, target isn't a GitHub repo, or no integration_id). */
+  code_scanning_url?: string | null;
+  code_scanning_uploaded_at?: string | null;
+  /** Tier II #7 / migration 066 — GitHub PR context, set when this
+   *  scan was created by the /api/webhooks/github receiver. The
+   *  PR comment dispatcher uses these to compose + post the sticky
+   *  comment. All four null for scans not driven by a PR webhook. */
+  github_owner?: string | null;
+  github_repo?: string | null;
+  github_pull_request_number?: number | null;
+  github_head_sha?: string | null;
+  /** Tier II #7 — sticky PR comment tracking. pr_comment_id is the
+   *  GitHub comment we own (PATCHed on re-runs rather than POSTed
+   *  fresh so the PR keeps one running comment, not N per push). */
+  pr_comment_id?: number | null;
+  pr_comment_url?: string | null;
+  pr_comment_posted_at?: string | null;
+  pr_comment_updated_at?: string | null;
   /** Engine PR #141 — HAR / Burp project imports persisted by the
    *  API route on scan creation (migration 035). Browser uploads to
    *  user-uploads bucket; worker downloads at scan-start. */
@@ -249,9 +455,30 @@ export interface RunMeta {
   mfa_attestation?: MfaAttestation;
   compliance_posture?: CompliancePosture;
   monitoring_posture?: MonitoringPosture;
+  /** Engine PR #286 — Cosign signature + SLSA provenance attestation
+   *  for the scanned container image. Set only on container_image
+   *  scans where the image had a sigstore signature and/or SLSA
+   *  provenance attached as a referrer. The wrapper renders a
+   *  top-of-page card off this; null / absent for non-image scans. */
+  supply_chain?: SupplyChainAttestation;
   /** Engines may add additional top-level signals over time. The
    *  open shape is forward-compatible — a new key the wrapper doesn't
    *  know about is preserved on the row and ignored by the UI. */
+  [k: string]: unknown;
+}
+
+export interface SupplyChainAttestation {
+  /** signed_by_trusted (Fulcio + trusted issuer) /
+   *  signed_unknown_issuer / unsigned / unknown */
+  signature_status: 'signed_by_trusted' | 'signed_unknown_issuer' | 'unsigned' | 'unknown';
+  /** 0 = no provenance, 1 = source identified, 2 = hermetic, 3 = isolated builder */
+  slsa_level?: 0 | 1 | 2 | 3 | null;
+  /** URI of the build platform (e.g. https://github.com/actions/runner). */
+  builder_uri?: string | null;
+  /** Cert subject when signed_by_trusted (e.g. `https://github.com/acme/repo/.github/workflows/release.yml@refs/tags/v1.2.0`). */
+  signed_by?: string | null;
+  /** Engine sometimes attaches the cert's not-after as a freshness signal. */
+  signature_observed_at?: string | null;
   [k: string]: unknown;
 }
 
@@ -337,6 +564,146 @@ export interface ScanRecurrenceSummary {
 }
 
 /**
+ * Tier II #13 — org-declared compensating control for a failing
+ * framework control. Surfaces on the trust page next to the failing
+ * control with an amber "compensated" badge.
+ */
+export interface CompensatingControl {
+  id: string;
+  framework: string;
+  control_id: string;
+  title: string;
+  rationale: string;
+  evidence_links: string[];
+  effective_from: string;
+  expires_at: string | null;
+  created_by: string;
+  created_at: string;
+  /** True when expires_at is within 30 days — UI surfaces a "review
+   *  due soon" chip on the row. Only returned by the
+   *  compensating_controls_active() RPC. */
+  review_due_soon?: boolean;
+}
+
+/**
+ * Tier II #13 — one row of the static cross-framework equivalence
+ * table. Returned by `equivalent_controls(framework, control_id)`.
+ */
+export interface ControlMappingRow {
+  group_key: string;
+  group_name: string;
+  framework: string;
+  control_id: string;
+  control_label: string | null;
+}
+
+/**
+ * Tier II #12 — Audit-readiness score for one framework.
+ *
+ * Returned by `compute_org_audit_readiness()`. The `prev_*` columns
+ * carry the previous-quarter snapshot for delta display ("was 68 last
+ * quarter") — both may be null when no snapshot yet exists.
+ *
+ * Note: all columns are prefixed `out_` in the RPC's RETURNS TABLE
+ * to dodge PG's identifier-shadowing rule (column names shadow OUT
+ * params in plpgsql). The TS shape strips that prefix for ergonomic
+ * consumption — the page code reads `row.framework` not `row.out_framework`.
+ */
+export interface AuditReadinessRow {
+  framework: string;
+  composite_pct: number;
+  base_readiness_pct: number;
+  coverage_pct: number;
+  cadence_pct: number;
+  findings_pct: number;
+  freshness_pct: number;
+  open_crit_findings: number;
+  open_high_findings: number;
+  stale_controls: number;
+  total_controls: number;
+  touched_controls: number;
+  days_since_last_scan: number;
+  prev_quarter: string | null;
+  prev_score: number | null;
+}
+
+/**
+ * Tier II #12 — one quarter's snapshot row from `compliance_snapshots`.
+ * Drives the "Q1: 68 → Q2: 81" history graph on /compliance/readiness.
+ */
+export interface ComplianceSnapshot {
+  id: string;
+  org_id: string;
+  framework: string;
+  /** YYYY-Q[1-4] (e.g. "2026-Q2"). */
+  quarter: string;
+  score: number;
+  breakdown: {
+    base_readiness_pct: number;
+    coverage_pct: number;
+    cadence_pct: number;
+    findings_pct: number;
+    freshness_pct: number;
+    open_crit_findings: number;
+    open_high_findings: number;
+    stale_controls: number;
+    total_controls: number;
+    touched_controls: number;
+    days_since_last_scan: number;
+  };
+  snapshot_at: string;
+}
+
+/**
+ * Tier II #11 — Cross-scan finding rollup.
+ *
+ * One row per fingerprint that hits >= 2 distinct targets in the org.
+ * Returned by `fingerprint_rollup()`. The canonical title / severity /
+ * CWE / CVE come from the most-recent occurrence; the counts are over
+ * the full set of occurrences (including pre-resolved ones).
+ */
+export interface FingerprintRollupRow {
+  fingerprint: string;
+  title: string;
+  severity: Severity;
+  cwe: string | null;
+  cve: string | null;
+  occurrence_count: number;
+  target_count: number;
+  open_count: number;
+  triaged_real_count: number;
+  fixed_count: number;
+  false_positive_count: number;
+  wont_fix_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  /** Highest urgency tier observed across occurrences. fix_now wins
+   *  over fix_soon > monitor > dismiss. null when no occurrence has
+   *  an ai_assessment. */
+  max_urgency: 'fix_now' | 'fix_soon' | 'monitor' | 'dismiss' | null;
+}
+
+/**
+ * Tier II #11 — drill-in row for `fingerprint_targets(p_fingerprint)`.
+ * One row per occurrence of the fingerprint across all targets in
+ * the org, ordered open-first then by recency.
+ */
+export interface FingerprintTargetRow {
+  finding_id: string;
+  target_id: string | null;
+  target_name: string | null;
+  target_value: string | null;
+  target_type: string | null;
+  scan_id: string;
+  scan_name: string;
+  status: FindingStatus;
+  severity: Severity;
+  created_at: string;
+  last_seen_at: string | null;
+  times_seen: number | null;
+}
+
+/**
  * One step in the heuristic "kill-chain" reconstruction (pillar 1 item 2).
  * The `event_type` is from Strix's vocabulary; the `payload` is the raw
  * scan_event payload. UI extracts a friendly label per event_type.
@@ -356,7 +723,7 @@ export interface KillChainResponse {
 export interface ScanTarget {
   id: string;
   scan_id: string;
-  type: 'local_code' | 'repository' | 'web_application' | 'domain' | 'ip_address';
+  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'cloud_account' | 'domain' | 'ip_address';
   value: string;
   workspace_subdir: string | null;
   source_integration_id: string | null;
@@ -453,6 +820,25 @@ export interface Finding {
   /** Mapping of compliance frameworks → control IDs implicated by this finding.
    *  Engine PR #103. */
   compliance_controls?: ComplianceControls | null;
+  /** Engine PR #292 — drift correlation classification. Set when a
+   *  scan included BOTH a `repository` target (IaC) AND a
+   *  `cloud_account` target (CSPM) and the engine cross-referenced
+   *  them. Null on any single-target scan.
+   *
+   *  Semantics:
+   *    iac_root_cause     IaC + CSPM agree → fix the IaC, re-apply
+   *    drift              CSPM-only finding → resource drifted out of IaC
+   *                       (severity is bumped one tier — IaC ≠ live is
+   *                       itself an operational signal)
+   *    iac_unfollowed     IaC says misconfig but live is clean → IaC
+   *                       hasn't been applied; next apply will reintroduce
+   *    uncorrelated_cspm  live-only attestation, no IaC analog */
+  drift_classification?:
+    | 'iac_root_cause'
+    | 'drift'
+    | 'iac_unfollowed'
+    | 'uncorrelated_cspm'
+    | null;
   /** `pii` / `phi` / `pci` / `credentials` / `internal` / null. */
   data_classification?: string | null;
   /** MITRE ATT&CK technique IDs. */
@@ -472,6 +858,50 @@ export interface Finding {
    *  whole record verbatim; the UI lazy-renders the "How did the engine
    *  arrive at this?" panel from these fields. */
   trajectory?: TrajectoryRecord | null;
+  /** Patcher specialist (strix PRs #243 / #250 / migration 058). One
+   *  unified-diff proposal per finding. status ∈
+   *  `proposed | applied | verified | failed`. UI renders these as the
+   *  "Suggested fix" expandable panel on the finding card. */
+  patch_id?: string | null;
+  patch_diff?: string | null;
+  patch_commit_message?: string | null;
+  patch_status?: string | null;
+  patch_verified_at?: string | null;
+  patch_proposed_at?: string | null;
+  /** Patcher → PR flow (wrapper migration 060). Set when a user clicks
+   *  "Apply as PR" and the wrapper opens a GitHub PR with the engine's
+   *  diff. Never set by the engine. */
+  patch_pr_url?: string | null;
+  patch_applied_at?: string | null;
+  /** Phase B #7 / migration 063 — risk-acceptance metadata when the
+   *  user marked this finding `wont_fix`. Required reason; optional
+   *  expiry timestamp (after which the finding visually surfaces as
+   *  an expired acceptance). Engine never sets these — wrapper UI
+   *  writes them via the triage flow. */
+  wont_fix_reason?: string | null;
+  risk_acceptance_expires_at?: string | null;
+  /** Tier I #6 / migration 065 — collaboration metadata. assignee_id
+   *  references auth.users(id) directly so the FK stays valid if a
+   *  member is moved between orgs. due_at is auto-set on triage by
+   *  severity SLA when missing; sla_severity_tier captures the tier
+   *  the due-date came from so a severity bump doesn't silently
+   *  reset it. */
+  assignee_id?: string | null;
+  due_at?: string | null;
+  sla_severity_tier?: string | null;
+}
+
+/** Tier I #6 / migration 065 — per-finding discussion thread. */
+export interface FindingComment {
+  id: string;
+  finding_id: string;
+  org_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
 }
 
 export interface TrajectoryRecord {
@@ -527,6 +957,15 @@ export interface ComplianceControls {
   iso_27001?: string[];
   nist_800_53?: string[];
   owasp?: string[];
+  // Engine PR #289 — CIS Cloud benchmark mappings. Emitted by CSPM
+  // specialists (PRs #290 / #291) and by IaC parsers (PR #287). Keys
+  // mirror the engine's framework registry; the wrapper renders them
+  // alongside the app-side frameworks above.
+  cis_aws?: string[];
+  cis_gcp?: string[];
+  cis_azure?: string[];
+  cis_kubernetes?: string[];
+  cis_docker?: string[];
 }
 
 export interface PriorLabelAttribution {

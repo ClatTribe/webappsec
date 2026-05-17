@@ -131,6 +131,86 @@ def test_web_application_zero_or_negative_qps_ignored() -> None:
 
 
 # ---------------------------------------------------------------------------
+# api (engine PRs #267 + #271 — first-class api target type)
+# ---------------------------------------------------------------------------
+
+
+def test_api_spec_url_appears_in_instruction() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "api",
+                "config": {"spec_url": "https://api.example.com/openapi.json"},
+            }
+        }
+    )
+    assert out is not None
+    assert "https://api.example.com/openapi.json" in out
+    assert "OpenAPI" in out or "spec" in out
+
+
+def test_api_rate_limit_qps_appears_in_instruction() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "api",
+                "config": {"rate_limit_qps": 5},
+            }
+        }
+    )
+    assert out is not None
+    assert "5 requests per second" in out
+
+
+def test_api_empty_config_emits_nothing() -> None:
+    """Empty config on an api target is the common case — engine probes
+    spec paths automatically. Wrapper should not bloat the instruction
+    with placeholder text when there's nothing tenant-specific to say."""
+    out = build_instruction({"targets": {"type": "api", "config": {}}})
+    assert out is None
+
+
+# ---------------------------------------------------------------------------
+# container_image (engine PR #274 — Trivy-driven OCI image scanning)
+# ---------------------------------------------------------------------------
+
+
+def test_container_image_severity_floor_threads_to_instruction() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "container_image",
+                "config": {"severity_floor": "HIGH"},
+            }
+        }
+    )
+    assert out is not None
+    assert "HIGH" in out
+    assert "scan_container_image" in out or "Trivy" in out
+
+
+def test_container_image_private_registry_flag_surfaces_warning() -> None:
+    out = build_instruction(
+        {
+            "targets": {
+                "type": "container_image",
+                "config": {"private_registry": True},
+            }
+        }
+    )
+    assert out is not None
+    assert "private registry" in out.lower()
+
+
+def test_container_image_empty_config_emits_nothing() -> None:
+    """Empty config on a container_image target is the common case —
+    Trivy picks sensible defaults. Wrapper should not bloat the
+    instruction with placeholder text."""
+    out = build_instruction({"targets": {"type": "container_image", "config": {}}})
+    assert out is None
+
+
+# ---------------------------------------------------------------------------
 # domain
 # ---------------------------------------------------------------------------
 

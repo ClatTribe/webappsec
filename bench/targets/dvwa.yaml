@@ -1,0 +1,23 @@
+# Damn Vulnerable Web Application (DVWA) — classic PHP-based teaching tool.
+# Local Docker setup; use the "low" security level to expose all flaws.
+
+slug: dvwa
+name: Damn Vulnerable Web Application (DVWA)
+url: http://localhost:8080
+target_type: web_application
+description: |
+  Long-standing PHP-based teaching DAST target. Eight vulnerability
+  categories at each of four difficulty levels. We use the "low" tier
+  to expose all primitives.
+scan_mode: standard
+max_cost_usd: 1.50
+instruction: |
+  Authorised assessment against a local DVWA instance at the "low"
+  security level. Expect SQLi, XSS, file inclusion, file upload,
+  command injection, CSRF, brute-force.
+ground_truth_file: ground_truth/dvwa.json
+license: GPL-3.0 (project)
+setup: |
+  docker run -d -p 8080:80 vulnerables/web-dvwa
+  # then visit http://localhost:8080/setup.php → Create Database
+  # then login admin/password → DVWA Security → Low → Submit

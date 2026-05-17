@@ -4,7 +4,6 @@ import { ArrowRight } from 'lucide-react';
 const NAV_LINKS = [
   { href: '/pricing', label: 'Pricing' },
   { href: '/blog', label: 'Blog' },
-  { href: '/changelog', label: 'Changelog' },
   { href: '/security', label: 'Security' },
   { href: '/about', label: 'About' },
 ];
@@ -16,7 +15,7 @@ export function BrandMark({ size = 'sm' }: { size?: 'sm' | 'md' }) {
       className={`flex flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 font-mono font-semibold text-white shadow-lg shadow-cyan-500/30 ${dim}`}
       aria-hidden
     >
-      y.
+      T
     </span>
   );
 }
@@ -26,7 +25,7 @@ export function BrandLockup({ className = '' }: { className?: string }) {
     <span className={`flex items-center gap-2.5 ${className}`}>
       <BrandMark />
       <span className="text-base font-semibold tracking-tight">
-        your <span className="text-cyan-300">AI</span> security engineer
+        Tensor<span className="text-cyan-300">Shield</span>
       </span>
     </span>
   );
@@ -79,19 +78,21 @@ export function MarketingFooter() {
             <Link href="/" className="block">
               <span className="flex items-center gap-2">
                 <BrandMark />
-                <span className="text-sm font-semibold">your AI security engineer</span>
+                <span className="text-sm font-semibold">
+                  Tensor<span className="text-cyan-300">Shield</span>
+                </span>
               </span>
             </Link>
             <p className="mt-3 max-w-xs text-xs leading-relaxed text-neutral-500">
-              An AI security engineer that finds real vulnerabilities and learns from your triage to
-              eliminate false positives over time.
+              The AI security engineer for your vibe-coded apps. Scans your code, watches your
+              URLs, and remembers every decision you make.
             </p>
           </div>
           <FooterColumn
             title="Product"
             links={[
               { href: '/pricing', label: 'Pricing' },
-              { href: '/changelog', label: 'Changelog' },
+              { href: '/blog', label: 'Blog' },
               { href: '/security', label: 'Security' },
               { href: '/signup', label: 'Get started' },
             ]}
@@ -115,7 +116,7 @@ export function MarketingFooter() {
         </div>
         <div className="mt-10 border-t border-neutral-900/80 pt-6">
           <p className="text-[11px] text-neutral-600">
-            © {new Date().getFullYear()} youraisecurityengineer. All rights reserved.
+            © {new Date().getFullYear()} TensorShield. All rights reserved.
           </p>
         </div>
       </div>

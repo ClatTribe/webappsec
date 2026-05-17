@@ -12,6 +12,12 @@ import {
   Server,
   Layers,
   Shuffle,
+  FileJson,
+  Plug,
+  Container,
+  Cloud,
+  ShieldAlert,
+  Lock,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TargetType } from '@/lib/target-config';
@@ -30,6 +36,30 @@ export interface AllFields {
   subdirectory: string;
   crawlSeeds: string[];
   rateLimitQps: string;
+  // engine PRs #267 + #271 — api target type. spec_url is forwarded to
+  // strix as `--openapi <url>` when set; the engine otherwise probes 11
+  // standard publishing paths automatically.
+  specUrl: string;
+  // engine PR #274 — container_image target. severity_floor is passed
+  // to Trivy via instruction text; private_registry is a UI hint that
+  // gates a warning banner when no registry-auth integration is wired.
+  imageSeverityFloor: '' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  imagePrivateRegistry: boolean;
+  // engine PRs #290 / #291 — cloud_account target. provider drives
+  // engine specialist dispatch (boto3 path for `aws`, Prowler for
+  // everything else). region / role_arn / external_id are forwarded
+  // via the existing materialize_credentials → AWS_* env vars path,
+  // so most of the heavy lifting is wrapper-side.
+  cloudProvider: '' | 'aws' | 'gcp' | 'azure' | 'kubernetes';
+  cloudRoleArn: string;
+  cloudExternalId: string;
+  cloudRegion: string;
+  // Wishlist §18.7 — per-target consent for MOAK live-probe
+  // (engine PR #278). When true, the worker forwards
+  // STRIX_MOAK_LIVE_PROBE=1 so the LiveProbe stage runs against
+  // the production target. Default off; live probes are an
+  // operational decision, not a default.
+  allowLiveProbe: boolean;
   subdomainExcludes: string[];
   portSpec: string;
   protocols: '' | 'tcp' | 'udp' | 'both';
@@ -58,6 +88,24 @@ const TYPE_META: Record<
     ring: 'border-cyan-500/30',
     tag: 'bg-cyan-500/15 text-cyan-200 ring-cyan-500/30',
     label: 'Web application configuration',
+  },
+  api: {
+    Icon: Plug,
+    ring: 'border-indigo-500/30',
+    tag: 'bg-indigo-500/15 text-indigo-200 ring-indigo-500/30',
+    label: 'API target configuration',
+  },
+  container_image: {
+    Icon: Container,
+    ring: 'border-sky-500/30',
+    tag: 'bg-sky-500/15 text-sky-200 ring-sky-500/30',
+    label: 'Container image configuration',
+  },
+  cloud_account: {
+    Icon: Cloud,
+    ring: 'border-orange-500/30',
+    tag: 'bg-orange-500/15 text-orange-200 ring-orange-500/30',
+    label: 'Cloud account configuration',
   },
   domain: {
     Icon: Compass,
@@ -106,6 +154,15 @@ export default function TypeFields({ type, value, onChange }: Props) {
       )}
       {type === 'web_application' && (
         <WebApplicationFields value={value} set={set} accent="cyan" />
+      )}
+      {type === 'api' && (
+        <ApiFields value={value} set={set} />
+      )}
+      {type === 'container_image' && (
+        <ContainerImageFields value={value} set={set} />
+      )}
+      {type === 'cloud_account' && (
+        <CloudAccountFields value={value} set={set} />
       )}
       {type === 'domain' && (
         <DomainFields value={value} set={set} accent="emerald" />
@@ -214,6 +271,249 @@ function WebApplicationFields({ value, set, accent }: { value: AllFields; set: S
           onChange={(v) => set('rateLimitQps', v)}
         />
       </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
+    </div>
+  );
+}
+
+// --- API -------------------------------------------------------------------
+
+function ApiFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      <FieldRow
+        Icon={FileJson}
+        label="OpenAPI / Swagger spec URL"
+        hint="Optional. Strix probes 11 standard paths automatically (/openapi.json, /swagger.json, /v3/api-docs, …). Set this if your spec lives elsewhere — forwarded as `--openapi <url>`."
+      >
+        <TextInput
+          placeholder="https://api.myapp.com/openapi.json"
+          value={value.specUrl}
+          onChange={(v) => set('specUrl', v)}
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Gauge}
+        label="Rate limit (req/s)"
+        hint="Same caveat as web apps — stay low for production traffic. Burst probes (rate-limit specialist, BOLA, mass-assignment) honour this cap."
+      >
+        <TextInput
+          type="number"
+          placeholder="10"
+          value={value.rateLimitQps}
+          onChange={(v) => set('rateLimitQps', v)}
+        />
+      </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
+      <p className="rounded-md border border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-[11px] leading-relaxed text-indigo-200/80">
+        <span className="font-medium text-indigo-100">Routed to the API tool catalog.</span> The
+        agent runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) plus
+        GraphQL deep introspection and gRPC reflection probes. Browser, DOM, and reflected-XSS
+        tools are <span className="text-neutral-300">skipped</span> — they don&apos;t apply to
+        JSON / gRPC surfaces.
+      </p>
+    </div>
+  );
+}
+
+// Wishlist §18.7 — per-target consent toggle for MOAK live-probe.
+//
+// Engine PR #278 ships the LiveProbe stage gated by the
+// STRIX_MOAK_LIVE_PROBE feature flag. The wrapper-side toggle
+// captures per-target consent and the worker forwards the env var
+// to the engine when the toggle is on. Default off — live probes
+// are an operational decision, not a default.
+
+function LiveProbeToggle({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5">
+      <label className="flex cursor-pointer items-start gap-2.5 text-[11.5px]">
+        <input
+          type="checkbox"
+          checked={value.allowLiveProbe}
+          onChange={(e) => set('allowLiveProbe', e.target.checked)}
+          className="mt-0.5 accent-amber-500"
+        />
+        <div className="space-y-0.5">
+          <div className="font-medium text-amber-100">
+            Allow MOAK live-probe against this target
+          </div>
+          <div className="text-[10.5px] leading-relaxed text-amber-200/70">
+            When MOAK Phase B3 produces a verified exploit in the sandbox, replay it
+            against the production target to capture a true positive (engine PR #278).
+            Only the 4 whitelisted impact classes are eligible (info_disclosure,
+            auth_bypass_unprivileged, ssrf_oob, open_redirect) — RCE / SQLi / RFI
+            never live-probe regardless of this setting. The worker forwards
+            <code className="ml-1 rounded bg-amber-500/15 px-1 font-mono text-[10px]">STRIX_MOAK_LIVE_PROBE=1</code>{' '}
+            when enabled.
+          </div>
+        </div>
+      </label>
+    </div>
+  );
+}
+
+// --- Container image -------------------------------------------------------
+
+function ContainerImageFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      <FieldRow
+        Icon={ShieldAlert}
+        label="Minimum severity"
+        hint="Trivy filters out CVEs below this. Most production setups want HIGH+ to keep the inbox actionable; pick LOW for full visibility."
+      >
+        <select
+          value={value.imageSeverityFloor}
+          onChange={(e) => set('imageSeverityFloor', e.target.value as AllFields['imageSeverityFloor'])}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        >
+          <option value="">Default (HIGH+)</option>
+          <option value="LOW">LOW and above (everything)</option>
+          <option value="MEDIUM">MEDIUM and above</option>
+          <option value="HIGH">HIGH and above</option>
+          <option value="CRITICAL">CRITICAL only</option>
+        </select>
+      </FieldRow>
+      <FieldRow
+        Icon={Lock}
+        label="Private registry"
+        hint="Tick if this image lives in a private registry. v1 expects registry auth in the worker's docker config; per-org registry credentials are on the roadmap."
+      >
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] text-neutral-300">
+          <input
+            type="checkbox"
+            checked={value.imagePrivateRegistry}
+            onChange={(e) => set('imagePrivateRegistry', e.target.checked)}
+            className="h-4 w-4 cursor-pointer rounded border-neutral-700 bg-neutral-900 text-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+          />
+          This image requires authentication to pull
+        </label>
+      </FieldRow>
+      <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] leading-relaxed text-sky-200/80">
+        <span className="font-medium text-sky-100">Routed to the container-image tool catalog.</span>{' '}
+        The engine runs <code>scan_container_image</code> (Trivy) for OS + language-package CVEs,
+        emits an SBOM, and decorates findings with KEV / EPSS data. New CVEs against your image
+        packages auto-fire MOAK exploit synthesis. Browser, DOM, and DAST tools are{' '}
+        <span className="text-neutral-300">skipped</span> — a registry artefact has no live surface.
+      </p>
+    </div>
+  );
+}
+
+// --- Cloud account ---------------------------------------------------------
+//
+// CSPM target (engine PRs #290 / #291). The `value` field on the parent
+// targets row carries `<provider>/<account_id>` so the engine's typed-
+// prefix dispatch picks the right specialist. The fields below let the
+// operator optionally override AWS-side auth at scan time (cross-account
+// role assume) without re-creating the linked integration.
+
+function CloudAccountFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      {/* Wishlist §17.3 — read-only contract notice. Pinned at the top
+          of the panel so security teams reviewing credential grants
+          see it before they get to the role-ARN field. The note
+          mirrors engine PR #290's safety contract: ZERO mutating API
+          calls; recommended grant is AWS-managed SecurityAudit. */}
+      <div className="space-y-2 rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-200">
+          <Lock className="h-3 w-3" strokeWidth={2.5} />
+          Read-only contract
+        </div>
+        <p className="text-[11.5px] leading-relaxed text-emerald-100/85">
+          The CSPM scanner makes <strong>zero mutating API calls</strong> — only{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">Describe*</code>,{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">Get*</code>,{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">List*</code>. We
+          recommend the AWS-managed{' '}
+          <code className="rounded bg-emerald-500/15 px-1 font-mono text-[10.5px]">SecurityAudit</code>{' '}
+          managed policy on the role you grant. The scan attests live state — no resources are
+          created, modified, or deleted.
+        </p>
+      </div>
+
+      {/* Wishlist §17.3 — scheduled-scan callout. Cloud accounts don't
+          change minute-to-minute; daily is the right cadence and the
+          engine is idempotent. The scheduling control lives at the
+          parent <ScheduleFields> level (scan_frequency); we just
+          point at it from here so users understand cloud_account is
+          the canonical schedule-it target. */}
+      <div className="rounded-md border border-cyan-500/20 bg-cyan-500/[0.04] px-3 py-2 text-[11px] leading-relaxed text-cyan-100/85">
+        <strong className="text-cyan-100">Schedule daily.</strong> CSPM is the canonical
+        nightly-scan target — drift accumulates slowly and a daily attestation produces a clean
+        24-hour history for auditors. Set{' '}
+        <code className="rounded bg-cyan-500/15 px-1 font-mono text-[10.5px]">scan_frequency</code>{' '}
+        to <code className="rounded bg-cyan-500/15 px-1 font-mono text-[10.5px]">daily</code> on
+        this target after creation.
+      </div>
+
+      <FieldRow
+        Icon={Cloud}
+        label="Provider"
+        hint="Which cloud the engine's CSPM specialist will scan. v1 ships first-class AWS (boto3, 14 CIS checks). Others go via the Prowler engine (PR #291) when the worker image has Prowler installed."
+      >
+        <select
+          value={value.cloudProvider}
+          onChange={(e) => set('cloudProvider', e.target.value as AllFields['cloudProvider'])}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        >
+          <option value="">Select a provider…</option>
+          <option value="aws">AWS (boto3 — recommended)</option>
+          <option value="gcp">GCP (via Prowler)</option>
+          <option value="azure">Azure (via Prowler)</option>
+          <option value="kubernetes">Kubernetes (via Prowler)</option>
+        </select>
+      </FieldRow>
+      <FieldRow
+        Icon={GitBranch}
+        label="Cross-account role ARN"
+        hint="When set, the engine assumes this role via STS at scan time. Useful when the linked integration's base credentials live in a security-tooling account but the target is in a different account."
+      >
+        <input
+          type="text"
+          placeholder="arn:aws:iam::123456789012:role/strix-readonly"
+          value={value.cloudRoleArn}
+          onChange={(e) => set('cloudRoleArn', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 font-mono text-xs transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Lock}
+        label="External ID"
+        hint="Second factor for the role's trust policy. Forwarded to STS AssumeRole only when role_arn is set."
+      >
+        <input
+          type="text"
+          placeholder="optional"
+          value={value.cloudExternalId}
+          onChange={(e) => set('cloudExternalId', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Compass}
+        label="Region override"
+        hint="Overrides the region stored on the integration. Most CSPM checks scan all regions regardless; this only matters for region-pinned services."
+      >
+        <input
+          type="text"
+          placeholder="us-east-1"
+          value={value.cloudRegion}
+          onChange={(e) => set('cloudRegion', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <LiveProbeToggle value={value} set={set} />
+      <p className="rounded-md border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-[11px] leading-relaxed text-orange-200/80">
+        <span className="font-medium text-orange-100">Routed to the CSPM tool catalog.</span> The
+        engine runs <code>scan_cloud_account</code> (PR #291 / Prowler) when available, falling
+        back to the boto3 path (<code>scan_aws_account_tool</code>, PR #290) for AWS. Findings are
+        decorated with CIS AWS / Azure / GCP / Kubernetes mappings (PR #289). Pair this target
+        with a repository target containing Terraform / Helm / K8s YAML to unlock IaC ↔ drift
+        correlation (PR #292).
+      </p>
     </div>
   );
 }

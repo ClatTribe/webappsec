@@ -1,0 +1,104 @@
+{
+  "target": "altoro-mutual",
+  "source": "https://demo.testfire.net + IBM AppScan documentation",
+  "vulns": [
+    {
+      "id": "altoro-sqli-login",
+      "cwe": "CWE-89",
+      "title": "SQL injection at /bank/login.aspx",
+      "endpoint": "/bank/login.aspx",
+      "method": "POST",
+      "title_keywords": ["sql injection", "sqli"]
+    },
+    {
+      "id": "altoro-sqli-search",
+      "cwe": "CWE-89",
+      "title": "SQL injection at /search.aspx",
+      "endpoint": "/search.aspx",
+      "method": "GET",
+      "title_keywords": ["sql injection", "sqli"]
+    },
+    {
+      "id": "altoro-xss-reflected",
+      "cwe": "CWE-79",
+      "title": "Reflected XSS",
+      "title_keywords": ["xss", "cross-site scripting", "reflected"]
+    },
+    {
+      "id": "altoro-xss-stored",
+      "cwe": "CWE-79",
+      "title": "Stored XSS in feedback form",
+      "endpoint": "/comment.aspx",
+      "title_keywords": ["xss", "cross-site scripting", "stored"]
+    },
+    {
+      "id": "altoro-lfi-content",
+      "cwe": "CWE-22",
+      "title": "Local file inclusion via content parameter",
+      "endpoint": "/default.aspx",
+      "title_keywords": ["file inclusion", "lfi", "path traversal", "directory traversal"]
+    },
+    {
+      "id": "altoro-default-creds",
+      "cwe": "CWE-798",
+      "title": "Default credentials admin:admin / jsmith:Demo1234",
+      "title_keywords": ["default credential", "weak credential", "hardcoded credential", "default password"]
+    },
+    {
+      "id": "altoro-http-banking",
+      "cwe": "CWE-319",
+      "title": "Plaintext HTTP transmission of authenticated banking session",
+      "title_keywords": ["plaintext", "http", "cleartext", "missing tls"]
+    },
+    {
+      "id": "altoro-info-disclosure-comment",
+      "cwe": "CWE-200",
+      "title": "Info disclosure: /comment.txt accessible",
+      "endpoint": "/comment.txt",
+      "title_keywords": ["info disclosure", "information disclosure", "comment.txt", "exposed"]
+    },
+    {
+      "id": "altoro-info-disclosure-robots",
+      "cwe": "CWE-200",
+      "title": "robots.txt exposes admin paths",
+      "endpoint": "/robots.txt",
+      "title_keywords": ["robots.txt", "info disclosure", "directory listing"]
+    },
+    {
+      "id": "altoro-server-banner",
+      "cwe": "CWE-200",
+      "title": "Server version disclosed via Server header",
+      "title_keywords": ["server banner", "server version", "header disclosure"]
+    },
+    {
+      "id": "altoro-missing-x-frame",
+      "cwe": "CWE-1021",
+      "title": "Missing X-Frame-Options header",
+      "title_keywords": ["x-frame-options", "clickjacking", "frame"]
+    },
+    {
+      "id": "altoro-missing-csp",
+      "cwe": "CWE-693",
+      "title": "Missing Content-Security-Policy header",
+      "title_keywords": ["content-security-policy", "csp", "missing header"]
+    },
+    {
+      "id": "altoro-http-trace",
+      "cwe": "CWE-693",
+      "title": "HTTP TRACE method enabled",
+      "title_keywords": ["http trace", "trace method", "method enabled"]
+    },
+    {
+      "id": "altoro-param-tampering",
+      "cwe": "CWE-639",
+      "title": "Parameter tampering on account / transaction endpoints",
+      "title_keywords": ["parameter tampering", "idor", "broken access control", "insecure direct object"]
+    },
+    {
+      "id": "altoro-csrf-transfer",
+      "cwe": "CWE-352",
+      "title": "CSRF on money-transfer flow",
+      "title_keywords": ["csrf", "cross-site request forgery"]
+    }
+  ]
+}

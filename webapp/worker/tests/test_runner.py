@@ -364,6 +364,12 @@ class FakeSupabase:
     def decrypt_integration(self, scan_id: str, integration_id: str) -> str:
         return "{}"
 
+    def decrypt_scan_auth(self, scan_id: str) -> tuple[str | None, str | None]:
+        # Phase A / migration 061. Tests can override by setting
+        # `self.scan_auth = ("bearer", "<token>")` to exercise the
+        # auth-env-var path.
+        return getattr(self, "scan_auth", (None, None))
+
     def decrypt_org_llm_key(self, scan_id: str) -> str | None:
         return None
 
@@ -381,6 +387,13 @@ class FakeSupabase:
         # set_compliance_pack_uploaded fake.
         self._sbom_uploaded = True
 
+    def set_code_scanning_uploaded(self, scan_id: str, url: str) -> None:
+        # Phase A #5 / migration 062. Tests assert via
+        # `sb._code_scanning_url` to verify the upload path stamps a
+        # URL. No-op when the test doesn't exercise SARIF — the worker
+        # only calls this when *.sarif exists in run_dir.
+        self._code_scanning_url = url
+
     def set_run_meta(self, scan_id: str, run_meta: dict[str, Any]) -> None:
         # Tests can read this back via `sb.run_meta` to assert the
         # worker forwarded the right blob to Postgres.
@@ -397,6 +410,18 @@ class FakeSupabase:
         # exercising flow-end-to-end isn't necessary for the runner
         # state-machine tests. Real coverage lives in dedicated tests.
         self._compliance_pack_uploaded = True
+
+    def ingest_compliance_evidence(
+        self, scan_id: str, evidence: dict[str, Any]
+    ) -> int:
+        # Captured for assertion. Real RPC returns the count of controls
+        # persisted; we mirror by counting framework × control pairs.
+        self._ingested_evidence = {"scan_id": scan_id, "evidence": evidence}
+        count = 0
+        for fw_value in evidence.values():
+            if isinstance(fw_value, dict):
+                count += len(fw_value)
+        return count
 
     def set_preflight_failed(self, scan_id: str) -> None:
         self._preflight_failed = True
@@ -1971,6 +1996,58 @@ async def test_upload_compliance_pack_skips_when_dir_missing(tmp_path, fake_scan
 
     assert [u for u in sb.uploads if "compliance_pack" in u["path"]] == []
     assert getattr(sb, "_compliance_pack_uploaded", False) is False
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_ingests_evidence_json(tmp_path, fake_scan):
+    """Migration 046 / Phase C v4 — when the pack contains
+    compliance_evidence.json (engine PR #219 §4b), the worker calls
+    sb.ingest_compliance_evidence with the parsed payload so the chat
+    handler + trust page can answer compliance questions with real data.
+    """
+    pack_root = tmp_path / "compliance_pack"
+    run_dir = pack_root / "run-abc"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text("{}")
+    (run_dir / "compliance_evidence.json").write_text(
+        '{"soc2_type_2": {'
+        '"CC6.1": {"verdict": "pass", "summary": "Access controls"},'
+        '"CC7.2": {"verdict": "fail", "summary": "No SIEM detected"}'
+        '}, "iso_27001": {'
+        '"A.5.1": {"verdict": "pass", "summary": "InfoSec policies"}'
+        '}}'
+    )
+
+    sb = FakeSupabase(fake_scan)
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    # Ingest captured.
+    ingested = getattr(sb, "_ingested_evidence", None)
+    assert ingested is not None, "ingest_compliance_evidence should have been called"
+    assert ingested["scan_id"] == SCAN_ID
+    assert "soc2_type_2" in ingested["evidence"]
+    assert ingested["evidence"]["soc2_type_2"]["CC6.1"]["verdict"] == "pass"
+    assert "iso_27001" in ingested["evidence"]
+
+
+@pytest.mark.asyncio
+async def test_upload_compliance_pack_skips_ingest_when_no_evidence_json(
+    tmp_path, fake_scan
+):
+    """Older engines that emit the auditor pack but not the per-control
+    evidence file (pre-engine-PR-#219) leave compliance_evidence.json
+    absent. The worker silently skips the ingest in that case — the
+    structured posture stays empty until a newer engine version lands."""
+    pack_root = tmp_path / "compliance_pack"
+    (pack_root / "run-abc").mkdir(parents=True)
+    (pack_root / "run-abc" / "manifest.json").write_text("{}")
+    # No compliance_evidence.json — older engine.
+
+    sb = FakeSupabase(fake_scan)
+    await _upload_compliance_pack(sb, SCAN_ID, ORG_ID, pack_root=pack_root)
+
+    # Ingest NOT called.
+    assert getattr(sb, "_ingested_evidence", None) is None
 
 
 @pytest.mark.asyncio

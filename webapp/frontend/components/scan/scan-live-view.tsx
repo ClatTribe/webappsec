@@ -4,14 +4,27 @@ import { useEffect, useState } from 'react';
 import { Activity, Pause, ShieldAlert, ShieldCheck, ShieldX, AlertTriangle, X, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import type { Finding, ScanEvent, ScanStatus } from '@/lib/supabase/types';
+import type {
+  Finding,
+  ScanEvent,
+  ScanStatus,
+  ScanTarget,
+  ScanCoverage,
+  RunMeta,
+} from '@/lib/supabase/types';
 import FindingCard from '@/components/finding/finding-card';
 import BehindTheScenes from '@/components/scan/behind-the-scenes';
 import AgentsSection from '@/components/scan/agents-section';
 import PhaseProgress from '@/components/scan/phase-progress';
+import DiscoveredPanel, { type KgNode } from '@/components/scan/discovered-panel';
 import HypothesisPane from '@/components/scan/hypothesis-pane';
 import ComplianceOverlay from '@/components/scan/compliance-overlay';
 import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
+import ToolFreshness from '@/components/scan/tool-freshness';
+import CoverageMatrix from '@/components/scan/coverage-matrix';
+import CriticalAttackPathsCard from '@/components/scan/critical-attack-paths-card';
+import SupplyChainCard from '@/components/scan/supply-chain-card';
+import MoakPipelineCard from '@/components/scan/moak-pipeline-card';
 
 interface Props {
   scanId: string;
@@ -21,6 +34,12 @@ interface Props {
   initialCancelRequestedAt?: string | null;
   initialErrorMessage?: string | null;
   initialExitCode?: number | null;
+  /** Tier I #2 / #3 — passed through from the scan-detail page so the
+   *  coverage matrix + tool-freshness panels have engine-emitted
+   *  context without an extra fetch round-trip. */
+  targets?: ScanTarget[];
+  coverage?: ScanCoverage | null;
+  runMeta?: RunMeta | null;
 }
 
 // A scan is "stale" if it's still in 'running' but hasn't heartbeat'd in this
@@ -93,11 +112,15 @@ export default function ScanLiveView({
   initialCancelRequestedAt,
   initialErrorMessage,
   initialExitCode,
+  targets = [],
+  coverage = null,
+  runMeta = null,
 }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState<ScanStatus>(initialStatus);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [kgNodes, setKgNodes] = useState<KgNode[]>([]);
   const [heartbeatAt, setHeartbeatAt] = useState<string | null>(initialHeartbeatAt ?? null);
   const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(
     initialCancelRequestedAt ?? null,
@@ -114,7 +137,11 @@ export default function ScanLiveView({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [{ data: ev }, { data: fd }] = await Promise.all([
+      // kg_nodes is fetched alongside events + findings on mount. The
+      // engine writes kg.json at scan finalize, so for a still-running
+      // scan this returns []; the status-change effect below re-fetches
+      // once the scan reaches a terminal state.
+      const [{ data: ev }, { data: fd }, { data: kg }] = await Promise.all([
         supabase
           .from('scan_events')
           .select('*')
@@ -126,15 +153,42 @@ export default function ScanLiveView({
           .select('*')
           .eq('scan_id', scanId)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('kg_nodes')
+          .select('id, scan_id, node_id, node_type, props, created_at')
+          .eq('scan_id', scanId)
+          .order('node_type', { ascending: true }),
       ]);
       if (cancelled) return;
       setEvents((ev ?? []) as ScanEvent[]);
       setFindings((fd ?? []) as Finding[]);
+      setKgNodes((kg ?? []) as KgNode[]);
     })();
     return () => {
       cancelled = true;
     };
   }, [scanId, supabase]);
+
+  // Re-fetch kg_nodes when the scan transitions to a terminal status —
+  // that's when the engine has written kg.json and the worker has
+  // ingested it. Saves us from needing a realtime subscription on
+  // the (read-only, finalize-only-written) kg_nodes table.
+  useEffect(() => {
+    if (status !== 'completed' && status !== 'cancelled' && status !== 'failed') return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('kg_nodes')
+        .select('id, scan_id, node_id, node_type, props, created_at')
+        .eq('scan_id', scanId)
+        .order('node_type', { ascending: true });
+      if (cancelled) return;
+      setKgNodes((data ?? []) as KgNode[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, scanId, supabase]);
 
   useEffect(() => {
     const channel = supabase
@@ -333,6 +387,31 @@ export default function ScanLiveView({
         />
       )}
 
+      {/* Wishlist §17.4 — Critical Attack Paths card. Top-of-page
+          rollup for cloud_attack_path findings (engine PRs #293/#294).
+          Hidden when the scan produced none — non-cloud scans render
+          unchanged. Pinned above coverage / phase so the CISO sees
+          the toxic-combination count first. */}
+      <CriticalAttackPathsCard findings={findings} />
+
+      {/* Wishlist §18.4 — Cosign signature + SLSA provenance card.
+          Engine PR #286. Renders only for container_image scans
+          where the engine wrote a supply_chain block on run_meta.
+          Top-of-page placement is intentional — supply-chain
+          integrity is the CISO's first-glance question for any
+          image scan. */}
+      {runMeta?.supply_chain && (
+        <SupplyChainCard attestation={runMeta.supply_chain} />
+      )}
+
+      {/* Wishlist §18.7 — MOAK exploit-synthesis pipeline live view.
+          Engine PRs #270 / #278 — five-stage progress bar built
+          from tool.execution.* events bucketed by agent. Hidden
+          when no MOAK events have fired on this scan; non-cloud /
+          non-API scans don't invoke MOAK so this stays out of
+          the way. */}
+      <MoakPipelineCard events={events} />
+
       {/* Per-phase coverage receipt (engine PR #140 / wishlist §15.4).
           Renders the four canonical phases (recon → exploit → validate
           → report) with the engine's self-audit `categories_covered`
@@ -340,6 +419,31 @@ export default function ScanLiveView({
           empty. Hidden until the engine emits a `phase.entered` event
           (older versions / pre-recon phase). */}
       <PhaseProgress events={events} />
+
+      {/* Tier I #2 — Coverage matrix. Category × tool × result grid built
+          from `coverage.required`, `tool.execution.started` events, and
+          findings.vuln_id. Collapsed by default; the header summary
+          (X found · Y clean · Z gaps) is the trust signal on its own. */}
+      <CoverageMatrix
+        coverage={coverage}
+        events={events}
+        targets={targets}
+        findings={findings}
+      />
+
+      {/* Tier I #3 — Tool freshness. Per-tool roll-up (invocations, last
+          call, content-freshness pill from run_meta.tools). Hidden when
+          no tool fired AND no engine-emitted tools meta. */}
+      <ToolFreshness events={events} runMeta={runMeta} />
+
+      {/* "Discovered" panel — typed knowledge graph the engine built
+          during this scan (strix PRs #240 / #265 / #266). Surfaces
+          assets, secrets, credentials, dependencies, threat intel,
+          synthesised exploits + the edges between them. Hidden until
+          kg_nodes rows arrive (scan finalize writes kg.json, the
+          worker ingests via _ingest_kg_from_run_dir, the row table
+          re-fetches on terminal status). */}
+      <DiscoveredPanel nodes={kgNodes} />
 
       {/* Active-hypothesis live pane (engine PR #138 / wishlist §15.4).
           Cross-specialist hypotheses with status (open / confirmed /

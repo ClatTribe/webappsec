@@ -55,7 +55,7 @@ const PROVENANCE_THEME: Record<ToolProvenance, { label: string; chip: string; do
     label: 'framework',
     chip: 'bg-neutral-700/40 text-neutral-300 ring-neutral-600/40',
     dot: 'bg-neutral-400',
-    tooltip: 'Framework/internal tool — output produced by Strix itself.',
+    tooltip: 'Framework/internal tool — output produced by the engine itself.',
   },
   mixed: {
     label: 'mixed',

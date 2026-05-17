@@ -1,5 +1,17 @@
 import Link from 'next/link';
-import { Plus, Target as TargetIcon, Code2, Globe, Server, Folder, Network } from 'lucide-react';
+import {
+  Plus,
+  Target as TargetIcon,
+  Code2,
+  Globe,
+  Server,
+  Folder,
+  Network,
+  Plug,
+  Clock,
+  Container,
+  Cloud,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import type { Target, TargetType } from '@/lib/supabase/types';
@@ -7,6 +19,9 @@ import type { Target, TargetType } from '@/lib/supabase/types';
 const TYPE_ICON: Record<TargetType, LucideIcon> = {
   repository: Code2,
   web_application: Globe,
+  api: Plug,
+  container_image: Container,
+  cloud_account: Cloud,
   domain: Globe,
   ip_address: Network,
   local_code: Folder,
@@ -75,13 +90,26 @@ export default async function TargetsPage() {
             Findings, scan history, and triage state all roll up per target.
           </p>
         </div>
-        <Link
-          href="/targets/new"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-white to-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 shadow-sm shadow-white/10 transition-all hover:shadow-md hover:shadow-white/15"
-        >
-          <Plus className="h-4 w-4" strokeWidth={2.5} />
-          Add target
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* Phase B #3 — bulk import from GitHub. Renders next to the
+              singleton "Add target" button so users with a connected
+              GitHub integration see the fast path. The link works
+              regardless of integration state — the destination page
+              shows a "connect first" CTA if none are wired. */}
+          <Link
+            href="/targets/import-github"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
+          >
+            Import from GitHub
+          </Link>
+          <Link
+            href="/targets/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-white to-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 shadow-sm shadow-white/10 transition-all hover:shadow-md hover:shadow-white/15"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.5} />
+            Add target
+          </Link>
+        </div>
       </header>
 
       {targets && targets.length > 0 ? (
@@ -125,10 +153,27 @@ export default async function TargetsPage() {
                           {s.urgent} urgent
                         </span>
                       )}
-                      <span className="ml-auto text-neutral-500">
-                        {t.last_scan_at
-                          ? `Last scanned ${new Date(t.last_scan_at).toLocaleDateString()}`
-                          : 'Never scanned'}
+                      <span className="ml-auto inline-flex flex-col items-end gap-0.5 text-neutral-500">
+                        <span>
+                          {t.last_scan_at
+                            ? `Last scanned ${new Date(t.last_scan_at).toLocaleDateString()}`
+                            : 'Never scanned'}
+                        </span>
+                        {/* Phase B #2 — surface scheduled cadence. The
+                            worker's `scheduled_scan_loop` (migration 050)
+                            fires `worker_enqueue_scheduled_scans` every
+                            tick; the next scan lands within the
+                            cadence window of the last scan. We surface
+                            cadence directly rather than computing an
+                            exact next-run timestamp because the
+                            scheduling RPC checks `last_scan_at <
+                            now() - cadence`. */}
+                        {t.scan_frequency && t.scan_frequency !== 'manual' && (
+                          <span className="inline-flex items-center gap-1 rounded bg-cyan-500/10 px-1.5 py-0.5 font-medium text-cyan-200 ring-1 ring-cyan-400/20">
+                            <Clock className="h-2.5 w-2.5" strokeWidth={2.5} />
+                            {t.scan_frequency}
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>

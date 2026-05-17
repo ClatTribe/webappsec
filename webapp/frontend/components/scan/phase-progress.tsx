@@ -113,15 +113,29 @@ function derivePhases(events: ScanEvent[]): PhaseState[] {
     const inner = shapeAsObject(payload.payload);
 
     if (ev.event_type === 'phase.entered') {
-      const phaseName = (inner.phase_name as string | undefined)
-        ?? (payload.phase_name as string | undefined);
+      // Field name drift over time: the engine has used `phase_name`
+      // (older PR #35), `phase` (current §2 OPPLAN state machine,
+      // strix PR #239), and `status` (newest events also carry the
+      // phase identifier here). We accept all three so older recorded
+      // scans still render and newer engine versions don't silently
+      // produce a blank coverage receipt.
+      const phaseName =
+        (inner.phase_name as string | undefined) ??
+        (payload.phase_name as string | undefined) ??
+        (inner.phase as string | undefined) ??
+        (payload.phase as string | undefined) ??
+        (typeof payload.status === 'string' ? payload.status : undefined);
       if (!phaseName) continue;
       const p = ensure(phaseName);
       if (p.status === 'pending') p.status = 'entered';
       if (!p.entered_at) p.entered_at = ev.created_at;
     } else if (ev.event_type === 'phase.completed') {
-      const phaseName = (inner.phase_name as string | undefined)
-        ?? (payload.phase_name as string | undefined);
+      const phaseName =
+        (inner.phase_name as string | undefined) ??
+        (payload.phase_name as string | undefined) ??
+        (inner.phase as string | undefined) ??
+        (payload.phase as string | undefined) ??
+        (typeof payload.status === 'string' ? payload.status : undefined);
       if (!phaseName) continue;
       const p = ensure(phaseName);
       p.status = 'completed';

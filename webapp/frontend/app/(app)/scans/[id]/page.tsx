@@ -15,6 +15,9 @@ import {
   Download,
   Package,
   RefreshCw,
+  ShieldAlert,
+  ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -26,7 +29,13 @@ import CompliancePostureCard from '@/components/scan/compliance-posture-card';
 import MonitoringPostureBadge from '@/components/scan/monitoring-posture-badge';
 import CoverageBanner from '@/components/scan/coverage-banner';
 import { AI_BRAND } from '@/lib/finding-theme';
-import type { ScanRecurrenceSummary, ScanSummary } from '@/lib/supabase/types';
+import type {
+  ScanRecurrenceSummary,
+  ScanSummary,
+  ScanTarget,
+  ScanCoverage,
+  RunMeta,
+} from '@/lib/supabase/types';
 
 // ---------------------------------------------------------------------------
 // Engine event parsers (§19.1 Tier 1 slice 2). Read the structured events
@@ -272,10 +281,49 @@ export default async function ScanDetailPage({ params }: Props) {
               <a
                 href={`/api/scans/${scan.id}/compliance-pack`}
                 className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:border-violet-500/50 hover:bg-violet-500/20"
-                title="Auditor-grade evidence bundle — manifest, control attestations, coverage report, findings, signed events excerpt, SHA256 sums"
+                title="Auditor-grade evidence bundle — manifest, control attestations (compliance_evidence.json per engine PR #285), coverage report, findings, signed events excerpt, SHA256 sums"
               >
                 <Download className="h-3.5 w-3.5" strokeWidth={2.25} />
                 Download compliance pack
+              </a>
+            )}
+            {/* Phase A #5 / migration 062 — SARIF auto-uploaded to
+                GitHub Code Scanning. Surfaces only when the worker
+                successfully pushed at scan-finalize. The link goes
+                to the repo's Code Scanning landing page (the
+                per-upload URL works too but only after GitHub's
+                async ingest completes, so the repo URL is the
+                friendlier deeplink). */}
+            {scan.code_scanning_url && (
+              <a
+                href={scan.code_scanning_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/20"
+                title="SARIF uploaded to GitHub Code Scanning — findings render inline on PR diffs in the repo"
+              >
+                <ShieldAlert className="h-3.5 w-3.5" strokeWidth={2.25} />
+                View in Code Scanning
+                <ExternalLink className="h-3 w-3 opacity-70" strokeWidth={2.5} />
+              </a>
+            )}
+            {/* Tier II #7 — PR comment posted. Surfaces only when the
+                worker post-finalize hook successfully called
+                /api/scans/[id]/pr-comment. Link goes to the sticky
+                comment on the PR itself so the user can verify the
+                comment landed. Hidden when the scan wasn't PR-driven
+                or the comment hasn't been posted yet. */}
+            {scan.pr_comment_url && (
+              <a
+                href={scan.pr_comment_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20"
+                title={`Sticky scan summary posted on PR #${scan.github_pull_request_number}${scan.pr_comment_updated_at ? ` (updated ${new Date(scan.pr_comment_updated_at).toLocaleString()})` : ''}`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" strokeWidth={2.25} />
+                PR #{scan.github_pull_request_number} commented
+                <ExternalLink className="h-3 w-3 opacity-70" strokeWidth={2.5} />
               </a>
             )}
           </div>
@@ -594,6 +642,9 @@ export default async function ScanDetailPage({ params }: Props) {
         initialCancelRequestedAt={scan.cancel_requested_at ?? null}
         initialErrorMessage={scan.error_message ?? null}
         initialExitCode={scan.exit_code ?? null}
+        targets={(targets ?? []) as ScanTarget[]}
+        coverage={(scan.coverage ?? null) as ScanCoverage | null}
+        runMeta={(scan.run_meta ?? null) as RunMeta | null}
       />
     </div>
   );

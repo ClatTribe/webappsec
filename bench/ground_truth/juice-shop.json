@@ -1,0 +1,84 @@
+{
+  "target": "juice-shop",
+  "source": "https://github.com/juice-shop/juice-shop/blob/master/data/static/challenges.yml",
+  "_note": "Subset of the ~100 challenges — the categories a DAST agent should plausibly find without auth-internal logic.",
+  "vulns": [
+    {
+      "id": "js-broken-auth-login",
+      "cwe": "CWE-287",
+      "title": "Login bypass via SQL injection",
+      "endpoint": "/rest/user/login",
+      "title_keywords": ["sql injection", "sqli", "auth bypass", "login bypass"]
+    },
+    {
+      "id": "js-xss-search",
+      "cwe": "CWE-79",
+      "title": "Reflected XSS in search",
+      "endpoint": "/#/search",
+      "title_keywords": ["xss", "reflected", "cross-site scripting"]
+    },
+    {
+      "id": "js-xss-stored",
+      "cwe": "CWE-79",
+      "title": "Stored XSS in feedback / user profile",
+      "title_keywords": ["stored xss", "persistent xss"]
+    },
+    {
+      "id": "js-idor-basket",
+      "cwe": "CWE-639",
+      "title": "IDOR — view other users' baskets",
+      "endpoint": "/rest/basket",
+      "title_keywords": ["idor", "broken access control", "insecure direct object"]
+    },
+    {
+      "id": "js-directory-listing",
+      "cwe": "CWE-548",
+      "title": "Confidential document accessible via directory traversal",
+      "endpoint": "/ftp",
+      "title_keywords": ["directory listing", "directory traversal", "exposed"]
+    },
+    {
+      "id": "js-sensitive-data",
+      "cwe": "CWE-200",
+      "title": "Sensitive data exposure (legal.md, etc.)",
+      "title_keywords": ["info disclosure", "sensitive data", "exposed file"]
+    },
+    {
+      "id": "js-jwt-weak",
+      "cwe": "CWE-347",
+      "title": "JWT token uses weak algorithm or insecure key",
+      "title_keywords": ["jwt", "weak token", "signing"]
+    },
+    {
+      "id": "js-dep-cve",
+      "cwe": "CWE-1104",
+      "title": "Dependency with known CVE (npm)",
+      "title_keywords": ["cve", "outdated dependency", "vulnerable component"]
+    },
+    {
+      "id": "js-admin-section",
+      "cwe": "CWE-284",
+      "title": "Admin section accessible without auth",
+      "endpoint": "/#/administration",
+      "title_keywords": ["admin", "broken access control", "missing auth"]
+    },
+    {
+      "id": "js-rate-limit",
+      "cwe": "CWE-307",
+      "title": "Missing rate limit on login / password reset",
+      "title_keywords": ["rate limit", "brute force", "missing throttle"]
+    },
+    {
+      "id": "js-missing-headers",
+      "cwe": "CWE-693",
+      "title": "Missing security headers (CSP, HSTS, X-Frame-Options)",
+      "title_keywords": ["missing header", "csp", "hsts", "x-frame-options"]
+    },
+    {
+      "id": "js-cors-misconfig",
+      "cwe": "CWE-942",
+      "title": "Permissive CORS policy",
+      "title_keywords": ["cors", "permissive origin", "misconfigured"]
+    }
+  ]
+}

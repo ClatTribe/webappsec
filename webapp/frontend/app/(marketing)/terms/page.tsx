@@ -29,7 +29,7 @@ export default function TermsPage() {
 
         <Section heading="1. Acceptance">
           <p>
-            By using the youraisecurityengineer service ("Service") at this domain, you agree to these Terms. If
+            By using the TensorShield service ("Service") at this domain, you agree to these Terms. If
             you're using the service on behalf of an organization, you confirm that you have the authority to bind that
             organization, and "you" means the organization.
           </p>
@@ -88,8 +88,8 @@ export default function TermsPage() {
           <p>
             You are responsible for keeping your account credentials secure. Notify us immediately
             at{' '}
-            <a href="mailto:security@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              security@youraisecurityengineer.com
+            <a href="mailto:security@tensorshield.ai" className="text-cyan-300 hover:underline">
+              security@tensorshield.ai
             </a>{' '}
             of any unauthorized access. We strongly recommend MFA for owners and admins; on
             qualifying plans we may require it.
@@ -133,15 +133,15 @@ export default function TermsPage() {
 
         <Section heading="8. Intellectual property">
           <p>
-            The Service and its underlying technology — including the AI scanning agent, the
-            reinforcement-trained triage model, the user interface, and all related software — are
-            owned by us. These Terms grant you a limited, non-exclusive, non-transferable license
-            to use the Service for the duration of your subscription.
+            The Service and its underlying technology — including the AI scanning agent, the chat
+            surface, the suppression-learning system, the user interface, and all related
+            software — are owned by us. These Terms grant you a limited, non-exclusive,
+            non-transferable license to use the Service for the duration of your subscription.
           </p>
           <p>
-            You retain all rights to your Customer Data and to your tenant-specific reinforcement
-            signal. We don&apos;t aggregate, share, or train a global model on your triage data —
-            see the{' '}
+            You retain all rights to your Customer Data and to your tenant-specific signal
+            (suppression rules, agent memory, autonomy preferences). We don&apos;t aggregate,
+            share, or train a global model on your triage data — see the{' '}
             <Link href="/privacy" className="text-cyan-300 hover:underline">
               Privacy Policy
             </Link>{' '}
@@ -212,8 +212,8 @@ export default function TermsPage() {
         <Section heading="15. Contact">
           <p>
             Questions about these Terms? Email{' '}
-            <a href="mailto:legal@youraisecurityengineer.com" className="text-cyan-300 hover:underline">
-              legal@youraisecurityengineer.com
+            <a href="mailto:legal@tensorshield.ai" className="text-cyan-300 hover:underline">
+              legal@tensorshield.ai
             </a>
             .
           </p>

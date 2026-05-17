@@ -4,8 +4,7 @@ import { getAllPosts } from '../posts';
 // RSS 2.0 feed. Two consumers in mind:
 //   1. Reader subscriptions (Feedly, Inoreader, NetNewsWire) — long-term
 //      retention of readers who don't want to come back to /blog manually.
-//   2. The changelog page already links to this URL via an <a href="/blog/rss.xml">
-//      Rss button — without this route the link 404'd.
+//   2. /blog/feed and similar conventions surface this URL automatically.
 //
 // Plain string-build instead of a feed library: two posts and predictable
 // fields, no need for an extra dep.
@@ -33,7 +32,7 @@ export async function GET() {
       <pubDate>${pubDate}</pubDate>
       <description>${escapeXml(post.excerpt)}</description>
       ${post.tags.map((t) => `<category>${escapeXml(t)}</category>`).join('\n      ')}
-      <author>noreply@youraisecurityengineer.com (${escapeXml(post.author.name)})</author>
+      <author>noreply@tensorshield.ai (${escapeXml(post.author.name)})</author>
     </item>`;
     })
     .join('\n');
