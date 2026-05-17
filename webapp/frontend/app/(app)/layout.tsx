@@ -14,11 +14,16 @@ import {
   Settings,
   LogOut,
   FileLock,
+  FolderKanban,
 } from 'lucide-react';
 
 const NAV = [
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  // Projects (Phase C) sit above Targets in the IA — they're the
+  // natural grouping mid-market teams reach for first; targets are
+  // the leaf nodes within them.
+  { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/targets', label: 'Targets', icon: Target },
   { href: '/scans', label: 'Scans', icon: ScanLine },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
