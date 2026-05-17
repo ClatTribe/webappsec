@@ -43,6 +43,24 @@ export default async function TargetsPage() {
     .eq('status', 'active')
     .order('last_scan_at', { ascending: false, nullsFirst: false });
 
+  // Phase C — pull project lookup so the cards can render a project
+  // chip per row. Cheap: one extra read for the whole projects list,
+  // hashed by id for O(1) lookup at render time.
+  const { data: projectRows } = (await supabase
+    .from('projects')
+    .select('id, slug, name, criticality')
+    .is('archived_at', null)) as unknown as {
+    data: Array<{
+      id: string;
+      slug: string;
+      name: string;
+      criticality: 'tier_1' | 'tier_2' | 'tier_3' | 'tier_4';
+    }> | null;
+  };
+  const projectById = Object.fromEntries(
+    (projectRows ?? []).map((p) => [p.id, p]),
+  );
+
   // Aggregate stats per target. Two cheap queries instead of N.
   const targetIds = (targets ?? []).map((t) => t.id);
   let stats: Record<string, Stats> = {};
@@ -135,6 +153,19 @@ export default async function TargetsPage() {
                       <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-neutral-400">
                         {t.type}
                       </span>
+                      {/* Phase C — project chip. Clicking jumps to the
+                          project detail page. We render NOTHING when the
+                          target isn't attached so the row looks identical
+                          to pre-migration-078. */}
+                      {((t as Target & { project_id?: string | null }).project_id) &&
+                        projectById[(t as Target & { project_id: string }).project_id] && (
+                          <span
+                            className="rounded bg-violet-500/15 px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-violet-200 ring-1 ring-violet-500/30"
+                            title={`Project: ${projectById[(t as Target & { project_id: string }).project_id].name}`}
+                          >
+                            {projectById[(t as Target & { project_id: string }).project_id].slug}
+                          </span>
+                        )}
                     </div>
                     <p className="mt-0.5 truncate font-mono text-[11.5px] text-neutral-400">
                       {t.value}
