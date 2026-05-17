@@ -113,6 +113,14 @@ function ReadinessChips({ chips }: { chips: ReadinessChipShape[] }) {
           >
             Compensating controls
           </Link>
+          {/* Continuous evidence collectors — the operational-SaaS
+              auto-pull. The "Vanta competitor" feature in one phrase. */}
+          <Link
+            href="/compliance/collectors"
+            className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-medium text-emerald-200 ring-1 ring-emerald-400/30 hover:bg-emerald-500/20"
+          >
+            Continuous evidence
+          </Link>
           <Link
             href="/compliance/readiness"
             className="inline-flex items-center gap-0.5 text-[11px] text-cyan-200/80 hover:text-cyan-100"
