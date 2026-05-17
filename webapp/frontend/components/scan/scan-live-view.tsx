@@ -22,6 +22,7 @@ import ComplianceOverlay from '@/components/scan/compliance-overlay';
 import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
 import ToolFreshness from '@/components/scan/tool-freshness';
 import CoverageMatrix from '@/components/scan/coverage-matrix';
+import CriticalAttackPathsCard from '@/components/scan/critical-attack-paths-card';
 
 interface Props {
   scanId: string;
@@ -383,6 +384,13 @@ export default function ScanLiveView({
           events={events}
         />
       )}
+
+      {/* Wishlist §17.4 — Critical Attack Paths card. Top-of-page
+          rollup for cloud_attack_path findings (engine PRs #293/#294).
+          Hidden when the scan produced none — non-cloud scans render
+          unchanged. Pinned above coverage / phase so the CISO sees
+          the toxic-combination count first. */}
+      <CriticalAttackPathsCard findings={findings} />
 
       {/* Per-phase coverage receipt (engine PR #140 / wishlist §15.4).
           Renders the four canonical phases (recon → exploit → validate
