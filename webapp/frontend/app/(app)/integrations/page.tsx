@@ -71,6 +71,18 @@ export default async function IntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Phase A — asset discovery link. Only surfaced
+                        for integration types that have a discoverer
+                        wired (today: github). Keep this list in sync
+                        with lib/asset-discoverers/registry.ts. */}
+                    {i.type === 'github' && (
+                      <Link
+                        href={`/integrations/${i.id}/discovered`}
+                        className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/20"
+                      >
+                        Discover assets
+                      </Link>
+                    )}
                     {/* Tier II #7 — quick link to enable PR scanning per
                         github integration. Pill colour reflects current
                         state so the user can see at a glance which
