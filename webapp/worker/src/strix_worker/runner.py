@@ -234,6 +234,10 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
             # `conservative`) flows in via STRIX_FP_AUTO_DISMISS env.
             feedback_path = _write_feedback_jsonl(sb, scan_id, org_id, workdir)
             fp_policy = _resolve_fp_policy(sb, org_id)
+            # Per-org custom rule library (engine consumes via
+            # STRIX_CUSTOM_RULES_DIR). Best-effort: missing rules are
+            # the default state, not a scan failure.
+            custom_rules_dir = _write_custom_rules(sb, scan_id, org_id, workdir)
 
             # Threat-intel & recon API keys (§19.1 Tier 1 item 10, migration
             # 028). Each decrypted STRIX_* key gets forwarded into the
@@ -271,6 +275,7 @@ async def run_scan(scan_id: str, cfg: WorkerConfig, sb: WorkerSupabase) -> None:
                 feedback_path=feedback_path, fp_policy=fp_policy,
                 org_strix_keys=org_strix_keys,
                 auth_method=auth_method, auth_plaintext=auth_plaintext,
+                custom_rules_dir=custom_rules_dir,
             )
             cmd = _build_cmd(
                 cfg, scan, targets,
@@ -567,6 +572,75 @@ def _write_feedback_jsonl(
     return str(path)
 
 
+def _write_custom_rules(
+    sb: WorkerSupabase, scan_id: str, org_id: str, workdir: str
+) -> str | None:
+    """Dump the org's enabled custom Semgrep rules to
+    <workdir>/custom_rules/<id>.yml so the engine can consume them via
+    STRIX_CUSTOM_RULES_DIR.
+
+    Returns the directory path when at least one rule was written, or
+    None when the org has no enabled rules / the read failed. The
+    engine treats absence as "no custom rules" and runs its built-in
+    pack unchanged.
+
+    Best-effort: a read failure logs + returns None rather than
+    failing the scan. The rules are augmentation, not gating.
+    """
+    try:
+        result = (
+            sb.client.from_("custom_rules")
+            .select("id, rule_yaml")
+            .eq("org_id", org_id)
+            .is_("archived_at", "null")
+            .eq("enabled", True)
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("scan %s: custom_rules query failed", scan_id)
+        return None
+
+    rows = result.data or []
+    if not rows:
+        return None
+
+    rules_dir = Path(workdir) / "custom_rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    written_ids: list[str] = []
+    for row in rows:
+        rule_id = row.get("id") if isinstance(row, dict) else None
+        rule_yaml = row.get("rule_yaml") if isinstance(row, dict) else None
+        if not rule_id or not isinstance(rule_yaml, str) or not rule_yaml.strip():
+            continue
+        # Filename = <uuid>.yml. Stable + collision-free across runs.
+        try:
+            (rules_dir / f"{rule_id}.yml").write_text(rule_yaml, encoding="utf-8")
+            written_ids.append(rule_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: failed to write custom rule %s", scan_id, rule_id)
+            continue
+
+    if not written_ids:
+        return None
+
+    # Stamp last_used_at on the rules we actually wrote. Best-effort —
+    # a failure here doesn't unwind the file writes.
+    try:
+        sb.client.rpc(
+            "touch_custom_rules_last_used", {"p_rule_ids": written_ids}
+        ).execute()
+    except Exception:  # noqa: BLE001
+        logger.warning("scan %s: touch_custom_rules_last_used failed", scan_id, exc_info=True)
+
+    logger.info(
+        "scan %s: wrote %d custom rule(s) to %s",
+        scan_id,
+        len(written_ids),
+        rules_dir,
+    )
+    return str(rules_dir)
+
+
 # Storage bucket the user uploads HAR/Burp files into. Defined here
 # rather than imported from a shared constants module because the same
 # string lives on the frontend; both sides change together when we ever
@@ -852,6 +926,7 @@ def _build_env(
     org_strix_keys: dict[str, str] | None = None,
     auth_method: str | None = None,
     auth_plaintext: str | None = None,
+    custom_rules_dir: str | None = None,
 ) -> dict[str, str]:
     env = {
         "STRIX_LLM": llm_provider,
@@ -911,6 +986,15 @@ def _build_env(
         env["STRIX_FEEDBACK_FROM"] = feedback_path
     if fp_policy:
         env["STRIX_FP_AUTO_DISMISS"] = fp_policy
+    # Custom rule library (wrapper-side) — when the org has enabled
+    # rules, _write_custom_rules() dumps them as <id>.yml files under
+    # <workdir>/custom_rules/ and returns the directory path. We forward
+    # via STRIX_CUSTOM_RULES_DIR; the engine's Semgrep specialist reads
+    # this in addition to its built-in rule pack. Unset when the org has
+    # no enabled rules so older engine versions without the env hook
+    # keep working unchanged.
+    if custom_rules_dir:
+        env["STRIX_CUSTOM_RULES_DIR"] = custom_rules_dir
     # §19.1 Tier 1 item 10 — per-org threat-intel & recon API keys.
     # The decrypt RPC already filters to the migration's CHECK enum,
     # but we re-check here so a future RPC drift can't smuggle an
