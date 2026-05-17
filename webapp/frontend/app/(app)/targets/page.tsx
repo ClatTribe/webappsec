@@ -109,6 +109,16 @@ export default async function TargetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Phase D — bulk CSV import for orgs with an existing CMDB /
+              Terraform state / spreadsheet inventory. Idempotent
+              re-import via external_id; per-row outcomes surface
+              created/updated/errored separately. */}
+          <Link
+            href="/targets/import-csv"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
+          >
+            Import from CSV
+          </Link>
           {/* Phase B #3 — bulk import from GitHub. Renders next to the
               singleton "Add target" button so users with a connected
               GitHub integration see the fast path. The link works

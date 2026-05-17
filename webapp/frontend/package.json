@@ -20,6 +20,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
     "next": "^14.2.5",
+    "papaparse": "^5.5.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22.5.0",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^18.3.4",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
