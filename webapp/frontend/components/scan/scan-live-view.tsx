@@ -23,6 +23,7 @@ import UpstreamRetryBanner from '@/components/scan/upstream-retry-banner';
 import ToolFreshness from '@/components/scan/tool-freshness';
 import CoverageMatrix from '@/components/scan/coverage-matrix';
 import CriticalAttackPathsCard from '@/components/scan/critical-attack-paths-card';
+import SupplyChainCard from '@/components/scan/supply-chain-card';
 
 interface Props {
   scanId: string;
@@ -391,6 +392,16 @@ export default function ScanLiveView({
           unchanged. Pinned above coverage / phase so the CISO sees
           the toxic-combination count first. */}
       <CriticalAttackPathsCard findings={findings} />
+
+      {/* Wishlist §18.4 — Cosign signature + SLSA provenance card.
+          Engine PR #286. Renders only for container_image scans
+          where the engine wrote a supply_chain block on run_meta.
+          Top-of-page placement is intentional — supply-chain
+          integrity is the CISO's first-glance question for any
+          image scan. */}
+      {runMeta?.supply_chain && (
+        <SupplyChainCard attestation={runMeta.supply_chain} />
+      )}
 
       {/* Per-phase coverage receipt (engine PR #140 / wishlist §15.4).
           Renders the four canonical phases (recon → exploit → validate

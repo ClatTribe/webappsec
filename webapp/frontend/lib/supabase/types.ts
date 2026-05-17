@@ -455,9 +455,30 @@ export interface RunMeta {
   mfa_attestation?: MfaAttestation;
   compliance_posture?: CompliancePosture;
   monitoring_posture?: MonitoringPosture;
+  /** Engine PR #286 — Cosign signature + SLSA provenance attestation
+   *  for the scanned container image. Set only on container_image
+   *  scans where the image had a sigstore signature and/or SLSA
+   *  provenance attached as a referrer. The wrapper renders a
+   *  top-of-page card off this; null / absent for non-image scans. */
+  supply_chain?: SupplyChainAttestation;
   /** Engines may add additional top-level signals over time. The
    *  open shape is forward-compatible — a new key the wrapper doesn't
    *  know about is preserved on the row and ignored by the UI. */
+  [k: string]: unknown;
+}
+
+export interface SupplyChainAttestation {
+  /** signed_by_trusted (Fulcio + trusted issuer) /
+   *  signed_unknown_issuer / unsigned / unknown */
+  signature_status: 'signed_by_trusted' | 'signed_unknown_issuer' | 'unsigned' | 'unknown';
+  /** 0 = no provenance, 1 = source identified, 2 = hermetic, 3 = isolated builder */
+  slsa_level?: 0 | 1 | 2 | 3 | null;
+  /** URI of the build platform (e.g. https://github.com/actions/runner). */
+  builder_uri?: string | null;
+  /** Cert subject when signed_by_trusted (e.g. `https://github.com/acme/repo/.github/workflows/release.yml@refs/tags/v1.2.0`). */
+  signed_by?: string | null;
+  /** Engine sometimes attaches the cert's not-after as a freshness signal. */
+  signature_observed_at?: string | null;
   [k: string]: unknown;
 }
 

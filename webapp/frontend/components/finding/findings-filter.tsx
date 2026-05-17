@@ -8,6 +8,7 @@ import type { AiUrgency, Finding, FindingStatus } from '@/lib/supabase/types';
 import { AI_BRAND } from '@/lib/finding-theme';
 import { createClient } from '@/lib/supabase/client';
 import { resolveDriftClassification } from '@/lib/cloud-attack-path';
+import { imageCategory } from '@/lib/finding-depth';
 
 type FindingWithScan = Finding & {
   scans?: { run_name: string; status: string } | null;
@@ -109,6 +110,10 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
   const [verificationFilter, setVerificationFilter] = useState<Set<string>>(new Set());
   // Wishlist §17.4 — drift classification filter.
   const [driftFilter, setDriftFilter] = useState<DriftFilterValue>('__all__');
+  // Wishlist §18.4 — container image category filter (engine PR #283).
+  const [imageCatFilter, setImageCatFilter] = useState<
+    '__all__' | 'sca' | 'misconfig' | 'secrets'
+  >('__all__');
   // Phase B #1 — bulk selection state.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkInFlight, setBulkInFlight] = useState(false);
@@ -173,15 +178,25 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
         const { classification } = resolveDriftClassification(f);
         if (classification !== driftFilter) return false;
       }
+      // Wishlist §18.4 — container image three-category filter.
+      if (imageCatFilter !== '__all__') {
+        if (imageCategory(f) !== imageCatFilter) return false;
+      }
       return true;
     });
-  }, [sorted, view, severityFilter, verificationFilter, driftFilter]);
+  }, [sorted, view, severityFilter, verificationFilter, driftFilter, imageCatFilter]);
 
   // Only render the drift filter row when at least one finding in
   // this dataset carries a drift classification. Keeps the toolbar
   // clean for non-cloud scans.
   const hasDriftFindings = useMemo(
     () => findings.some((f) => resolveDriftClassification(f).classification !== null),
+    [findings],
+  );
+
+  // Wishlist §18.4 — same conditional render for image-category filter.
+  const hasImageFindings = useMemo(
+    () => findings.some((f) => imageCategory(f) !== null),
     [findings],
   );
 
@@ -203,6 +218,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
     setVerificationFilter(new Set());
     setTargetFilter(ALL_TARGETS);
     setDriftFilter('__all__');
+    setImageCatFilter('__all__');
   }
 
   // Phase B #1 — bulk-select helpers.
@@ -384,6 +400,44 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
                 className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
                   active
                     ? 'bg-orange-500/20 text-orange-100 ring-orange-400/40'
+                    : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Wishlist §18.4 — container image three-category filter row
+          (engine PR #283). Same conditional-render discipline as the
+          drift row: only appears when the current dataset contains
+          at least one image finding, so non-container scans render
+          unchanged. */}
+      {hasImageFindings && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-sky-500/15 bg-sky-500/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-sky-200/80">
+            Image:
+          </span>
+          {[
+            { value: '__all__',  label: 'All',       help: 'Show every finding regardless of image category.' },
+            { value: 'sca',      label: 'SCA',       help: 'CVE in installed packages (Trivy SCA path).' },
+            { value: 'misconfig', label: 'Misconfig', help: 'Dockerfile / image config issue.' },
+            { value: 'secrets',  label: 'Secrets',   help: 'Secret baked into image layers.' },
+          ].map((opt) => {
+            const active = imageCatFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() =>
+                  setImageCatFilter(opt.value as '__all__' | 'sca' | 'misconfig' | 'secrets')
+                }
+                title={opt.help}
+                className={`rounded-md px-2 py-0.5 font-medium ring-1 transition-colors ${
+                  active
+                    ? 'bg-sky-500/20 text-sky-100 ring-sky-400/40'
                     : 'bg-neutral-900/40 text-neutral-500 ring-neutral-800 hover:text-neutral-300'
                 }`}
               >
