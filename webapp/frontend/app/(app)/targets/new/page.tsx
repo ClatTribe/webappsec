@@ -141,6 +141,8 @@ const EMPTY_FIELDS: AllFields = {
   cloudRoleArn: '',
   cloudExternalId: '',
   cloudRegion: '',
+  // Wishlist §18.7 — MOAK live-probe consent (engine PR #278).
+  allowLiveProbe: false,
   subdomainExcludes: [],
   portSpec: '',
   protocols: '',
@@ -552,6 +554,8 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
       if (raw.crawlSeeds.length) out.crawl_seeds = raw.crawlSeeds;
       const qps = parseInt(raw.rateLimitQps, 10);
       if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
+      // Wishlist §18.7 — per-target MOAK live-probe consent.
+      if (raw.allowLiveProbe) out.allow_live_probe = true;
       return out;
     }
     case 'api': {
@@ -559,6 +563,7 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
       if (raw.specUrl.trim()) out.spec_url = raw.specUrl.trim();
       const qps = parseInt(raw.rateLimitQps, 10);
       if (Number.isFinite(qps) && qps > 0) out.rate_limit_qps = qps;
+      if (raw.allowLiveProbe) out.allow_live_probe = true;
       return out;
     }
     case 'container_image': {
@@ -582,6 +587,7 @@ function buildConfigForType(type: TargetType, raw: AllFields): Record<string, un
       if (raw.cloudRoleArn.trim()) out.role_arn = raw.cloudRoleArn.trim();
       if (raw.cloudExternalId.trim()) out.external_id = raw.cloudExternalId.trim();
       if (raw.cloudRegion.trim()) out.region = raw.cloudRegion.trim();
+      if (raw.allowLiveProbe) out.allow_live_probe = true;
       return out;
     }
     case 'domain': {
