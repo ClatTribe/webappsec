@@ -32,6 +32,11 @@ import type {
 import { createClient } from '@/lib/supabase/client';
 import PatchPreview from '@/components/finding/patch-preview';
 import AffectedFiles from '@/components/finding/affected-files';
+import CloudAttackPathCasefile from '@/components/finding/cloud-attack-path-casefile';
+import {
+  isAttackPathFinding,
+  resolveDriftClassification,
+} from '@/lib/cloud-attack-path';
 import AssigneePicker from '@/components/finding/assignee-picker';
 import CommentThread from '@/components/finding/comment-thread';
 import {
@@ -137,6 +142,14 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
 
   const sev = SEVERITY_THEME[finding.severity];
   const statusTheme = STATUS_THEME[finding.status];
+
+  // Engine PR #292 emits drift findings with `[drift:foo]` title
+  // prefix. Resolve preferring the dedicated TS field (forward-compat
+  // for when the engine adds a column) and falling back to the
+  // prefix parse. `displayTitle` is the user-facing title with the
+  // prefix stripped so we don't show `[drift:drift] xyz`.
+  const { classification: driftClassification, cleanedTitle: displayTitle } =
+    resolveDriftClassification(finding);
   const ai = finding.ai_assessment ?? null;
   const urgencyTheme = ai ? URGENCY_THEME[ai.urgency] : null;
   const reachTheme = ai ? REACHABILITY_THEME[ai.reachability] : null;
@@ -331,7 +344,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                   isResolved ? 'text-neutral-300 line-through decoration-neutral-700' : 'text-neutral-50'
                 }`}
               >
-                <span className="line-clamp-2">{finding.title}</span>
+                <span className="line-clamp-2">{displayTitle}</span>
               </h3>
               <div className="flex flex-shrink-0 items-center gap-1.5">
                 {urgencyTheme && (() => {
@@ -382,7 +395,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 Open status is implied — we don't badge it. The recurrence
                 pill is the calm signal that this finding has cross-scan
                 history; full timeline is in the expanded view. */}
-            {(finding.status !== 'open' || isRecurring || finding.drift_classification) && (
+            {(finding.status !== 'open' || isRecurring || driftClassification) && (
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 {finding.status !== 'open' && (
                   <span
@@ -392,13 +405,10 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                     {statusTheme.label}
                   </span>
                 )}
-                {/* Engine PR #292 — drift correlation badge. Set when a
-                    scan included both a repository (IaC) target and a
-                    cloud_account (CSPM) target and the engine cross-
-                    referenced findings. */}
-                {finding.drift_classification && (
-                  <DriftBadge classification={finding.drift_classification} />
-                )}
+                {/* Engine PR #292 — drift correlation badge. Resolved
+                    from `[drift:foo]` title prefix OR the dedicated
+                    drift_classification TS field. */}
+                {driftClassification && <DriftBadge classification={driftClassification} />}
                 {reopenedCount > 0 && (
                   <span
                     className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-amber-400/30"
@@ -942,7 +952,15 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
               migration 029). */}
           {finding.trajectory && <TrajectorySection trajectory={finding.trajectory} />}
 
-          {sections.length === 0 && finding.description_md && (
+          {/* Wishlist §17.2 / §17.4 — Cloud attack-path casefile.
+              Renders the hop-chain + narrative + remediation when the
+              finding's category is cloud_attack_path (engine PRs
+              #293/#294). The casefile replaces the default markdown
+              description block for these findings — the hop chain IS
+              the description for an attack-path. */}
+          {isAttackPathFinding(finding) && <CloudAttackPathCasefile finding={finding} />}
+
+          {sections.length === 0 && finding.description_md && !isAttackPathFinding(finding) && (
             <Markdown body={finding.description_md} />
           )}
 
