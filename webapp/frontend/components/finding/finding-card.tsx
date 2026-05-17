@@ -382,7 +382,7 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                 Open status is implied — we don't badge it. The recurrence
                 pill is the calm signal that this finding has cross-scan
                 history; full timeline is in the expanded view. */}
-            {(finding.status !== 'open' || isRecurring) && (
+            {(finding.status !== 'open' || isRecurring || finding.drift_classification) && (
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 {finding.status !== 'open' && (
                   <span
@@ -391,6 +391,13 @@ export default function FindingCard({ finding: initial, defaultExpanded = false 
                     <StatusIcon className="h-3 w-3" strokeWidth={2.5} />
                     {statusTheme.label}
                   </span>
+                )}
+                {/* Engine PR #292 — drift correlation badge. Set when a
+                    scan included both a repository (IaC) target and a
+                    cloud_account (CSPM) target and the engine cross-
+                    referenced findings. */}
+                {finding.drift_classification && (
+                  <DriftBadge classification={finding.drift_classification} />
                 )}
                 {reopenedCount > 0 && (
                   <span
@@ -1712,4 +1719,59 @@ function formatTrajectoryDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
   return `${mins}m ${secs}s`;
+}
+
+// Engine PR #292 — drift correlation badge. Renders one of four
+// classifications inline in the finding-card title row. We choose tone
+// (and copy) to match what the auditor cares about per bucket:
+//
+//   drift           rose, alarming — live ≠ IaC, operational signal
+//   iac_root_cause  amber, actionable — fix the source, drift clears
+//   iac_unfollowed  amber, hygiene — IaC declares a misconfig, live is
+//                    clean; next apply will reintroduce it
+//   uncorrelated_cspm  neutral — no IaC analog, judge on its own merits
+const DRIFT_THEME: Record<
+  NonNullable<Finding['drift_classification']>,
+  { cls: string; label: string; title: string }
+> = {
+  drift: {
+    cls: 'bg-rose-500/15 text-rose-200 ring-rose-400/30',
+    label: 'Drift',
+    title:
+      "Live cloud state diverges from your Terraform/IaC. Resource was created or modified outside IaC, OR someone hand-edited after the last `terraform apply`.",
+  },
+  iac_root_cause: {
+    cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    label: 'IaC root cause',
+    title:
+      "Both IaC and live state flag the same issue. Fix the Terraform / Helm / K8s YAML and re-apply — the live finding will clear automatically.",
+  },
+  iac_unfollowed: {
+    cls: 'bg-amber-500/15 text-amber-200 ring-amber-400/30',
+    label: 'IaC unfollowed',
+    title:
+      "Your IaC declares this misconfig but live state is currently clean. Either IaC hasn't been applied yet, or someone hand-fixed live and the next apply will reintroduce the issue.",
+  },
+  uncorrelated_cspm: {
+    cls: 'bg-neutral-700/60 text-neutral-300 ring-neutral-600/40',
+    label: 'CSPM-only',
+    title:
+      "Live-only attestation with no IaC analog (e.g., root MFA, password policy). No drift to compute — judge on its own merits.",
+  },
+};
+
+function DriftBadge({
+  classification,
+}: {
+  classification: NonNullable<Finding['drift_classification']>;
+}) {
+  const theme = DRIFT_THEME[classification];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ${theme.cls}`}
+      title={theme.title}
+    >
+      {theme.label}
+    </span>
+  );
 }

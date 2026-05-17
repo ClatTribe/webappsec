@@ -18,7 +18,7 @@ export type FindingStatus =
   // policy) so it's auditable and one-click-reversible. See migration 020.
   | 'dismissed_by_ai';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
-export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'domain' | 'ip_address';
+export type TargetType = 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'cloud_account' | 'domain' | 'ip_address';
 export type ScanFrequency = 'manual' | 'daily' | 'weekly' | 'monthly';
 export type TargetStatus = 'active' | 'archived';
 
@@ -702,7 +702,7 @@ export interface KillChainResponse {
 export interface ScanTarget {
   id: string;
   scan_id: string;
-  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'domain' | 'ip_address';
+  type: 'local_code' | 'repository' | 'web_application' | 'api' | 'container_image' | 'cloud_account' | 'domain' | 'ip_address';
   value: string;
   workspace_subdir: string | null;
   source_integration_id: string | null;
@@ -799,6 +799,25 @@ export interface Finding {
   /** Mapping of compliance frameworks → control IDs implicated by this finding.
    *  Engine PR #103. */
   compliance_controls?: ComplianceControls | null;
+  /** Engine PR #292 — drift correlation classification. Set when a
+   *  scan included BOTH a `repository` target (IaC) AND a
+   *  `cloud_account` target (CSPM) and the engine cross-referenced
+   *  them. Null on any single-target scan.
+   *
+   *  Semantics:
+   *    iac_root_cause     IaC + CSPM agree → fix the IaC, re-apply
+   *    drift              CSPM-only finding → resource drifted out of IaC
+   *                       (severity is bumped one tier — IaC ≠ live is
+   *                       itself an operational signal)
+   *    iac_unfollowed     IaC says misconfig but live is clean → IaC
+   *                       hasn't been applied; next apply will reintroduce
+   *    uncorrelated_cspm  live-only attestation, no IaC analog */
+  drift_classification?:
+    | 'iac_root_cause'
+    | 'drift'
+    | 'iac_unfollowed'
+    | 'uncorrelated_cspm'
+    | null;
   /** `pii` / `phi` / `pci` / `credentials` / `internal` / null. */
   data_classification?: string | null;
   /** MITRE ATT&CK technique IDs. */
@@ -917,6 +936,15 @@ export interface ComplianceControls {
   iso_27001?: string[];
   nist_800_53?: string[];
   owasp?: string[];
+  // Engine PR #289 — CIS Cloud benchmark mappings. Emitted by CSPM
+  // specialists (PRs #290 / #291) and by IaC parsers (PR #287). Keys
+  // mirror the engine's framework registry; the wrapper renders them
+  // alongside the app-side frameworks above.
+  cis_aws?: string[];
+  cis_gcp?: string[];
+  cis_azure?: string[];
+  cis_kubernetes?: string[];
+  cis_docker?: string[];
 }
 
 export interface PriorLabelAttribution {

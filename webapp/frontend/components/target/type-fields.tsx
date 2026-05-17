@@ -15,6 +15,7 @@ import {
   FileJson,
   Plug,
   Container,
+  Cloud,
   ShieldAlert,
   Lock,
 } from 'lucide-react';
@@ -44,6 +45,15 @@ export interface AllFields {
   // gates a warning banner when no registry-auth integration is wired.
   imageSeverityFloor: '' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   imagePrivateRegistry: boolean;
+  // engine PRs #290 / #291 — cloud_account target. provider drives
+  // engine specialist dispatch (boto3 path for `aws`, Prowler for
+  // everything else). region / role_arn / external_id are forwarded
+  // via the existing materialize_credentials → AWS_* env vars path,
+  // so most of the heavy lifting is wrapper-side.
+  cloudProvider: '' | 'aws' | 'gcp' | 'azure' | 'kubernetes';
+  cloudRoleArn: string;
+  cloudExternalId: string;
+  cloudRegion: string;
   subdomainExcludes: string[];
   portSpec: string;
   protocols: '' | 'tcp' | 'udp' | 'both';
@@ -84,6 +94,12 @@ const TYPE_META: Record<
     ring: 'border-sky-500/30',
     tag: 'bg-sky-500/15 text-sky-200 ring-sky-500/30',
     label: 'Container image configuration',
+  },
+  cloud_account: {
+    Icon: Cloud,
+    ring: 'border-orange-500/30',
+    tag: 'bg-orange-500/15 text-orange-200 ring-orange-500/30',
+    label: 'Cloud account configuration',
   },
   domain: {
     Icon: Compass,
@@ -138,6 +154,9 @@ export default function TypeFields({ type, value, onChange }: Props) {
       )}
       {type === 'container_image' && (
         <ContainerImageFields value={value} set={set} />
+      )}
+      {type === 'cloud_account' && (
+        <CloudAccountFields value={value} set={set} />
       )}
       {type === 'domain' && (
         <DomainFields value={value} set={set} accent="emerald" />
@@ -332,6 +351,85 @@ function ContainerImageFields({ value, set }: { value: AllFields; set: Setter })
         emits an SBOM, and decorates findings with KEV / EPSS data. New CVEs against your image
         packages auto-fire MOAK exploit synthesis. Browser, DOM, and DAST tools are{' '}
         <span className="text-neutral-300">skipped</span> — a registry artefact has no live surface.
+      </p>
+    </div>
+  );
+}
+
+// --- Cloud account ---------------------------------------------------------
+//
+// CSPM target (engine PRs #290 / #291). The `value` field on the parent
+// targets row carries `<provider>/<account_id>` so the engine's typed-
+// prefix dispatch picks the right specialist. The fields below let the
+// operator optionally override AWS-side auth at scan time (cross-account
+// role assume) without re-creating the linked integration.
+
+function CloudAccountFields({ value, set }: { value: AllFields; set: Setter }) {
+  return (
+    <div className="space-y-4">
+      <FieldRow
+        Icon={Cloud}
+        label="Provider"
+        hint="Which cloud the engine's CSPM specialist will scan. v1 ships first-class AWS (boto3, 14 CIS checks). Others go via the Prowler engine (PR #291) when the worker image has Prowler installed."
+      >
+        <select
+          value={value.cloudProvider}
+          onChange={(e) => set('cloudProvider', e.target.value as AllFields['cloudProvider'])}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        >
+          <option value="">Select a provider…</option>
+          <option value="aws">AWS (boto3 — recommended)</option>
+          <option value="gcp">GCP (via Prowler)</option>
+          <option value="azure">Azure (via Prowler)</option>
+          <option value="kubernetes">Kubernetes (via Prowler)</option>
+        </select>
+      </FieldRow>
+      <FieldRow
+        Icon={GitBranch}
+        label="Cross-account role ARN"
+        hint="When set, the engine assumes this role via STS at scan time. Useful when the linked integration's base credentials live in a security-tooling account but the target is in a different account."
+      >
+        <input
+          type="text"
+          placeholder="arn:aws:iam::123456789012:role/strix-readonly"
+          value={value.cloudRoleArn}
+          onChange={(e) => set('cloudRoleArn', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 font-mono text-xs transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Lock}
+        label="External ID"
+        hint="Second factor for the role's trust policy. Forwarded to STS AssumeRole only when role_arn is set."
+      >
+        <input
+          type="text"
+          placeholder="optional"
+          value={value.cloudExternalId}
+          onChange={(e) => set('cloudExternalId', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <FieldRow
+        Icon={Compass}
+        label="Region override"
+        hint="Overrides the region stored on the integration. Most CSPM checks scan all regions regardless; this only matters for region-pinned services."
+      >
+        <input
+          type="text"
+          placeholder="us-east-1"
+          value={value.cloudRegion}
+          onChange={(e) => set('cloudRegion', e.target.value)}
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+        />
+      </FieldRow>
+      <p className="rounded-md border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-[11px] leading-relaxed text-orange-200/80">
+        <span className="font-medium text-orange-100">Routed to the CSPM tool catalog.</span> The
+        engine runs <code>scan_cloud_account</code> (PR #291 / Prowler) when available, falling
+        back to the boto3 path (<code>scan_aws_account_tool</code>, PR #290) for AWS. Findings are
+        decorated with CIS AWS / Azure / GCP / Kubernetes mappings (PR #289). Pair this target
+        with a repository target containing Terraform / Helm / K8s YAML to unlock IaC ↔ drift
+        correlation (PR #292).
       </p>
     </div>
   );
