@@ -757,3 +757,73 @@ The §15 components are the building blocks. This section sketches the operator-
 | ⬜ | **"Trust the engine progressively" UX.** New users start with auto-dismiss in `off` mode (visibility), graduate to `conservative` (default), power users opt into `aggressive`. UI nudges the upgrade as the labeler's TP/FP queue stabilises. | Engine ships the policy primitives (§15.1); wrapper handles progressive rollout. |
 | ⬜ | **"This finding has a stable identity" cross-scan view.** Use `fingerprint` + `reproducibility_token` to thread findings across scans. Operator sees: "this finding was first reported on Jan 5, has been observed in every scan since, was labeled FP once on Feb 12, and was force-shown via re-promote on Feb 14." A continuous casefile, not 47 separate scan reports. | All primitives shipped engine-side; pure wrapper persistence + UI. |
 | ⬜ | **"Coverage receipt" on every report.** Final report ends with a coverage receipt: phases run × categories covered × ingested traffic × hypotheses resolved × auto-dismissals × FP-loop labels written. The operator hands this to compliance: "here's evidence the engine did its job." | Engine emits all the primitives (§15.1, 15.2, 15.4); wrapper aggregates. |
+
+---
+
+## 17. Wrapper-side companions to engine PRs #290–#294 (CSPM + cloud attack paths)
+
+The engine just shipped the fifth target type — `cloud_account` — plus IaC↔CSPM
+drift correlation and graph-based cloud-attack-path detection. Together they're
+the CNAPP-capability slice that closes the biggest gap vs. Wiz/Orca at the
+dev-tier price point.
+
+**Breaking-shape changes**: zero. Every new finding rides the existing
+`findings` table with a new `category` value (`misconfig` / `drift` /
+`cloud_attack_path`) and a new `rule_id` namespace (`AWS_*`,
+`prowler:<check_id>`, `cap_*`). Per `CLAUDE.md` mirror-engine-shape doctrine,
+no schema migration is required for findings ingestion.
+
+**Engine PRs that landed**:
+- **[#290]** boto3-backed AWS CSPM scanner — 14 checks across S3, EC2 SG, IAM, RDS, EBS, CloudTrail, VPC; hermetic-testable via DI'd client factory.
+- **[#291]** Prowler wrapper as primary engine — Apache 2.0, multi-cloud (AWS/Azure/GCP/K8s), 500+ checks; built-in boto3 stays as offline / minimal-install fallback.
+- **[#292]** IaC ↔ CSPM drift correlator — classifies every finding as `iac_root_cause` / `drift` / `iac_unfollowed` / `uncorrelated_cspm`.
+- **[#293]** Cloud attack-path graph — five built-in patterns (public storage credentials risk, internet-exposed compute with IAM, wildcard admin attached, root unsafe, world-assumable role); pluggable via custom-pattern functions for org-specific scenarios.
+- **[#294]** Attack-path emission threaded through `scan_cloud_account` by default — wrapper gets toxic-combination findings for free with zero integration work.
+
+### 17.1 New target type wiring (already done in `cspm_cloud_account_target` migration)
+
+The migration `20260617000072_cspm_cloud_account_target.sql` already extends the
+DB CHECK constraints; the frontend target-config (`lib/target-config.ts`) and
+the worker instruction augmenter (`worker/src/strix_worker/instruction.py`)
+were updated alongside. **Done — listed here so future contributors can find
+the precedent.**
+
+### 17.2 New finding categories the wrapper must render
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **`category=misconfig` rendering for CSPM findings.** CSPM rule IDs come in three namespaces: `AWS_*` (boto3 path), `prowler:<check_id>` (Prowler path), and `TF_AWS_*` (IaC layer — was already there). Findings carry `compliance_controls.cis_aws` / `cis_azure` / `cis_gcp` / `cis_docker` / `cis_kubernetes` arrays the existing compliance panel renders. | Without explicit per-namespace styling the dashboard treats CSPM findings as generic "Other". |
+| ⬜ | **`category=drift` rendering with classification pill.** Drift findings carry `rule_id`, `iac_rule_id`, `cspm_rule_id`, plus a classification label rendered via the title prefix `[drift:iac_root_cause]` / `[drift:drift]` / `[drift:iac_unfollowed]`. The wrapper should render the classification as a chip + filter pill — auditors group by classification. | Drift findings are operationally distinct from CSPM findings; a single classification chip turns the "is my Terraform authoritative?" answer into a one-glance dashboard widget. |
+| ⬜ | **`category=cloud_attack_path` rendering with a `casefile` shape.** Attack-path findings carry `narrative`, `hops` (ordered node-key chain), `evidence_edges`, `mitre_techniques`, `remediation`. Treat them as Wiz-style attack-path cards: hop-chain diagram (or numbered list) at top, narrative below, remediation accordion. | This is the single highest-impact UI affordance — attack-path findings are the headline number in a CNAPP product; a flat list hides their value. |
+
+### 17.3 Cloud-account target picker + creds form
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Cloud-account "Add target" form.** Provider selector (AWS / Azure / GCP), AWS-side fields for profile name OR assume-role ARN OR access-key pair, optional region filter, optional Prowler `--compliance` pack. Same secret-handling pattern as `--auth-*` flags (forwarded as env, never logged). | The migration ships the DB shape; the form is the operator-facing surface. |
+| ⬜ | **"Scan now" + scheduled-scan toggle.** CSPM is the canonical schedule-it target — most customers want a nightly account scan. Reuse the existing scheduler. | Cloud accounts don't change minute-to-minute; daily is the right cadence and the engine's already idempotent. |
+| ⬜ | **Read-only contract notice.** Banner reminding the operator the scan is read-only (`Describe*` / `Get*` / `List*` only, AWS-managed `SecurityAudit` role is the recommended grant). | Customers' security teams ask before granting cloud creds; the banner pre-empts the question. |
+
+### 17.4 Attack-path dashboard
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Top-of-dashboard "Critical Attack Paths" card.** Aggregate count of `cloud_attack_path` findings with severity ≥ high, grouped by `pattern_id`. Click drills into the per-path casefile. | First thing the CISO looks at. The single number "5 critical attack paths" is more legible than "127 CSPM findings". |
+| ⬜ | **Per-path casefile view.** Hop-chain diagram (resource → identity → policy → ...), narrative paragraph, MITRE technique chips, remediation accordion, "Show constituent CSPM findings" expander linking back to the underlying single findings. | Attack-path findings reference multiple constituent CSPM findings; the wrapper should show the relationship — operator wants to see "fixing this one IaC line clears these 3 attack paths". |
+| ⬜ | **Drift filter row.** Toggle group above the findings table: `All / iac_root_cause / drift / iac_unfollowed / uncorrelated_cspm`. Reads from the `[drift:*]` title prefix on the underlying tracer record. | Dev-team workflow: "show me only the drift" → fix in Terraform; "show me only iac_unfollowed" → re-apply pipeline. |
+
+### 17.5 Compliance-overlay polish for cloud findings
+
+| | Item | Why it matters |
+|---|---|---|
+| ⬜ | **Per-framework filter for CIS Docker / Kubernetes / AWS / Azure / GCP.** Engine ships per-finding `compliance_controls.cis_<provider>` arrays via the `RULE_ID_TO_CONTROLS` map. Wrapper renders the filter pill set so "show me everything that violates CIS AWS 2.1.5" works one click. | Auditor-facing question shape; the data's there, just needs the UI. |
+| ⬜ | **Compliance dashboard rollup: "X of Y CIS AWS controls attested by latest scan."** Engine's `covered_controls()` + `untested_controls()` from `strix.compliance.mappings` give the denominator; tracer findings give the numerator. | Procurement / SOC 2 prep ask. Same shape as the engine-side `compliance_evidence.json` already shipped. |
+
+### 17.6 Tools-wishlist follow-ups (recorded for future engine PRs)
+
+These aren't wrapper work — they're engine work the wrapper would consume next:
+
+- **Live PoC probes for cloud attack paths** — anonymous S3 GET / RDS TCP handshake / SQS SendMessage / Lambda invoke to verify exploitability of detected paths. Closes the loop on "is this actually exploitable?".
+- **Asset discovery via Prowler enumeration / boto3** — currently the attack-path graph is built from CSPM findings only; a richer graph needs an enumeration pass. Wrapper would then have a more complete picture of the cloud account.
+- **Reachability scoring across the cloud graph** — Wiz's noise-reduction moat. The strix KG architecture is built for it; needs cloud edges plugged into the existing §99 reachability scorer.
+- **CLI surface** — `strix cspm scan --provider aws --profile prod` for operator CLI use outside the agent loop. Today the wrapper composes this via the agent-call path, which is fine, but a direct CLI mode would let CI users run cloud scans without an LLM bill.
