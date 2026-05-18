@@ -56,7 +56,7 @@ export default async function ApiKeysPage() {
           <code className="rounded bg-neutral-800/80 px-1 py-0.5 text-xs">
             ~/.config/claude-code/mcp_servers.json
           </code>{' '}
-          so your AI assistant can ask TensorShield about your security posture.
+          so your AI assistant can ask TensorShield about your security status.
         </p>
       </header>
 

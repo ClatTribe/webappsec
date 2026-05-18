@@ -59,7 +59,7 @@ const GROUPS: Array<{
       {
         href: '/settings/api-keys',
         label: 'API keys',
-        blurb: 'Bearer tokens for the public bulk-import + MCP surface.',
+        blurb: 'Tokens for CI / CMDB sync scripts and the Cursor / Claude integration.',
         Icon: KeyRound,
       },
     ],
@@ -79,21 +79,21 @@ const GROUPS: Array<{
       {
         href: '/settings/custom-rules',
         label: 'Custom rules',
-        blurb: 'Per-org Semgrep rules for stack-specific patterns.',
+        blurb: 'Your own rules for things specific to your stack — framework misuse, internal naming, deprecated APIs.',
         Icon: Wand2,
       },
     ],
   },
   {
     title: 'Compliance basics',
-    blurb: 'How auditors see you.',
+    blurb: 'What auditors will check.',
     Icon: FileLock,
     items: [
       {
         href: '/compliance/collectors',
-        label: 'Evidence collectors',
+        label: 'Automatic compliance checks',
         blurb:
-          'Continuously poll GitHub / AWS / GCP / Okta for org-level controls.',
+          'Continuously check GitHub / AWS / GCP / Okta for the things auditors ask about — two-factor auth, key rotation, who has admin.',
         Icon: ShieldCheck,
       },
       {

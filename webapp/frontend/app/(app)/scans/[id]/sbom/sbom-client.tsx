@@ -125,7 +125,7 @@ export default function SbomClient({ scanId, runName }: Props) {
     return (
       <section className="flex items-center gap-2 rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-6 text-sm text-neutral-400">
         <Loader2 className="h-4 w-4 animate-spin text-neutral-500" strokeWidth={2.5} />
-        Loading SBOM…
+        Loading component list…
       </section>
     );
   }
@@ -136,7 +136,7 @@ export default function SbomClient({ scanId, runName }: Props) {
         <div className="flex items-start gap-3 text-sm text-rose-200">
           <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
           <div className="space-y-1">
-            <div className="font-medium">Could not load SBOM</div>
+            <div className="font-medium">Could not load component list</div>
             <div className="text-rose-200/70">{error ?? 'no body'}</div>
           </div>
         </div>
@@ -154,7 +154,7 @@ export default function SbomClient({ scanId, runName }: Props) {
             <Package className="h-5 w-5 text-cyan-300" strokeWidth={2} />
           </div>
           <div className="space-y-0.5">
-            <h1 className="text-lg font-semibold text-neutral-100">{runName} — SBOM</h1>
+            <h1 className="text-lg font-semibold text-neutral-100">{runName} — Component list</h1>
             <p className="text-[12px] text-neutral-500">
               CycloneDX {bom.specVersion ?? '1.5'} · {components.length} component
               {components.length === 1 ? '' : 's'}

@@ -74,7 +74,7 @@ export default async function FindingsPage() {
           <Link
             href="/findings/recurring"
             className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/20"
-            title="Findings that hit two or more of your targets — triage as a group"
+            title="The same finding hitting two or more of your assets — review them all as a group"
           >
             <Sparkles className="h-3.5 w-3.5" strokeWidth={2.25} />
             Recurring across targets
