@@ -532,6 +532,8 @@ function hintForIntegrationType(t: string): string {
       return 'Click "Discover now" to enumerate public ALBs, API Gateways, and Lambda function URLs in this AWS account.';
     case 'gcp':
       return 'Click "Discover now" to enumerate public Cloud Run services, App Engine apps, and Cloud Functions in this GCP project.';
+    case 'azure':
+      return 'Click "Discover now" to enumerate App Service web apps, Function Apps, public IPs with DNS, and Front Door endpoints in this Azure subscription.';
     case 'domain':
       return 'Click "Discover now" to enumerate subdomains of this apex via public certificate-transparency logs.';
     default:

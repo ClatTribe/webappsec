@@ -80,6 +80,7 @@ export default async function IntegrationsPage() {
                     {(i.type === 'github' ||
                       i.type === 'aws' ||
                       i.type === 'gcp' ||
+                      i.type === 'azure' ||
                       i.type === 'domain') && (
                       <Link
                         href={`/integrations/${i.id}/discovered`}
