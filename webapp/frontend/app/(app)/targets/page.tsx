@@ -122,10 +122,10 @@ export default async function TargetsPage() {
     <div className="space-y-8">
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Targets</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Assets</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-neutral-400">
-            Each target is an asset you scan repeatedly — a repo, a deployed app, a domain.
-            Findings, scan history, and triage state all roll up per target.
+            Everything TensorShield watches — repos, web apps, APIs, cloud accounts,
+            containers, domains. Findings and scan history roll up per asset.
           </p>
         </div>
         <div className="flex items-center gap-2">

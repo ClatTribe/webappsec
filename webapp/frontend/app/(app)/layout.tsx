@@ -4,36 +4,56 @@ import { createClient } from '@/lib/supabase/server';
 import { BrandLockup } from '@/components/marketing/marketing-shell';
 import OnboardingDialog from '@/components/onboarding/onboarding-dialog';
 import {
-  LayoutDashboard,
+  Home,
   MessageSquare,
-  Target,
-  ScanLine,
   ShieldAlert,
-  Plug,
-  Users,
-  Settings,
   LogOut,
   FileLock,
   FolderKanban,
-  Briefcase,
+  Boxes,
+  Wrench,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-const NAV = [
-  { href: '/chat', label: 'Chat', icon: MessageSquare },
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/exec', label: 'Executive', icon: Briefcase },
-  // Projects (Phase C) sit above Targets in the IA — they're the
-  // natural grouping mid-market teams reach for first; targets are
-  // the leaf nodes within them.
-  { href: '/projects', label: 'Projects', icon: FolderKanban },
-  { href: '/targets', label: 'Targets', icon: Target },
-  { href: '/scans', label: 'Scans', icon: ScanLine },
+// Nav revamp (PR A). Maps the four jobs a non-security developer
+// actually has: see status, see what to monitor, see what's broken,
+// see audit posture. Configuration goes behind one "Setup" section.
+//
+// Conditional items:
+//   - Projects appears once targets.count >= 5 (mid-market signal).
+//     The threshold is hard-coded here rather than a settings flag so
+//     the surface shows up automatically when it's useful.
+//
+// Removed from primary nav (still reachable by URL):
+//   - /dashboard  — replaced by adaptive Home (PR B)
+//   - /exec       — surfaced as "Share with the board" CTA, not a tab
+//   - /scans      — surfaced inside Asset detail and as context on
+//                   individual findings; almost nobody opens "scans"
+//                   as a first move
+//   - /integrations, /team, /settings — moved behind /setup
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const PRIMARY_NAV: NavItem[] = [
+  { href: '/home', label: 'Home', icon: Home },
+  { href: '/targets', label: 'Assets', icon: Boxes },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
   { href: '/compliance', label: 'Compliance', icon: FileLock },
-  { href: '/integrations', label: 'Integrations', icon: Plug },
-  { href: '/team', label: 'Team', icon: Users },
-  { href: '/settings', label: 'Settings', icon: Settings },
 ];
+
+const SECONDARY_NAV: NavItem[] = [
+  { href: '/chat', label: 'Chat', icon: MessageSquare },
+  { href: '/setup', label: 'Setup', icon: Wrench },
+];
+
+// Threshold at which the Projects nav item starts appearing. Picked
+// because that's the point at which a flat target list stops fitting
+// on one screen and grouping starts paying for itself.
+const PROJECTS_NAV_THRESHOLD = 5;
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -45,6 +65,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: orgs } = await supabase.from('organizations').select('*').limit(5);
   const org = orgs?.[0];
+
+  // Conditional Projects nav — only show once the user has enough
+  // targets to benefit from grouping. Counts active targets only;
+  // dormant/archived don't trigger the threshold.
+  const { count: activeTargetCount } = await supabase
+    .from('targets')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'active');
+  const showProjectsNav = (activeTargetCount ?? 0) >= PROJECTS_NAV_THRESHOLD;
 
   // Tier II #9 — onboarding wizard.
   // Only fetch the integration list when the wizard is actually going
@@ -81,10 +110,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-neutral-800/80 bg-neutral-950/40 backdrop-blur-xl">
-        <Link
-          href="/dashboard"
-          className="px-5 pb-3 pt-6"
-        >
+        <Link href="/home" className="px-5 pb-3 pt-6">
           <BrandLockup />
         </Link>
 
@@ -100,20 +126,31 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         )}
 
-        <nav className="mt-6 flex flex-col gap-0.5 px-3">
-          {NAV.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-neutral-50"
-              >
-                <Icon className="h-4 w-4 transition-colors group-hover:text-cyan-300" strokeWidth={2} />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+        <nav className="mt-6 flex flex-1 flex-col gap-0.5 px-3">
+          {/* Primary — the four jobs */}
+          {PRIMARY_NAV.map((item) => (
+            <NavLinkRow key={item.href} {...item} />
+          ))}
+
+          {/* Conditional: Projects appears once an org has >= N
+              active targets. The empty rendering keeps the nav stable
+              for fresh accounts. */}
+          {showProjectsNav && (
+            <NavLinkRow href="/projects" label="Projects" icon={FolderKanban} />
+          )}
+
+          {/* Secondary — chat is universal (people know how to use it)
+              and Setup collapses all configuration entry points. Pushed
+              to the bottom of the rail via mt-auto so primary nav
+              sits at eye level. */}
+          <div className="mt-auto pt-4">
+            <div className="mb-1 px-3 text-[10px] uppercase tracking-wider text-neutral-600">
+              Tools
+            </div>
+            {SECONDARY_NAV.map((item) => (
+              <NavLinkRow key={item.href} {...item} />
+            ))}
+          </div>
         </nav>
 
         <div className="mt-auto px-3 pb-5">
@@ -153,5 +190,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           via the prop list passed here. */}
       {showOnboarding && <OnboardingDialog initialIntegrations={onboardingIntegrations} />}
     </div>
+  );
+}
+
+function NavLinkRow({
+  href,
+  label,
+  icon: Icon,
+}: {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-neutral-50"
+    >
+      <Icon
+        className="h-4 w-4 transition-colors group-hover:text-cyan-300"
+        strokeWidth={2}
+      />
+      <span>{label}</span>
+    </Link>
   );
 }
