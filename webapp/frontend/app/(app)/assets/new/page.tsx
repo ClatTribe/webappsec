@@ -85,13 +85,6 @@ const TYPES: {
     Icon: Network,
     blurb: 'Network-level scan. Set ports + protocol below.',
   },
-  {
-    value: 'local_code',
-    label: 'Local code path',
-    example: '/home/me/myapp',
-    Icon: Folder,
-    blurb: 'Self-host only. Worker must have read access to the path.',
-  },
 ];
 
 function inferType(value: string): TargetType {

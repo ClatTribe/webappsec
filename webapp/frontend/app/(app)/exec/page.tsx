@@ -158,7 +158,6 @@ export default async function ExecRollupPage() {
     'container_image',
     'domain',
     'ip_address',
-    'local_code',
   ];
   const coverageGaps = ALL_TYPES.filter((t) => !typesInUse.has(t));
 

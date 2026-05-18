@@ -57,7 +57,6 @@ interface ImportResult {
 
 const REQUIRED_COLS = ['name', 'type', 'value'] as const;
 const VALID_TYPES = new Set([
-  'local_code',
   'repository',
   'web_application',
   'domain',
@@ -199,7 +198,7 @@ export default function ImportCsvPage() {
           </thead>
           <tbody className="text-neutral-300">
             <SchemaRow col="name" required notes="Display name shown in the UI" />
-            <SchemaRow col="type" required notes="repository | web_application | api | container_image | cloud_account | domain | ip_address | local_code" />
+            <SchemaRow col="type" required notes="repository | web_application | api | container_image | cloud_account | domain | ip_address" />
             <SchemaRow col="value" required notes="Canonical identifier (URL, hostname, image:tag, provider/account)" />
             <SchemaRow col="external_id" notes="Stable id from your CMDB. Re-imports are idempotent on this." />
             <SchemaRow col="description" notes="Free-text" />
