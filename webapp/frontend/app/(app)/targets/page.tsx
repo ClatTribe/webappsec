@@ -12,6 +12,7 @@ import {
   Container,
   Cloud,
 } from 'lucide-react';
+import DormantTargetsClient from './dormant-targets-client';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import type { Target, TargetType } from '@/lib/supabase/types';
@@ -42,6 +43,25 @@ export default async function TargetsPage() {
     .select('*')
     .eq('status', 'active')
     .order('last_scan_at', { ascending: false, nullsFirst: false });
+
+  // Phase F — dormant targets the sweep cron flagged. Surface them in
+  // a collapsible section under the active list so the customer can
+  // batch-review/restore/archive them without leaving the targets page.
+  const { data: dormantTargets } = (await supabase
+    .from('targets')
+    .select('id, name, type, value, dormancy_reason, dormancy_detected_at, last_scan_at')
+    .eq('status', 'dormant')
+    .order('dormancy_detected_at', { ascending: false })) as unknown as {
+    data: Array<{
+      id: string;
+      name: string;
+      type: string;
+      value: string;
+      dormancy_reason: string | null;
+      dormancy_detected_at: string | null;
+      last_scan_at: string | null;
+    }> | null;
+  };
 
   // Phase C — pull project lookup so the cards can render a project
   // chip per row. Cheap: one extra read for the whole projects list,
@@ -241,6 +261,14 @@ export default async function TargetsPage() {
             Add your first target
           </Link>
         </div>
+      )}
+
+      {/* Phase F — dormant assets. Only renders when the sweep flagged
+          something; quiet teams see nothing. The client component
+          handles the restore/archive bulk actions to keep this server
+          page minimal. */}
+      {dormantTargets && dormantTargets.length > 0 && (
+        <DormantTargetsClient targets={dormantTargets} />
       )}
     </div>
   );
