@@ -16,6 +16,7 @@ export default function NewIntegrationPage({ params }: Props) {
   if (type === 'gcp') return <GcpForm />;
   if (type === 'k8s') return <KubeconfigForm />;
   if (type === 'domain') return <DomainForm />;
+  if (type === 'okta') return <OktaForm />;
   // Skeletons for remaining types — same shape as AWS / k8s.
   return (
     <div className="max-w-2xl space-y-4">
@@ -510,6 +511,101 @@ function DomainForm() {
         <button
           type="submit"
           disabled={submitting || !apex.trim()}
+          className="rounded-md bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/25 disabled:opacity-50"
+        >
+          {submitting ? 'Saving…' : 'Save integration'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ===================== OKTA =====================
+function OktaForm() {
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [orgUrl, setOrgUrl] = useState('');
+  const [sswsToken, setSswsToken] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    const cleanOrg = orgUrl.trim().replace(/\/+$/, '');
+    if (!/^https:\/\/[a-z0-9-]+\.okta(?:preview|-emea|preview-emea)?\.com$/i.test(cleanOrg)) {
+      setError('Org URL should look like https://acme.okta.com (no trailing path).');
+      setSubmitting(false);
+      return;
+    }
+    const res = await fetch('/api/integrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'okta',
+        name: name.trim() || cleanOrg,
+        // Vault payload — Okta collector reads { ssws_token, org_url }.
+        secret_payload: { ssws_token: sswsToken.trim(), org_url: cleanOrg },
+        // org_url duplicated in metadata for non-secret display.
+        metadata: { org_url: cleanOrg },
+      }),
+    });
+    setSubmitting(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'Failed to save');
+      return;
+    }
+    router.push('/integrations');
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">Connect Okta</h1>
+      <p className="text-sm text-neutral-400">
+        Reads MFA enrollment, privileged-role assignments, API token age,
+        and inactive accounts from your Okta tenant. The SSWS token needs
+        the <code className="rounded bg-neutral-800 px-1 font-mono text-[11px]">Read-Only Admin</code>{' '}
+        role at minimum.
+      </p>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <Field
+          label="Name (optional)"
+          value={name}
+          onChange={setName}
+          placeholder="acme okta tenant"
+        />
+        <Field
+          label="Org URL"
+          value={orgUrl}
+          onChange={setOrgUrl}
+          placeholder="https://acme.okta.com"
+        />
+        <label className="flex flex-col text-sm">
+          SSWS API token
+          <input
+            type="password"
+            value={sswsToken}
+            onChange={(e) => setSswsToken(e.target.value)}
+            placeholder="00abc... (stored encrypted in the vault)"
+            className="mt-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-xs"
+          />
+          <span className="mt-1 text-[10.5px] text-neutral-500">
+            Create at Okta Admin → Security → API → Tokens. Use a token tied
+            to a service account so revoking it doesn&apos;t affect a real user.
+          </span>
+        </label>
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2 text-[11.5px] text-amber-200/80">
+          Use the tenant URL (e.g.{' '}
+          <code className="font-mono">https://acme.okta.com</code>), NOT the
+          admin URL (<code className="font-mono">https://acme-admin.okta.com</code>).
+          The admin URL responds with HTML redirects that break the JSON API.
+        </p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting || !sswsToken.trim() || !orgUrl.trim()}
           className="rounded-md bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/25 disabled:opacity-50"
         >
           {submitting ? 'Saving…' : 'Save integration'}

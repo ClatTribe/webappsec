@@ -1,7 +1,7 @@
 // Hand-written types matching the Supabase schema.
 // In production you'd generate these via `supabase gen types typescript --linked > types.ts`.
 
-export type IntegrationType = 'github' | 'gitlab' | 'aws' | 'azure' | 'gcp' | 'k8s' | 'webhook' | 'domain';
+export type IntegrationType = 'github' | 'gitlab' | 'aws' | 'azure' | 'gcp' | 'k8s' | 'webhook' | 'domain' | 'okta';
 export type ScanStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ScanMode = 'quick' | 'standard' | 'deep';
 export type ScopeMode = 'auto' | 'diff' | 'full';

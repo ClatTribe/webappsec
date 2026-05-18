@@ -11,6 +11,7 @@ const INTEGRATION_TYPES: { type: IntegrationType; label: string; href: string }[
   { type: 'k8s', label: 'Kubernetes (Kubeconfig)', href: '/integrations/new/k8s' },
   // Phase A — apex-domain "integration" powers subdomain discovery via crt.sh.
   { type: 'domain', label: 'Apex domain (subdomain discovery)', href: '/integrations/new/domain' },
+  { type: 'okta', label: 'Okta (identity-provider posture)', href: '/integrations/new/okta' },
   { type: 'webhook', label: 'Webhook', href: '/integrations/new/webhook' },
 ];
 
