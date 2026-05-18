@@ -120,7 +120,7 @@ export default function ImportTerraformPage() {
   return (
     <div className="max-w-5xl space-y-6">
       <nav className="flex items-center gap-1.5 text-[11px] text-neutral-500">
-        <Link href="/targets" className="transition-colors hover:text-neutral-300">
+        <Link href="/assets" className="transition-colors hover:text-neutral-300">
           Targets
         </Link>
         <ChevronRight className="h-3 w-3" />
@@ -317,7 +317,7 @@ export default function ImportTerraformPage() {
           </div>
           <button
             type="button"
-            onClick={() => router.push('/targets')}
+            onClick={() => router.push('/assets')}
             className="rounded-md bg-gradient-to-b from-white to-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-950"
           >
             View targets

@@ -149,7 +149,7 @@ export default function ImportClient({ integrations }: { integrations: Integrati
     setImportInFlight(false);
     setImportErrors(errors);
     if (errors.length === 0) {
-      router.push('/targets?imported=' + (targets.length - errors.length));
+      router.push('/assets?imported=' + (targets.length - errors.length));
     }
   }
 

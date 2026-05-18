@@ -12,7 +12,7 @@ import {
   Container,
   Cloud,
 } from 'lucide-react';
-import DormantTargetsClient from './dormant-targets-client';
+import DormantTargetsClient from './dormant-assets-client';
 import AddAssetsButton from './add-assets-button';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
@@ -143,7 +143,7 @@ export default async function TargetsPage() {
             return (
               <Link
                 key={t.id}
-                href={`/targets/${t.id}`}
+                href={`/assets/${t.id}`}
                 className="group relative overflow-hidden rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-5 transition-all hover:border-neutral-700 hover:bg-neutral-900/50"
               >
                 <div className="flex items-start gap-3">
@@ -229,7 +229,7 @@ export default async function TargetsPage() {
             roll up here.
           </p>
           <Link
-            href="/targets/new"
+            href="/assets/new"
             className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-neutral-950 transition-colors hover:bg-neutral-200"
           >
             <Plus className="h-4 w-4" />

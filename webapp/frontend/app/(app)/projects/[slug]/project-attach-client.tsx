@@ -141,7 +141,7 @@ export default function ProjectAttachClient({
         {filtered.length === 0 ? (
           <p className="p-4 text-center text-xs text-neutral-500">
             {unattached.length === 0
-              ? 'Every target is already attached to a project. Create more in /targets/new.'
+              ? 'Every asset is already attached to a project. Create more in /assets/new.'
               : 'No matches for that filter.'}
           </p>
         ) : (

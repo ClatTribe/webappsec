@@ -265,7 +265,7 @@ function NewScanInner() {
               Target
             </span>
             <Link
-              href="/targets/new"
+              href="/assets/new"
               className="inline-flex items-center gap-1 text-xs text-cyan-300 hover:underline"
             >
               <Plus className="h-3 w-3" /> Add new
@@ -279,7 +279,7 @@ function NewScanInner() {
                 Add a repo, app, or domain first.
               </p>
               <Link
-                href="/targets/new"
+                href="/assets/new"
                 className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-neutral-950 hover:bg-neutral-200"
               >
                 <Plus className="h-3.5 w-3.5" /> Add target

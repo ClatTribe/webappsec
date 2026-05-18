@@ -248,7 +248,7 @@ export default async function ProjectDetailPage({
               return (
                 <Link
                   key={t.id}
-                  href={`/targets/${t.id}`}
+                  href={`/assets/${t.id}`}
                   className={`grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-neutral-900/50 ${
                     i < targets.length - 1 ? 'border-b border-neutral-800/60' : ''
                   }`}

@@ -40,7 +40,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { href: '/home', label: 'Home', icon: Home },
-  { href: '/targets', label: 'Assets', icon: Boxes },
+  { href: '/assets', label: 'Assets', icon: Boxes },
   { href: '/findings', label: 'Findings', icon: ShieldAlert },
   { href: '/compliance', label: 'Compliance', icon: FileLock },
 ];

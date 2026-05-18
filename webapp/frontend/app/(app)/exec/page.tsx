@@ -350,7 +350,7 @@ export default async function ExecRollupPage() {
             ))}
           </div>
           <Link
-            href="/targets/new"
+            href="/assets/new"
             className="mt-3 inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:underline"
           >
             Add a target

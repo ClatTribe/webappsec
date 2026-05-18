@@ -224,7 +224,7 @@ export default function NewTargetPage() {
       return;
     }
     const { id } = await res.json();
-    router.push(`/targets/${id}`);
+    router.push(`/assets/${id}`);
   }
 
   return (
@@ -232,7 +232,7 @@ export default function NewTargetPage() {
       {/* ===================== left: form ===================== */}
       <div className="space-y-6">
         <nav className="flex items-center gap-1.5 text-xs text-neutral-500">
-          <Link href="/targets" className="transition-colors hover:text-neutral-300">
+          <Link href="/assets" className="transition-colors hover:text-neutral-300">
             Targets
           </Link>
           <ChevronRight className="h-3 w-3" />
@@ -470,7 +470,7 @@ export default function NewTargetPage() {
               {submitting ? 'Creating…' : 'Create target'}
             </button>
             <Link
-              href="/targets"
+              href="/assets"
               className="text-sm text-neutral-400 transition-colors hover:text-neutral-100"
             >
               Cancel
