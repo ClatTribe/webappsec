@@ -530,6 +530,8 @@ function hintForIntegrationType(t: string): string {
       return 'Click "Discover now" above to enumerate repositories this GitHub integration can see.';
     case 'aws':
       return 'Click "Discover now" to enumerate public ALBs, API Gateways, and Lambda function URLs in this AWS account.';
+    case 'gcp':
+      return 'Click "Discover now" to enumerate public Cloud Run services, App Engine apps, and Cloud Functions in this GCP project.';
     case 'domain':
       return 'Click "Discover now" to enumerate subdomains of this apex via public certificate-transparency logs.';
     default:

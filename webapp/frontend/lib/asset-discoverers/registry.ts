@@ -6,12 +6,14 @@
 
 import { awsResourcesDiscoverer } from './aws';
 import { domainSubdomainDiscoverer } from './domain';
+import { gcpResourcesDiscoverer } from './gcp';
 import { githubReposDiscoverer } from './github';
 import type { DiscovererDefinition } from './types';
 
 export const DISCOVERERS: DiscovererDefinition[] = [
   githubReposDiscoverer,
   awsResourcesDiscoverer,
+  gcpResourcesDiscoverer,
   domainSubdomainDiscoverer,
 ];
 
