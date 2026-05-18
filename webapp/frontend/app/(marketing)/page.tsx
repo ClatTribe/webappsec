@@ -28,7 +28,6 @@ import {
   Container,
   Network,
   Server,
-  FileCode2,
   Webhook,
   Crosshair,
   FlaskConical,
@@ -54,7 +53,7 @@ export default function LandingPage() {
     <>
       <Hero />
       <ProofStrip />
-      <Coverage />
+      <AssetCoverage />
       <ProofItRail />
       <ClosedLoop />
       <ComplianceProduct />
@@ -68,20 +67,32 @@ export default function LandingPage() {
 }
 
 // ============================================================================
-// HERO — problem-led headline; chat mockup as proof the agent is real.
+// HERO
 // ============================================================================
 
 function Hero() {
   return (
-    <section className="mx-auto max-w-6xl px-6 pt-20 pb-16 lg:pt-28 lg:pb-24">
+    <section className="relative mx-auto max-w-6xl px-6 pt-20 pb-16 lg:pt-28 lg:pb-24">
+      {/* Ambient gradient halo — pure CSS, no client JS */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[600px] opacity-60"
+        style={{
+          background:
+            'radial-gradient(60% 50% at 50% 0%, rgba(6, 182, 212, 0.12) 0%, transparent 70%)',
+        }}
+      />
       <div className="grid items-center gap-12 lg:grid-cols-12">
         <div className="lg:col-span-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-200">
-            <Sparkles className="h-3 w-3" strokeWidth={2.5} />
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400" />
+            </span>
             AI security &amp; compliance engineer
           </div>
-          <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl">
-            Your stack has eight attack surfaces.{' '}
+          <h1 className="mt-6 text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-[3.75rem]">
+            Your stack has seven attack surfaces.{' '}
             <span className="bg-gradient-to-br from-cyan-300 via-blue-300 to-violet-300 bg-clip-text text-transparent">
               Your security team has one.
             </span>
@@ -95,7 +106,7 @@ function Hero() {
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
               href="/signup"
-              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-950 shadow-lg shadow-white/15 transition-all hover:shadow-xl hover:shadow-white/25"
+              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-950 shadow-lg shadow-white/15 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-white/25"
             >
               Start free
               <ArrowRight
@@ -139,9 +150,9 @@ function HeroChatMockup() {
     <div className="relative">
       <div
         aria-hidden
-        className="absolute -inset-6 rounded-3xl bg-gradient-to-br from-cyan-500/20 via-blue-500/10 to-violet-500/20 blur-2xl"
+        className="absolute -inset-6 rounded-3xl bg-gradient-to-br from-cyan-500/25 via-blue-500/15 to-violet-500/25 blur-2xl"
       />
-      <div className="relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-950/80 shadow-2xl shadow-black/50 backdrop-blur">
+      <div className="relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-950/85 shadow-2xl shadow-black/50 backdrop-blur">
         {/* Window chrome */}
         <div className="flex items-center justify-between border-b border-neutral-800/80 bg-neutral-900/60 px-4 py-2.5">
           <div className="flex items-center gap-1.5">
@@ -149,9 +160,14 @@ function HeroChatMockup() {
             <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
           </div>
-          <span className="font-mono text-[10.5px] text-neutral-500">tensorshield.ai · your workspace</span>
+          <span className="font-mono text-[10.5px] text-neutral-500">
+            tensorshield.ai · your workspace
+          </span>
           <div className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            </span>
             <span className="text-[10px] text-neutral-400">live</span>
           </div>
         </div>
@@ -203,7 +219,7 @@ function HeroChatMockup() {
             <div className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-500">
               Ask TensorShield anything about your scans, findings, cloud posture, or compliance…
             </div>
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/30">
               <Send className="h-3.5 w-3.5" />
             </span>
           </div>
@@ -235,7 +251,7 @@ function ChatMessage({
             <User className="h-3.5 w-3.5" />
           </div>
         ) : (
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 shadow-md shadow-cyan-500/20">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 shadow-md shadow-cyan-500/30">
             <Sparkles className="h-3.5 w-3.5 text-white" />
           </div>
         )}
@@ -243,7 +259,7 @@ function ChatMessage({
       <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
         <div
           className={`rounded-2xl px-4 py-3 ${
-            isUser ? 'bg-cyan-500/15 text-neutral-100' : 'bg-neutral-900/60 text-neutral-100'
+            isUser ? 'bg-cyan-500/15 text-neutral-100' : 'bg-neutral-900/70 text-neutral-100'
           }`}
         >
           {children}
@@ -267,7 +283,7 @@ function Pill({
 }) {
   if (cyan) {
     return (
-      <span className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 text-[10.5px] font-medium text-cyan-200">
+      <span className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 text-[10.5px] font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20">
         {children}
       </span>
     );
@@ -280,33 +296,33 @@ function Pill({
     );
   }
   return (
-    <span className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 py-1 text-[10.5px] text-neutral-200">
+    <span className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 py-1 text-[10.5px] text-neutral-200 transition-colors hover:bg-neutral-800/90">
       {children}
     </span>
   );
 }
 
 // ============================================================================
-// PROOF STRIP — concrete numbers, not generic puffery
+// PROOF STRIP
 // ============================================================================
 
 function ProofStrip() {
   const stats: { value: string; label: string }[] = [
-    { value: '8', label: 'Attack surfaces under one agent' },
-    { value: '5', label: 'Compliance frameworks scored from one scan' },
-    { value: '0', label: 'Re-flagging of a dismissed pattern, ever' },
+    { value: '7', label: 'Attack surfaces under one agent' },
+    { value: '5', label: 'Frameworks scored from one scan' },
+    { value: '0', label: 'Re-flagging of dismissed patterns, ever' },
     { value: '24/7', label: 'Continuous monitoring across registered assets' },
   ];
   return (
-    <section className="border-y border-neutral-900/60 bg-neutral-950/30 py-10">
+    <section className="border-y border-neutral-900/60 bg-neutral-950/40 py-10">
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           {stats.map((s) => (
             <div key={s.label} className="text-center">
-              <div className="bg-gradient-to-br from-cyan-300 to-blue-300 bg-clip-text text-3xl font-semibold tracking-tight text-transparent">
+              <div className="bg-gradient-to-br from-cyan-300 to-blue-300 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl">
                 {s.value}
               </div>
-              <div className="mt-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
+              <div className="mt-1.5 text-[10.5px] uppercase tracking-wider text-neutral-500">
                 {s.label}
               </div>
             </div>
@@ -318,60 +334,134 @@ function ProofStrip() {
 }
 
 // ============================================================================
-// COVERAGE — every attack surface, one agent. The breadth flex.
+// ASSET COVERAGE — what we protect for each surface
 // ============================================================================
 
-function Coverage() {
-  const surfaces: { Icon: LucideIcon; title: string; body: string }[] = [
-    {
-      Icon: Code2,
-      title: 'Source code',
-      body:
-        'SAST across 15+ languages, dependency CVEs with reachability scoring, secret leaks, IaC misconfigurations. Custom Semgrep rules per workspace.',
-    },
-    {
-      Icon: Globe,
-      title: 'Web applications',
-      body:
-        'Black-box DAST that drives a real browser — OWASP Top 10, business logic, auth bypass, IDOR. Supports session, bearer, cookie, and login-flow auth.',
-    },
-    {
-      Icon: Webhook,
-      title: 'APIs',
-      body:
-        'OpenAPI-aware. BOLA, broken auth, mass assignment, rate-limit gaps, server-side request forgery. Authenticated and unauthenticated coverage.',
-    },
-    {
-      Icon: Cloud,
-      title: 'Cloud accounts',
-      body:
-        'AWS / GCP / Azure CSPM with attack-path reasoning: which external principal can reach which sensitive resource through which chain.',
-    },
-    {
-      Icon: Container,
-      title: 'Container images',
-      body:
-        'Image scanning for OS package CVEs, leaked credentials in layers, vulnerable base images, and Dockerfile anti-patterns.',
-    },
-    {
-      Icon: Network,
-      title: 'Domains &amp; surface',
-      body:
-        'Passive recon, subdomain enumeration, DNS hygiene, exposed admin panels. The "what does the attacker see from outside" view.',
-    },
-    {
-      Icon: Server,
-      title: 'IP &amp; infrastructure',
-      body:
-        'Port-level reconnaissance, exposed services, certificate hygiene, infrastructure drift detection across registered IP space.',
-    },
-    {
-      Icon: FileCode2,
-      title: 'Local code uploads',
-      body:
-        'Drop a zip, get a scan. For code that doesn&apos;t live in a connected repo yet — prototypes, audits, M&amp;A diligence.',
-    },
-  ];
+interface SurfaceCoverage {
+  Icon: LucideIcon;
+  tone: 'cyan' | 'violet' | 'emerald' | 'amber' | 'blue' | 'rose' | 'fuchsia';
+  surface: string;
+  tagline: string;
+  catches: string[];
+  proof: string;
+}
+
+const SURFACES: SurfaceCoverage[] = [
+  {
+    Icon: Code2,
+    tone: 'cyan',
+    surface: 'Source code',
+    tagline: 'SAST + SCA + secrets + IaC — every layer of your repository.',
+    catches: [
+      'SQL injection',
+      'XSS · RCE · SSRF',
+      'Hardcoded secrets',
+      'Weak crypto',
+      'Insecure deserialisation',
+      'Dependency CVEs (with reachability)',
+      'IaC misconfig',
+      'Custom Semgrep rules',
+    ],
+    proof: 'Reachability scoring — a CVE in code that never runs is not your problem.',
+  },
+  {
+    Icon: Globe,
+    tone: 'violet',
+    surface: 'Web applications',
+    tagline: 'Black-box DAST that drives a real browser and verifies every critical.',
+    catches: [
+      'SQL injection (PoC)',
+      'XSS (reflected · stored · DOM)',
+      'IDOR & broken access',
+      'Auth bypass',
+      'CSRF',
+      'Open redirects',
+      'Business-logic flaws',
+      'Session / JWT issues',
+    ],
+    proof: 'Every high finds a working exploit before it reaches your inbox.',
+  },
+  {
+    Icon: Webhook,
+    tone: 'amber',
+    surface: 'APIs',
+    tagline: 'OpenAPI-aware. The attacks scanners miss because they need context.',
+    catches: [
+      'BOLA',
+      'Mass assignment',
+      'Broken authentication',
+      'Rate-limit gaps',
+      'Server-side request forgery',
+      'GraphQL introspection abuse',
+      'API key leaks in responses',
+      'Spec drift',
+    ],
+    proof: 'Authenticates as a real user before testing — finds what unauth scanners can\'t.',
+  },
+  {
+    Icon: Cloud,
+    tone: 'blue',
+    surface: 'Cloud accounts',
+    tagline: 'Attack-path graph: external principal → resource. AWS / GCP / Azure.',
+    catches: [
+      'Public storage exposure',
+      'IAM sprawl (root keys, admin users)',
+      'Missing encryption at rest',
+      'Cross-account trust chains',
+      'Network exposure (open SGs / firewalls)',
+      'IaC drift vs deployed state',
+      'Unattached resources',
+    ],
+    proof: 'A single open S3 bucket is not the finding. The chain to PII is.',
+  },
+  {
+    Icon: Container,
+    tone: 'emerald',
+    surface: 'Container images',
+    tagline: 'Layer-by-layer scan with secret discovery + base-image health.',
+    catches: [
+      'OS package CVEs',
+      'Vulnerable base images',
+      'Secret leaks in layers',
+      'Dockerfile anti-patterns',
+      'Excessive privileges',
+      'Outdated runtimes',
+    ],
+    proof: 'Same fingerprint family as code — one finding, one fix, every image affected.',
+  },
+  {
+    Icon: Network,
+    tone: 'fuchsia',
+    surface: 'Domains & surface',
+    tagline: 'Passive recon — see what the outside world sees of you.',
+    catches: [
+      'Subdomain enumeration',
+      'DNS hygiene (SPF · DKIM · DMARC · DNSSEC)',
+      'Expired certificates',
+      'Exposed admin panels',
+      'Email security (BIMI · MTA-STS)',
+      'Shadow-IT discovery',
+    ],
+    proof: 'Driven from cert-transparency logs — comprehensive without DNS probes.',
+  },
+  {
+    Icon: Server,
+    tone: 'rose',
+    surface: 'IP & infrastructure',
+    tagline: 'Port-level recon and certificate hygiene across registered IP space.',
+    catches: [
+      'Exposed services',
+      'TLS / SSL hygiene',
+      'Service fingerprinting',
+      'Known service CVEs',
+      'Infrastructure drift',
+      'Outdated SSH / RDP',
+    ],
+    proof: 'Catches the staging port someone forgot was open in 2023.',
+  },
+];
+
+function AssetCoverage() {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="mx-auto max-w-2xl text-center">
@@ -379,42 +469,146 @@ function Coverage() {
           Coverage
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          One agent. Every attack surface.{' '}
-          <span className="text-neutral-400">
-            Stop paying three vendors for one job.
-          </span>
+          Connect your production stack.{' '}
+          <span className="text-neutral-400">We protect every surface.</span>
         </h2>
         <p className="mt-4 text-base leading-relaxed text-neutral-400">
-          Snyk does code. Wiz does cloud. Burp does web. You end up paying $80k/yr for three
-          dashboards none of your engineers open. TensorShield runs every kind of scan from
-          one workspace, and answers questions across all of them in chat.
+          Paste your prod URL, connect AWS / GitHub / a domain — TensorShield discovers what
+          you have and starts continuous monitoring. Below is what we catch on each surface.
         </p>
       </div>
-      <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {surfaces.map((s) => (
-          <div
-            key={s.title}
-            className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-4 transition-colors hover:border-neutral-700"
+
+      {/* Quick chip rail — visual summary that mirrors the cards below */}
+      <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
+        {SURFACES.map((s) => (
+          <a
+            key={s.surface}
+            href={`#surface-${s.surface.toLowerCase().replace(/[^a-z]/g, '-')}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all hover:-translate-y-0.5 ${TONE_CHIP[s.tone]}`}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-200 ring-1 ring-inset ring-cyan-500/20">
-              <s.Icon className="h-4 w-4" strokeWidth={2.25} />
-            </div>
-            <h3 className="mt-3 text-sm font-semibold text-white">{s.title}</h3>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">{s.body}</p>
-          </div>
+            <s.Icon className="h-3 w-3" strokeWidth={2.5} />
+            {s.surface}
+          </a>
+        ))}
+      </div>
+
+      {/* Deep coverage cards — one per surface, two columns on lg+ */}
+      <div className="mt-12 grid gap-4 md:grid-cols-2">
+        {SURFACES.map((s) => (
+          <SurfaceCard key={s.surface} surface={s} />
         ))}
       </div>
     </section>
   );
 }
 
+const TONE_CHIP: Record<SurfaceCoverage['tone'], string> = {
+  cyan: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/15',
+  violet: 'border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/15',
+  emerald:
+    'border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15',
+  amber: 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15',
+  blue: 'border-blue-500/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15',
+  rose: 'border-rose-500/30 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15',
+  fuchsia:
+    'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/15',
+};
+
+const TONE_CARD: Record<SurfaceCoverage['tone'], { ring: string; bg: string; icon: string; text: string }> = {
+  cyan: {
+    ring: 'ring-cyan-500/20 hover:ring-cyan-500/40',
+    bg: 'from-cyan-500/10',
+    icon: 'bg-cyan-500/15 text-cyan-200',
+    text: 'text-cyan-200',
+  },
+  violet: {
+    ring: 'ring-violet-500/20 hover:ring-violet-500/40',
+    bg: 'from-violet-500/10',
+    icon: 'bg-violet-500/15 text-violet-200',
+    text: 'text-violet-200',
+  },
+  emerald: {
+    ring: 'ring-emerald-500/20 hover:ring-emerald-500/40',
+    bg: 'from-emerald-500/10',
+    icon: 'bg-emerald-500/15 text-emerald-200',
+    text: 'text-emerald-200',
+  },
+  amber: {
+    ring: 'ring-amber-500/20 hover:ring-amber-500/40',
+    bg: 'from-amber-500/10',
+    icon: 'bg-amber-500/15 text-amber-200',
+    text: 'text-amber-200',
+  },
+  blue: {
+    ring: 'ring-blue-500/20 hover:ring-blue-500/40',
+    bg: 'from-blue-500/10',
+    icon: 'bg-blue-500/15 text-blue-200',
+    text: 'text-blue-200',
+  },
+  rose: {
+    ring: 'ring-rose-500/20 hover:ring-rose-500/40',
+    bg: 'from-rose-500/10',
+    icon: 'bg-rose-500/15 text-rose-200',
+    text: 'text-rose-200',
+  },
+  fuchsia: {
+    ring: 'ring-fuchsia-500/20 hover:ring-fuchsia-500/40',
+    bg: 'from-fuchsia-500/10',
+    icon: 'bg-fuchsia-500/15 text-fuchsia-200',
+    text: 'text-fuchsia-200',
+  },
+};
+
+function SurfaceCard({ surface }: { surface: SurfaceCoverage }) {
+  const t = TONE_CARD[surface.tone];
+  const slug = surface.surface.toLowerCase().replace(/[^a-z]/g, '-');
+  return (
+    <article
+      id={`surface-${slug}`}
+      className={`group flex flex-col rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-6 ring-1 transition-all duration-200 hover:-translate-y-0.5 ${t.ring}`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${t.icon} ring-1 ring-inset ring-white/5`}
+        >
+          <surface.Icon className="h-4.5 w-4.5" strokeWidth={2.25} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-white">{surface.surface}</h3>
+          <p className="mt-0.5 text-[12.5px] leading-relaxed text-neutral-400">
+            {surface.tagline}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {surface.catches.map((c) => (
+          <span
+            key={c}
+            className="rounded-md bg-neutral-900/70 px-2 py-1 text-[10.5px] text-neutral-300 ring-1 ring-inset ring-neutral-800/80 transition-colors group-hover:bg-neutral-900"
+          >
+            {c}
+          </span>
+        ))}
+      </div>
+
+      <div
+        className={`mt-4 flex items-start gap-2 border-t border-neutral-800/60 pt-3 text-[11.5px] leading-relaxed ${t.text}`}
+      >
+        <Sparkles className="mt-0.5 h-3 w-3 flex-shrink-0" strokeWidth={2.5} />
+        <span>{surface.proof}</span>
+      </div>
+    </article>
+  );
+}
+
 // ============================================================================
-// PROOF IT — exploit verification + reachability + attack path. The depth flex.
+// PROOF IT — we don't just flag, we prove
 // ============================================================================
 
 function ProofItRail() {
   return (
-    <section className="border-y border-neutral-900/60 bg-gradient-to-b from-neutral-950/40 to-neutral-950 py-24">
+    <section className="relative border-y border-neutral-900/60 bg-gradient-to-b from-neutral-950/50 to-neutral-950 py-24">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <p className="text-xs font-semibold uppercase tracking-wider text-violet-300/80">
@@ -481,14 +675,30 @@ function ProofItCard({
   body: string;
 }) {
   const t = {
-    cyan: { ring: 'ring-cyan-500/30', text: 'text-cyan-300', bg: 'from-cyan-500/8', chipBg: 'bg-cyan-500/15 text-cyan-200 border-cyan-500/30' },
-    violet: { ring: 'ring-violet-500/30', text: 'text-violet-300', bg: 'from-violet-500/8', chipBg: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
-    emerald: { ring: 'ring-emerald-500/30', text: 'text-emerald-300', bg: 'from-emerald-500/8', chipBg: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30' },
+    cyan: {
+      ring: 'ring-cyan-500/30 hover:ring-cyan-500/50',
+      bg: 'from-cyan-500/10',
+      chipBg: 'bg-cyan-500/15 text-cyan-200 border-cyan-500/30',
+    },
+    violet: {
+      ring: 'ring-violet-500/30 hover:ring-violet-500/50',
+      bg: 'from-violet-500/10',
+      chipBg: 'bg-violet-500/15 text-violet-200 border-violet-500/30',
+    },
+    emerald: {
+      ring: 'ring-emerald-500/30 hover:ring-emerald-500/50',
+      bg: 'from-emerald-500/10',
+      chipBg: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30',
+    },
   }[tone];
   return (
-    <div className={`rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-6 ring-1 ${t.ring}`}>
+    <div
+      className={`rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-6 ring-1 transition-all duration-200 hover:-translate-y-1 ${t.ring}`}
+    >
       <div className="flex items-center gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-full border ${t.chipBg} px-2.5 py-1 text-[10.5px] font-medium`}>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border ${t.chipBg} px-2.5 py-1 text-[10.5px] font-medium`}
+        >
           <Icon className="h-3 w-3" strokeWidth={2.5} />
           {chip}
         </span>
@@ -586,7 +796,7 @@ function LoopStep({
   }[tone];
   return (
     <div
-      className={`rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${toneClass.bg} to-transparent p-5 ring-1 ${toneClass.ring} ${wide ? 'max-w-md' : ''}`}
+      className={`rounded-2xl border border-neutral-800/80 bg-gradient-to-b ${toneClass.bg} to-transparent p-5 ring-1 ${toneClass.ring} ${wide ? 'max-w-md' : ''} transition-all hover:-translate-y-0.5`}
     >
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-neutral-500">
         <span
@@ -617,7 +827,7 @@ function LoopArrow({ down }: { down?: boolean }) {
 }
 
 // ============================================================================
-// COMPLIANCE PRODUCT — half the product, not a side feature.
+// COMPLIANCE PRODUCT
 // ============================================================================
 
 function ComplianceProduct() {
@@ -634,21 +844,22 @@ function ComplianceProduct() {
           </h2>
           <p className="mt-4 text-base leading-relaxed text-neutral-300">
             Every scan emits per-control evidence across SOC 2, ISO 27001, PCI DSS 4.0, HIPAA,
-            and NIST 800-53. Continuous collectors poll GitHub and AWS for the org-level controls
-            auditors actually ask about — MFA enforcement, key rotation, admin sprawl. One
-            observation credits every framework it maps to.
+            and NIST 800-53. Continuous collectors poll GitHub, AWS, GCP, and Okta for the
+            org-level controls auditors actually ask about — MFA enforcement, key rotation,
+            admin sprawl. One observation credits every framework it maps to.
           </p>
           <ul className="mt-6 space-y-2.5 text-sm text-neutral-300">
             <ComplianceBullet text="Per-control verdicts ingested from every scan and posted to a live readiness score." />
-            <ComplianceBullet text="Continuous evidence collectors for GitHub Admin and AWS IAM — set once, runs forever." />
+            <ComplianceBullet text="Continuous evidence collectors for GitHub, AWS IAM, GCP IAM, Okta — set once, runs forever." />
             <ComplianceBullet text="One observation credits five frameworks via cross-framework mappings — no duplicate work." />
             <ComplianceBullet text="Public Trust Page for prospects. Time-bounded auditor portal with JSON export for the rest." />
+            <ComplianceBullet text="SBOM export in CycloneDX or SPDX for procurement diligence." />
             <ComplianceBullet text="Tamper-evident HMAC signature chain on every scan&apos;s evidence." />
           </ul>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
               href="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-950 shadow-md transition-all hover:shadow-lg"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-950 shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg"
             >
               Try free
               <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -677,14 +888,11 @@ function ComplianceBullet({ text }: { text: string }) {
         className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-300"
         strokeWidth={2.25}
       />
-      <span>{text}</span>
+      <span dangerouslySetInnerHTML={{ __html: text }} />
     </li>
   );
 }
 
-/** A mock of the readiness dashboard — bar trend per framework + a few
- *  control rows. Same visual language as the in-app auditor portal so
- *  prospects recognise it on landing. */
 function ReadinessMockup() {
   const frameworks: { name: string; score: number; delta: number; quarters: number[] }[] = [
     { name: 'SOC 2', score: 81, delta: 13, quarters: [42, 55, 68, 81] },
@@ -702,9 +910,9 @@ function ReadinessMockup() {
     <div className="relative">
       <div
         aria-hidden
-        className="absolute -inset-6 rounded-3xl bg-gradient-to-br from-amber-500/15 via-cyan-500/10 to-violet-500/15 blur-2xl"
+        className="absolute -inset-6 rounded-3xl bg-gradient-to-br from-amber-500/20 via-cyan-500/15 to-violet-500/20 blur-2xl"
       />
-      <div className="relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-950/80 shadow-2xl shadow-black/50 backdrop-blur">
+      <div className="relative overflow-hidden rounded-2xl border border-neutral-800/80 bg-neutral-950/85 shadow-2xl shadow-black/50 backdrop-blur">
         <div className="flex items-center justify-between border-b border-neutral-800/80 bg-neutral-900/60 px-4 py-2.5">
           <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400">
             <ScrollText className="h-3.5 w-3.5" />
@@ -722,7 +930,7 @@ function ReadinessMockup() {
               {frameworks.map((f) => (
                 <div
                   key={f.name}
-                  className="rounded-lg border border-neutral-800 bg-neutral-900/30 p-3"
+                  className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 transition-colors hover:border-neutral-700"
                 >
                   <div className="flex items-baseline justify-between">
                     <span className="font-mono text-[11px] text-neutral-300">{f.name}</span>
@@ -752,7 +960,7 @@ function ReadinessMockup() {
               {controls.map((c) => (
                 <div
                   key={`${c.fw}-${c.id}`}
-                  className="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/30 px-3 py-2"
+                  className="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
                 >
                   <VerdictDot verdict={c.verdict} />
                   <code className="font-mono text-[10.5px] text-neutral-300">
@@ -783,7 +991,7 @@ function VerdictDot({ verdict }: { verdict: 'pass' | 'fail' | 'warn' }) {
 }
 
 // ============================================================================
-// CAPABILITIES — the working feature surface
+// CAPABILITIES
 // ============================================================================
 
 function Capabilities() {
@@ -860,7 +1068,7 @@ function Capabilities() {
   );
 }
 
-const TONE_CARD: Record<string, { ring: string; bg: string; iconBg: string; iconText: string }> = {
+const TONE_CAPABILITY: Record<string, { ring: string; bg: string; iconBg: string; iconText: string }> = {
   cyan: { ring: 'ring-cyan-500/20', bg: 'from-cyan-500/8', iconBg: 'bg-cyan-500/15', iconText: 'text-cyan-200' },
   violet: { ring: 'ring-violet-500/20', bg: 'from-violet-500/8', iconBg: 'bg-violet-500/15', iconText: 'text-violet-200' },
   amber: { ring: 'ring-amber-500/20', bg: 'from-amber-500/8', iconBg: 'bg-amber-500/15', iconText: 'text-amber-200' },
@@ -878,15 +1086,15 @@ function CapabilityCard({
   Icon: LucideIcon;
   title: string;
   body: string;
-  tone: keyof typeof TONE_CARD;
+  tone: keyof typeof TONE_CAPABILITY;
 }) {
-  const t = TONE_CARD[tone];
+  const t = TONE_CAPABILITY[tone];
   return (
     <div
-      className={`group rounded-xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-5 ring-1 ${t.ring} transition-all hover:border-neutral-700`}
+      className={`group rounded-xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-5 ring-1 ${t.ring} transition-all duration-200 hover:-translate-y-1 hover:border-neutral-700`}
     >
       <div
-        className={`flex h-9 w-9 items-center justify-center rounded-lg ${t.iconBg} ${t.iconText} ring-1 ring-inset ring-white/5`}
+        className={`flex h-9 w-9 items-center justify-center rounded-lg ${t.iconBg} ${t.iconText} ring-1 ring-inset ring-white/5 transition-transform group-hover:scale-110`}
       >
         <Icon className="h-4 w-4" strokeWidth={2.25} />
       </div>
@@ -900,7 +1108,7 @@ function CapabilityCard({
 }
 
 // ============================================================================
-// PERSONAS — three concrete user shapes the product was built for
+// PERSONAS
 // ============================================================================
 
 function Personas() {
@@ -936,7 +1144,7 @@ function Personas() {
             'Register every asset once — cadence-driven scans run themselves',
             'Closed-loop suppression cuts your inbox 80% in two weeks',
             'Cloud attack-path graph replaces 47 disconnected CSPM rows',
-            'Signed audit trail per scan; per-team workspaces planned',
+            'Per-team workspaces; signed audit trail per scan',
           ]}
           cta="See pricing"
           ctaHref="/pricing"
@@ -947,7 +1155,7 @@ function Personas() {
           title="Your auditor is asking. You don&apos;t want to update spreadsheets."
           bullets={[
             'Per-control verdicts across SOC 2 / ISO / PCI / HIPAA / NIST',
-            'Continuous collectors for GitHub + AWS — no manual screenshots',
+            'Continuous collectors for GitHub, AWS, GCP, Okta — no manual screenshots',
             'Read-only auditor portal with JSON export — share, then revoke',
             'Quarterly readiness snapshots show the improvement narrative',
           ]}
@@ -975,7 +1183,7 @@ function PersonaCard({
   ctaHref?: string;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-6">
+    <div className="flex h-full flex-col rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-6 transition-all duration-200 hover:-translate-y-1 hover:border-neutral-700 hover:bg-neutral-900/50">
       <div className="inline-flex items-center gap-2 self-start rounded-full border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-[10.5px] font-medium text-neutral-300">
         <Icon className="h-3 w-3" strokeWidth={2.5} />
         {chip}
@@ -994,7 +1202,7 @@ function PersonaCard({
       </ul>
       <Link
         href={ctaHref}
-        className="mt-6 inline-flex items-center gap-1.5 self-start rounded-lg border border-neutral-800 bg-neutral-950/60 px-3.5 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900"
+        className="mt-6 inline-flex items-center gap-1.5 self-start rounded-lg border border-neutral-800 bg-neutral-950/60 px-3.5 py-2 text-xs font-medium text-neutral-200 transition-all hover:-translate-y-0.5 hover:border-neutral-700 hover:bg-neutral-900"
       >
         {cta}
         <ArrowRight className="h-3 w-3" strokeWidth={2.5} />
@@ -1004,7 +1212,7 @@ function PersonaCard({
 }
 
 // ============================================================================
-// COMPARISON — vs the categories TensorShield replaces
+// COMPARISON
 // ============================================================================
 
 function ComparisonTable() {
@@ -1019,7 +1227,7 @@ function ComparisonTable() {
       label: 'Coverage',
       Icon: Layers,
       others: 'One product per surface (SAST, DAST, CSPM, SCA)',
-      tensorshield: 'Eight surfaces under one workspace and one memory',
+      tensorshield: 'Seven surfaces under one workspace and one memory',
     },
     {
       label: 'Signal shape',
@@ -1095,7 +1303,7 @@ function ComparisonTable() {
         {rows.map((r, i) => (
           <div
             key={r.label}
-            className={`grid grid-cols-[1.2fr_1.4fr_1.4fr] items-center gap-4 px-5 py-4 text-sm ${
+            className={`grid grid-cols-[1.2fr_1.4fr_1.4fr] items-center gap-4 px-5 py-4 text-sm transition-colors hover:bg-neutral-900/40 ${
               i % 2 === 0 ? 'bg-neutral-950/20' : ''
             } ${i < rows.length - 1 ? 'border-b border-neutral-800/40' : ''}`}
           >
@@ -1116,7 +1324,7 @@ function ComparisonTable() {
 }
 
 // ============================================================================
-// HOW IT WORKS — what happens in your first week
+// HOW IT WORKS
 // ============================================================================
 
 function HowItWorks() {
@@ -1130,9 +1338,9 @@ function HowItWorks() {
     },
     {
       n: 2,
-      title: 'Register your surfaces',
+      title: 'Connect your stack',
       body:
-        'Install the GitHub App. Paste production URLs. Connect AWS, GCP, or Azure. Add domains, container registries, OpenAPI specs. Each asset gets its own cadence.',
+        'Install the GitHub App. Paste production URLs. Connect AWS, GCP, or Azure. Add domains, container registries, OpenAPI specs. We auto-discover what you have.',
       Icon: TargetIcon,
     },
     {
@@ -1164,10 +1372,10 @@ function HowItWorks() {
         {steps.map((s) => (
           <div
             key={s.n}
-            className="relative rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-5"
+            className="group relative rounded-xl border border-neutral-800/80 bg-neutral-900/30 p-5 transition-all duration-200 hover:-translate-y-1 hover:border-neutral-700"
           >
             <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-200 ring-1 ring-inset ring-white/5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-200 ring-1 ring-inset ring-white/5 transition-transform group-hover:scale-110">
                 <s.Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
               </div>
               <span className="font-mono text-[10px] uppercase tracking-wider text-neutral-500">
@@ -1220,7 +1428,7 @@ function FinalCta() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/signup"
-              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-6 py-3 text-base font-semibold text-neutral-950 shadow-lg shadow-white/20 transition-all hover:shadow-xl"
+              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-200 px-6 py-3 text-base font-semibold text-neutral-950 shadow-lg shadow-white/20 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl"
             >
               Start free
               <ArrowRight
