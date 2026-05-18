@@ -99,10 +99,10 @@ function EmptyHome({ userName }: { userName: string }) {
     },
     {
       Icon: Cloud,
-      label: 'Connect AWS',
+      label: 'Connect a cloud account',
       blurb:
-        'We check who has admin access, find publicly-exposed assets, and map the chain an attacker would follow into your data.',
-      href: '/integrations/new/aws',
+        'AWS, Google Cloud, or Azure. We check who has admin access, find publicly-exposed assets, and map the chain an attacker would follow into your data.',
+      href: '/integrations/new/cloud',
     },
   ];
 
