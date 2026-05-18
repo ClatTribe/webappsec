@@ -534,6 +534,8 @@ function hintForIntegrationType(t: string): string {
       return 'Click "Discover now" to enumerate public Cloud Run services, App Engine apps, and Cloud Functions in this GCP project.';
     case 'azure':
       return 'Click "Discover now" to enumerate App Service web apps, Function Apps, public IPs with DNS, and Front Door endpoints in this Azure subscription.';
+    case 'k8s':
+      return 'Click "Discover now" to enumerate LoadBalancer-type Services and Ingress hosts exposed by this Kubernetes cluster.';
     case 'domain':
       return 'Click "Discover now" to enumerate subdomains of this apex via public certificate-transparency logs.';
     default:
