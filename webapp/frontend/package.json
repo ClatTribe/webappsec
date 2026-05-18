@@ -10,7 +10,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-api-gateway": "^3.1048.0",
+    "@aws-sdk/client-apigatewayv2": "^3.1048.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.1048.0",
     "@aws-sdk/client-iam": "^3.1048.0",
+    "@aws-sdk/client-lambda": "^3.1048.0",
     "@aws-sdk/client-sts": "^3.1047.0",
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.0",

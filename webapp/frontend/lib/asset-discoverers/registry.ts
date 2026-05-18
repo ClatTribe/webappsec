@@ -4,13 +4,15 @@
 // metadata. Mirrors the evidence-collector registry's shape so the
 // patterns are interchangeable from a maintenance standpoint.
 
+import { awsResourcesDiscoverer } from './aws';
+import { domainSubdomainDiscoverer } from './domain';
 import { githubReposDiscoverer } from './github';
 import type { DiscovererDefinition } from './types';
 
 export const DISCOVERERS: DiscovererDefinition[] = [
   githubReposDiscoverer,
-  // Future: awsResourcesDiscoverer, gcpResourcesDiscoverer,
-  // domainSubdomainDiscoverer.
+  awsResourcesDiscoverer,
+  domainSubdomainDiscoverer,
 ];
 
 /** Lookup by id. Returns null for unknown ids (the cron treats that
