@@ -100,12 +100,18 @@ function AwsForm() {
       body: JSON.stringify({ type: 'aws', name, secret_payload, metadata }),
     });
     setSubmitting(false);
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
       setError(body.error ?? 'Failed to save');
       return;
     }
-    router.push('/integrations');
+    // Phase A onboarding callout — drop the user straight into asset
+    // discovery for the newly-connected integration. The discovered
+    // page auto-triggers a fresh discovery when ?just_connected=1 is
+    // set so the customer sees "we found 47 assets" within seconds.
+    router.push(
+      body.id ? `/integrations/${body.id}/discovered?just_connected=1` : '/integrations',
+    );
   }
 
   const canSubmit =
@@ -239,12 +245,14 @@ function KubeconfigForm() {
       }),
     });
     setSubmitting(false);
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
       setError(body.error ?? 'Failed to save');
       return;
     }
-    router.push('/integrations');
+    router.push(
+      body.id ? `/integrations/${body.id}/discovered?just_connected=1` : '/integrations',
+    );
   }
 
   return (
@@ -346,12 +354,14 @@ function GcpForm() {
       }),
     });
     setSubmitting(false);
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
       setError(body.error ?? 'Failed to save');
       return;
     }
-    router.push('/integrations');
+    router.push(
+      body.id ? `/integrations/${body.id}/discovered?just_connected=1` : '/integrations',
+    );
   }
 
   const autoProject = parseSaProject(saJson);
@@ -452,12 +462,14 @@ function DomainForm() {
       }),
     });
     setSubmitting(false);
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
       setError(body.error ?? 'Failed to save');
       return;
     }
-    router.push('/integrations');
+    router.push(
+      body.id ? `/integrations/${body.id}/discovered?just_connected=1` : '/integrations',
+    );
   }
 
   return (

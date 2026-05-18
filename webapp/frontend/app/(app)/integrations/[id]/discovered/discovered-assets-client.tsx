@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Circle,
@@ -11,6 +11,7 @@ import {
   ExternalLink,
   X,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 
 interface DiscoveredAssetRow {
@@ -50,12 +51,26 @@ export default function DiscoveredAssetsClient({
   lastDiscoveryAt,
 }: Props) {
   const router = useRouter();
+  const search = useSearchParams();
+  const justConnected = search?.get('just_connected') === '1';
   const [pending, setPending] = useState(initialPending);
   const [imported] = useState(initialImported);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [submitting, setSubmitting] = useState<'approve' | 'reject' | 'discover' | null>(null);
   const [banner, setBanner] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  // Onboarding moment: when the customer just connected this integration,
+  // fire a discovery run immediately so they see "we found N assets"
+  // instead of an empty page asking them to click another button. The
+  // ref guards against React 18 strict-mode's effect double-fire.
+  const autoDiscoverFiredRef = useRef(false);
+  useEffect(() => {
+    if (!justConnected) return;
+    if (autoDiscoverFiredRef.current) return;
+    autoDiscoverFiredRef.current = true;
+    discoverNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justConnected]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return pending;
@@ -209,6 +224,33 @@ export default function DiscoveredAssetsClient({
 
   return (
     <div className="space-y-5">
+      {/* Onboarding callout — first thing the user sees right after
+          connecting an integration. The discoverNow() call fires in
+          the effect above; we show this until the user clicks anywhere
+          to acknowledge or the page refreshes after the first set of
+          assets lands. */}
+      {justConnected && (
+        <div className="flex items-start gap-3 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.06] p-4">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500/30 to-blue-500/30 text-cyan-200 ring-1 ring-cyan-400/30">
+            <Sparkles className="h-4 w-4" strokeWidth={2.25} />
+          </div>
+          <div className="flex-1 space-y-1">
+            <p className="text-sm font-semibold text-cyan-100">
+              {submitting === 'discover'
+                ? 'Enumerating your scannable assets…'
+                : pending.length > 0
+                  ? `Found ${pending.length} asset${pending.length === 1 ? '' : 's'} ready to scan.`
+                  : 'Asset discovery complete.'}
+            </p>
+            <p className="text-[12px] leading-relaxed text-cyan-200/80">
+              Each one becomes a continuously-monitored target the moment you
+              approve. Bulk-select what you want to scan; reject the rest so
+              future discoveries don&apos;t re-surface them.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/30 px-4 py-3">
         <button
