@@ -38,14 +38,14 @@ const TYPES: {
     label: 'Git repository',
     example: 'https://github.com/me/myapp',
     Icon: Code2,
-    blurb: 'Source-code review of a GitHub / GitLab / Bitbucket repo.',
+    blurb: 'We scan the code, dependencies, and any secrets we find in a GitHub / GitLab / Bitbucket repo.',
   },
   {
     value: 'web_application',
     label: 'Deployed web app',
     example: 'https://myapp.com',
     Icon: Globe,
-    blurb: 'Live HTTP target — agent crawls and probes rendered pages.',
+    blurb: 'Your live site. We drive a real browser through it and probe every page like a real attacker would.',
   },
   {
     value: 'api',
@@ -53,7 +53,7 @@ const TYPES: {
     example: 'https://api.myapp.com',
     Icon: Plug,
     blurb:
-      'JSON / GraphQL / gRPC API. Skips browser & DOM tools; runs OWASP API Top 10 specialists (BOLA, BFLA, mass-assignment, rate-limit) + OpenAPI / Swagger spec ingest.',
+      'JSON, GraphQL, or gRPC API. We skip browser-based testing and instead probe for API-specific bugs: users reading other users\' data, hidden fields editable from outside, no rate limiting. Reads your OpenAPI / Swagger spec when available.',
   },
   {
     value: 'container_image',
@@ -61,7 +61,7 @@ const TYPES: {
     example: 'nginx:1.25',
     Icon: Container,
     blurb:
-      'OCI image reference (registry path + tag, or sha256 digest). Runs Trivy for OS + language-package CVEs, emits an SBOM, and feeds MOAK so new CVEs against your image packages auto-fire exploit synthesis. DAST tools are skipped — a registry artefact has no live surface.',
+      'A container image — registry path + tag, or a sha256 digest. We scan it layer by layer for known bugs in OS and language packages, produce a complete component list, and (when new bugs surface later against your image) we try to exploit them automatically.',
   },
   {
     value: 'cloud_account',
@@ -69,7 +69,7 @@ const TYPES: {
     example: 'aws/123456789012',
     Icon: Cloud,
     blurb:
-      'AWS account (more clouds coming). CSPM posture scan against the live account — 14 boto3 checks across S3 / EC2 / IAM / RDS / EBS / CloudTrail / VPC mapped to CIS AWS Foundations Benchmark v3.0. Requires an AWS integration first (Integrations → New → AWS). Pair with a repository target containing Terraform to get IaC↔drift correlation.',
+      'AWS account (more clouds coming). We check 14 things across S3, EC2, user permissions, RDS, storage, audit logs, and networking — all mapped to the CIS AWS Foundations Benchmark. Connect AWS first via Integrations → New → AWS. Pair with a repository containing your Terraform to also catch drift between deployed and declared.',
   },
   {
     value: 'domain',

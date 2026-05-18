@@ -87,21 +87,21 @@ function EmptyHome({ userName }: { userName: string }) {
       Icon: GitBranch,
       label: 'Connect GitHub',
       blurb:
-        'Scans every repo for SAST + dep CVEs + secrets. We discover the repos automatically.',
+        'We scan every repo for code bugs, risky dependencies, and leaked secrets. The repos themselves we discover for you.',
       href: '/integrations/new/github',
     },
     {
       Icon: Globe,
       label: 'Add a web app URL',
       blurb:
-        'Black-box DAST against your live site. Verifies every critical with a real exploit before flagging.',
+        'We drive a real browser against your live site and try to actually exploit anything we find before flagging it.',
       href: '/assets/new',
     },
     {
       Icon: Cloud,
       label: 'Connect AWS',
       blurb:
-        'Reads IAM + CSPM posture, surfaces public assets, builds an attack-path graph.',
+        'We check who has admin access, find publicly-exposed assets, and map the chain an attacker would follow into your data.',
       href: '/integrations/new/aws',
     },
   ];
@@ -337,11 +337,11 @@ async function PopulatedHome() {
           </div>
           <div>
             <div className="text-sm font-semibold text-white">
-              See compliance posture
+              See compliance status
             </div>
             <p className="mt-0.5 text-[11.5px] text-neutral-400">
-              Per-control verdicts across SOC 2 / ISO / PCI / HIPAA / NIST. The
-              auditor portal lives here too.
+              Control-by-control evidence across SOC 2, ISO 27001, PCI DSS, HIPAA,
+              and NIST. The portal you share with auditors lives here too.
             </p>
           </div>
           <ChevronRight
@@ -361,7 +361,7 @@ async function PopulatedHome() {
               Ask TensorShield
             </div>
             <p className="mt-0.5 text-[11.5px] text-neutral-400">
-              &ldquo;Am I SOC 2 ready?&rdquo; · &ldquo;What was the SSRF we found last quarter?&rdquo;
+              &ldquo;Am I SOC 2 ready?&rdquo; · &ldquo;What was that server-side bug we found last quarter?&rdquo;
             </p>
           </div>
           <ChevronRight

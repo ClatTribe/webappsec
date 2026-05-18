@@ -31,11 +31,11 @@ export default async function SbomPage({ params }: { params: { id: string } }) {
       <div className="space-y-4">
         <Breadcrumb scanId={scan.id} runName={scan.run_name} />
         <section className="rounded-2xl border border-neutral-800/80 bg-neutral-900/30 p-8 text-center">
-          <h1 className="text-lg font-semibold text-neutral-100">No SBOM available</h1>
+          <h1 className="text-lg font-semibold text-neutral-100">Component list not available yet</h1>
           <p className="mt-2 text-sm text-neutral-400">
-            The engine did not produce a CycloneDX SBOM for this scan, or upload is still
-            in flight. SBOM emission is gated by engine PR #131 — older runs or scans
-            against targets without recognisable component signals won&apos;t have one.
+            We didn&apos;t generate a software component list for this scan, or the
+            upload is still in flight. Scans against very simple targets (no
+            detectable dependencies) won&apos;t produce one.
           </p>
         </section>
       </div>
@@ -64,7 +64,7 @@ function Breadcrumb({ scanId, runName }: { scanId: string; runName: string }) {
         {runName}
       </Link>
       <ChevronRight className="h-3 w-3" />
-      <span className="text-neutral-300">SBOM</span>
+      <span className="text-neutral-300">Component list</span>
     </nav>
   );
 }

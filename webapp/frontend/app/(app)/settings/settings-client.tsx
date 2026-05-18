@@ -1489,10 +1489,10 @@ function TrustPageSection({
       title="Public Trust Page"
       Icon={ShieldCheck}
       hint={
-        'A public URL prospects and auditors can bookmark. Renders your '
-        + 'compliance posture, recent improvements, and the signed '
-        + 'evidence chain. Updates after every scan. The page is gated by '
-        + 'this toggle — disabled means the URL returns 404.'
+        'A public URL prospects and auditors can bookmark. Shows your '
+        + 'compliance status, recent improvements, and a tamper-evident '
+        + 'audit trail. Updates after every scan. The toggle below '
+        + 'controls whether the URL is live — disabled means it returns 404.'
       }
     >
       <div className="space-y-4">
@@ -1517,7 +1517,7 @@ function TrustPageSection({
               </div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-neutral-500">
                 {enabled
-                  ? 'Anyone with the URL can view your compliance posture and recent improvements. Disable to take it offline.'
+                  ? 'Anyone with the URL can view your compliance status and recent improvements. Disable to take it offline.'
                   : 'Page is private. Enable to share the URL with a prospect or auditor.'}
               </p>
             </div>

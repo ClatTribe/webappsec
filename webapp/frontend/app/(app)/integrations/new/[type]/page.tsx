@@ -125,10 +125,11 @@ function AwsForm() {
     <div className="max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold">Connect AWS</h1>
       <p className="text-sm text-neutral-400">
-        Wire an AWS account for CSPM scans (CIS AWS Foundations Benchmark) and
-        IaC↔drift correlation. We strongly recommend the IAM role flow — short-
-        lived credentials minted at scan time via STS AssumeRole. Access keys are
-        also supported for setups where the trust-policy round-trip is impractical.
+        Connect an AWS account so we can check your cloud setup against the CIS
+        AWS Foundations Benchmark and flag drift between your Terraform and what&apos;s
+        actually deployed. We strongly recommend the IAM role flow — we mint short-
+        lived credentials at scan time instead of holding a long-lived access key.
+        Access keys are supported too, when role assumption isn&apos;t practical.
       </p>
 
       {/* Mode toggle */}
