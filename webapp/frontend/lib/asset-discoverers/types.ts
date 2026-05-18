@@ -28,14 +28,17 @@ export type AssetType =
   | 'container_image'
   | 'cloud_account';
 
-/** Where the discoverer expects to find its credentials. */
+/** Where the discoverer expects to find its credentials. The
+ *  `domain` value (migration 081) is a wrapper-side abstraction —
+ *  no real credential, just an apex domain in the vault payload. */
 export type IntegrationType =
   | 'github'
   | 'aws'
   | 'gcp'
   | 'azure'
   | 'k8s'
-  | 'gitlab';
+  | 'gitlab'
+  | 'domain';
 
 /** A single proposed target row destined for `discovered_assets`. The
  *  shape mirrors the table 1:1 minus org_id/integration_id (provided

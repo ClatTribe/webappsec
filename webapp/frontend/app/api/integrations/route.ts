@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 const Body = z.object({
-  type: z.enum(['github', 'gitlab', 'aws', 'azure', 'gcp', 'k8s', 'webhook']),
+  type: z.enum(['github', 'gitlab', 'aws', 'azure', 'gcp', 'k8s', 'webhook', 'domain']),
   name: z.string().min(1).max(120),
   metadata: z.record(z.unknown()).default({}),
   // Anything inside `secret_payload` is encrypted and stored in Vault.

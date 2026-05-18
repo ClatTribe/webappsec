@@ -9,6 +9,8 @@ const INTEGRATION_TYPES: { type: IntegrationType; label: string; href: string }[
   { type: 'azure', label: 'Azure (Service Principal)', href: '/integrations/new/azure' },
   { type: 'gcp', label: 'GCP (Service Account)', href: '/integrations/new/gcp' },
   { type: 'k8s', label: 'Kubernetes (Kubeconfig)', href: '/integrations/new/k8s' },
+  // Phase A — apex-domain "integration" powers subdomain discovery via crt.sh.
+  { type: 'domain', label: 'Apex domain (subdomain discovery)', href: '/integrations/new/domain' },
   { type: 'webhook', label: 'Webhook', href: '/integrations/new/webhook' },
 ];
 
@@ -71,11 +73,11 @@ export default async function IntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Phase A — asset discovery link. Only surfaced
-                        for integration types that have a discoverer
-                        wired (today: github). Keep this list in sync
-                        with lib/asset-discoverers/registry.ts. */}
-                    {i.type === 'github' && (
+                    {/* Phase A — asset discovery link. Surfaced for
+                        every integration type that has a discoverer
+                        wired. Keep this list in sync with
+                        lib/asset-discoverers/registry.ts. */}
+                    {(i.type === 'github' || i.type === 'aws' || i.type === 'domain') && (
                       <Link
                         href={`/integrations/${i.id}/discovered`}
                         className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/20"

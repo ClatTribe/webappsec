@@ -19,7 +19,7 @@
 import type { McpScope } from '@/lib/mcp/auth';
 
 /** Where the wrapper expects the collector's credentials to come from. */
-export type IntegrationType = 'github' | 'aws' | 'gcp' | 'azure' | 'k8s' | 'gitlab';
+export type IntegrationType = 'github' | 'aws' | 'gcp' | 'azure' | 'k8s' | 'gitlab' | 'domain';
 
 /** A single row destined for compliance_evidence via the
  *  upsert_collector_evidence RPC. Mirrors the table's columns 1:1

@@ -518,10 +518,21 @@ function EmptyState({
           : 'Discovery hasn\'t run for this integration yet.'}
       </p>
       <p className="mt-1 text-[11px] text-neutral-500">
-        {integrationType === 'github'
-          ? 'Click "Discover now" above to enumerate the repositories this GitHub integration can see.'
-          : `Discovery for ${integrationType} integrations: coming soon. Track progress on the roadmap.`}
+        {hintForIntegrationType(integrationType)}
       </p>
     </div>
   );
+}
+
+function hintForIntegrationType(t: string): string {
+  switch (t) {
+    case 'github':
+      return 'Click "Discover now" above to enumerate repositories this GitHub integration can see.';
+    case 'aws':
+      return 'Click "Discover now" to enumerate public ALBs, API Gateways, and Lambda function URLs in this AWS account.';
+    case 'domain':
+      return 'Click "Discover now" to enumerate subdomains of this apex via public certificate-transparency logs.';
+    default:
+      return `Discovery for ${t} integrations: coming soon.`;
+  }
 }

@@ -15,6 +15,7 @@ export default function NewIntegrationPage({ params }: Props) {
   if (type === 'aws') return <AwsForm />;
   if (type === 'gcp') return <GcpForm />;
   if (type === 'k8s') return <KubeconfigForm />;
+  if (type === 'domain') return <DomainForm />;
   // Skeletons for remaining types — same shape as AWS / k8s.
   return (
     <div className="max-w-2xl space-y-4">
@@ -408,6 +409,95 @@ function GcpForm() {
         <button
           type="submit"
           disabled={submitting || !name.trim() || !saJson.trim()}
+          className="rounded-md bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/25 disabled:opacity-50"
+        >
+          {submitting ? 'Saving…' : 'Save integration'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ===================== DOMAIN =====================
+// Apex-domain "integration" — no credentials. Powers subdomain
+// enumeration via the domain_subdomains discoverer (crt.sh).
+function DomainForm() {
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [apex, setApex] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    const clean = apex.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(clean)) {
+      setError('Enter a valid apex domain (e.g. acme.com)');
+      setSubmitting(false);
+      return;
+    }
+    const res = await fetch('/api/integrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'domain',
+        name: name.trim() || clean,
+        // Vault payload — the discoverer reads { apex } at run time.
+        secret_payload: { apex: clean },
+        // Metadata is non-sensitive; we duplicate apex here so the
+        // /integrations list can show it without decrypting.
+        metadata: { apex: clean },
+      }),
+    });
+    setSubmitting(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'Failed to save');
+      return;
+    }
+    router.push('/integrations');
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">Connect apex domain</h1>
+      <p className="text-sm text-neutral-400">
+        Registers an apex domain (e.g.{' '}
+        <code className="rounded bg-neutral-800 px-1 font-mono text-[11px]">acme.com</code>)
+        for subdomain enumeration. We poll public certificate-transparency logs
+        — no DNS probing of your own infrastructure, no credentials needed. Each
+        live subdomain we find gets proposed as a web_application target you can
+        bulk-approve under{' '}
+        <code className="rounded bg-neutral-800 px-1 font-mono text-[11px]">
+          /integrations/&lt;id&gt;/discovered
+        </code>
+        .
+      </p>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <Field
+          label="Name (optional)"
+          value={name}
+          onChange={setName}
+          placeholder="acme corp public surface"
+        />
+        <Field
+          label="Apex domain"
+          value={apex}
+          onChange={setApex}
+          placeholder="acme.com"
+        />
+        <p className="rounded-md border border-cyan-500/30 bg-cyan-500/[0.05] px-3 py-2 text-[11.5px] text-cyan-200/80">
+          Subdomain enumeration runs daily by default. Results from
+          certificate-transparency are typically comprehensive for hosts with
+          publicly-issued TLS certs; internal-CA-only hosts won&apos;t surface
+          here.
+        </p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting || !apex.trim()}
           className="rounded-md bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/25 disabled:opacity-50"
         >
           {submitting ? 'Saving…' : 'Save integration'}
