@@ -13,6 +13,7 @@ import {
   Cloud,
 } from 'lucide-react';
 import DormantTargetsClient from './dormant-targets-client';
+import AddAssetsButton from './add-assets-button';
 import type { LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import type { Target, TargetType } from '@/lib/supabase/types';
@@ -128,53 +129,10 @@ export default async function TargetsPage() {
             containers, domains. Findings and scan history roll up per asset.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Phase B — target templates settings link. Discoverable
-              from /targets so the path "I have many targets" →
-              "I want one template they share" is one click. */}
-          <Link
-            href="/settings/target-templates"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
-          >
-            Templates
-          </Link>
-          {/* Phase D — bulk CSV import for orgs with an existing CMDB /
-              spreadsheet inventory. Idempotent re-import via
-              external_id; per-row outcomes surface created/updated/
-              errored separately. */}
-          <Link
-            href="/targets/import-csv"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
-          >
-            Import from CSV
-          </Link>
-          {/* Phase D follow-up — Terraform state ingest. Reads a
-              terraform.tfstate JSON and extracts scannable resources. */}
-          <Link
-            href="/targets/import-terraform"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
-          >
-            Import from Terraform
-          </Link>
-          {/* Phase B #3 — bulk import from GitHub. Renders next to the
-              singleton "Add target" button so users with a connected
-              GitHub integration see the fast path. The link works
-              regardless of integration state — the destination page
-              shows a "connect first" CTA if none are wired. */}
-          <Link
-            href="/targets/import-github"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
-          >
-            Import from GitHub
-          </Link>
-          <Link
-            href="/targets/new"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-white to-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 shadow-sm shadow-white/10 transition-all hover:shadow-md hover:shadow-white/15"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.5} />
-            Add target
-          </Link>
-        </div>
+        {/* Single primary CTA. Opens a sheet with three clearly-titled
+            paths: connect-a-system / one-by-hand / bulk-import.
+            Templates is config — lives in /setup, not here. */}
+        <AddAssetsButton />
       </header>
 
       {targets && targets.length > 0 ? (
