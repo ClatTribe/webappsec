@@ -13,7 +13,26 @@
 
 import { notFound } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
-import { Sparkles, ShieldCheck, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
+import {
+  Sparkles,
+  ShieldCheck,
+  AlertTriangle,
+  AlertCircle,
+  Clock,
+  Code2,
+  Globe,
+  Webhook,
+  Cloud,
+  Container,
+  Network,
+  Server,
+  FileCode2,
+  FlaskConical,
+  Crosshair,
+  Repeat,
+  FileLock,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Severity } from '@/lib/supabase/types';
 
 // Disable ISR static caching — the trust page is the live posture.
@@ -250,6 +269,16 @@ export default async function TrustPage({ params }: { params: { slug: string } }
       </header>
 
       <div className="mx-auto max-w-4xl space-y-12 px-6 py-12">
+        {/* Coverage breadth — matches the landing page's "8 surfaces"
+            claim so prospects who hit the trust page from marketing
+            see the same product shape. Static brand claims, not org-
+            specific data. */}
+        <CoverageStrip />
+
+        {/* What we actually do — three depth claims that mirror the
+            landing's "we don't just flag, we prove" section. */}
+        <DepthCallouts />
+
         {/* Frameworks */}
         <section>
           <h2 className="mb-6 text-xs font-semibold uppercase tracking-wider text-neutral-400">
@@ -510,5 +539,141 @@ function Stat({
       <div className={`text-2xl font-semibold ${colorMap[tone]}`}>{value}</div>
       <div className="mt-0.5 text-[10px] uppercase tracking-wider text-neutral-400">{label}</div>
     </div>
+  );
+}
+
+// ============================================================================
+// Coverage strip + depth callouts
+// ============================================================================
+//
+// Static brand claims that mirror the landing page. These intentionally
+// don't pull per-org data — the message is "this is how TensorShield
+// monitors *any* org, here's what we cover", not "your specific
+// inventory". The framework + open-finding counts elsewhere on the
+// page carry the per-org specifics.
+
+function CoverageStrip() {
+  const surfaces: { Icon: LucideIcon; label: string }[] = [
+    { Icon: Code2, label: 'Source code' },
+    { Icon: Globe, label: 'Web apps' },
+    { Icon: Webhook, label: 'APIs' },
+    { Icon: Cloud, label: 'Cloud accounts' },
+    { Icon: Container, label: 'Container images' },
+    { Icon: Network, label: 'Domains' },
+    { Icon: Server, label: 'IP & infra' },
+    { Icon: FileCode2, label: 'Local uploads' },
+  ];
+  return (
+    <section>
+      <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+        Coverage — every attack surface, one agent
+      </h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {surfaces.map(({ Icon, label }) => (
+          <div
+            key={label}
+            className="flex items-center gap-2.5 rounded-lg border border-neutral-800/80 bg-neutral-900/30 px-3 py-2.5"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-cyan-500/10 text-cyan-200 ring-1 ring-inset ring-cyan-500/20">
+              <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+            </div>
+            <span className="text-[12px] text-neutral-200">{label}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] text-neutral-500">
+        Monitored continuously, not on quarterly cycles. Each surface
+        feeds the same compliance evidence pipeline that powers this page.
+      </p>
+    </section>
+  );
+}
+
+function DepthCallouts() {
+  const items: {
+    Icon: LucideIcon;
+    tone: 'cyan' | 'violet' | 'emerald' | 'amber';
+    title: string;
+    body: string;
+  }[] = [
+    {
+      Icon: FlaskConical,
+      tone: 'violet',
+      title: 'Verified exploits, not noise',
+      body: 'Every high-severity finding gets an exploit attempt against a sandbox replica of the target. The finding only lands if the PoC succeeded.',
+    },
+    {
+      Icon: Crosshair,
+      tone: 'cyan',
+      title: 'Reachability scoring',
+      body: 'A dependency CVE in code that never executes is not the same as one in your auth path. We trace whether the vulnerable code is actually reachable before raising.',
+    },
+    {
+      Icon: Repeat,
+      tone: 'emerald',
+      title: 'Closed-loop suppression',
+      body: 'A dismissal becomes a rule with the reason on file. The same false positive never lands twice, and the audit trail shows when and why it was suppressed.',
+    },
+    {
+      Icon: FileLock,
+      tone: 'amber',
+      title: 'Compliance, automatically',
+      body: 'Per-control evidence across SOC 2 / ISO 27001 / PCI DSS 4.0 / HIPAA / NIST 800-53 is ingested from every scan. The framework cards below are live.',
+    },
+  ];
+  const TONE: Record<
+    'cyan' | 'violet' | 'emerald' | 'amber',
+    { ring: string; bg: string; icon: string }
+  > = {
+    cyan: {
+      ring: 'ring-cyan-500/20',
+      bg: 'from-cyan-500/8',
+      icon: 'bg-cyan-500/15 text-cyan-200',
+    },
+    violet: {
+      ring: 'ring-violet-500/20',
+      bg: 'from-violet-500/8',
+      icon: 'bg-violet-500/15 text-violet-200',
+    },
+    emerald: {
+      ring: 'ring-emerald-500/20',
+      bg: 'from-emerald-500/8',
+      icon: 'bg-emerald-500/15 text-emerald-200',
+    },
+    amber: {
+      ring: 'ring-amber-500/20',
+      bg: 'from-amber-500/8',
+      icon: 'bg-amber-500/15 text-amber-200',
+    },
+  };
+  return (
+    <section>
+      <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+        How we monitor
+      </h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {items.map(({ Icon, tone, title, body }) => {
+          const t = TONE[tone];
+          return (
+            <div
+              key={title}
+              className={`rounded-xl border border-neutral-800/80 bg-gradient-to-b ${t.bg} to-transparent p-4 ring-1 ${t.ring}`}
+            >
+              <div
+                className={`flex h-7 w-7 items-center justify-center rounded-md ${t.icon} ring-1 ring-inset ring-white/5`}
+              >
+                <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+              </div>
+              <h3 className="mt-2.5 text-[13.5px] font-semibold text-white">
+                {title}
+              </h3>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-neutral-400">
+                {body}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
