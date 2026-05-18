@@ -9,12 +9,14 @@
 import { awsIamCollector } from './aws-iam';
 import { gcpIamCollector } from './gcp-iam';
 import { githubAdminCollector } from './github';
+import { oktaCollector } from './okta';
 import type { CollectorDefinition } from './types';
 
 export const COLLECTORS: CollectorDefinition[] = [
   githubAdminCollector,
   awsIamCollector,
   gcpIamCollector,
+  oktaCollector,
 ];
 
 /** Map lookup by collector id. Returns null if the id isn't known —

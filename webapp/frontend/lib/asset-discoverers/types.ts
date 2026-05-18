@@ -38,7 +38,8 @@ export type IntegrationType =
   | 'azure'
   | 'k8s'
   | 'gitlab'
-  | 'domain';
+  | 'domain'
+  | 'okta';
 
 /** A single proposed target row destined for `discovered_assets`. The
  *  shape mirrors the table 1:1 minus org_id/integration_id (provided
