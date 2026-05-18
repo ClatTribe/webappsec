@@ -47,7 +47,7 @@ export default function SignupPage() {
 
     // Refresh JWT so the new org_id claim lands in cookies.
     await supabase.auth.refreshSession();
-    router.push('/dashboard');
+    router.push('/home');
     router.refresh();
   }
 

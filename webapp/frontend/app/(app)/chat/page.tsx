@@ -65,9 +65,8 @@ export default async function ChatPage() {
 
   if (!thread) {
     // RLS denied the insert — means user has no org membership. Send
-    // them somewhere they can fix that (today: dashboard with empty
-    // state; later: org-onboarding flow).
-    redirect('/dashboard');
+    // them home where the empty state will prompt the connect flow.
+    redirect('/home');
   }
 
   return (

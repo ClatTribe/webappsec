@@ -8,7 +8,7 @@
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Gauge, ChevronRight } from 'lucide-react';
+import { Gauge, ChevronRight, Briefcase, ArrowRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import QuestionnaireClient from './questionnaire-client';
 
@@ -104,8 +104,39 @@ export default async function CompliancePage() {
     <div className="space-y-6">
       {chips.length > 0 && <ReadinessChips chips={chips} />}
       {cisAttestation.length > 0 && <CisAttestationCard rows={cisAttestation} />}
+      <ShareWithBoardCard />
       <QuestionnaireClient templates={templates} />
     </div>
+  );
+}
+
+// The /exec page was promoted out of the primary nav (PR A) — surface
+// it from the place it's actually relevant. Compliance is where a
+// founder shares their quarterly posture with the board / investors /
+// auditor.
+function ShareWithBoardCard() {
+  return (
+    <Link
+      href="/exec"
+      className="group flex items-start gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/[0.04] p-4 transition-all hover:-translate-y-0.5 hover:border-violet-500/40"
+    >
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-200 ring-1 ring-inset ring-violet-500/20">
+        <Briefcase className="h-4 w-4" strokeWidth={2.25} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-white">
+          Share with the board
+        </div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-neutral-400">
+          One-page executive view: readiness trend per framework, top
+          risks by criticality, last-30d activity narrative.
+        </p>
+      </div>
+      <ArrowRight
+        className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-neutral-500 transition-all group-hover:translate-x-1 group-hover:text-violet-300"
+        strokeWidth={2.25}
+      />
+    </Link>
   );
 }
 
