@@ -77,7 +77,10 @@ export default async function IntegrationsPage() {
                         every integration type that has a discoverer
                         wired. Keep this list in sync with
                         lib/asset-discoverers/registry.ts. */}
-                    {(i.type === 'github' || i.type === 'aws' || i.type === 'domain') && (
+                    {(i.type === 'github' ||
+                      i.type === 'aws' ||
+                      i.type === 'gcp' ||
+                      i.type === 'domain') && (
                       <Link
                         href={`/integrations/${i.id}/discovered`}
                         className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-cyan-200 hover:bg-cyan-500/20"
