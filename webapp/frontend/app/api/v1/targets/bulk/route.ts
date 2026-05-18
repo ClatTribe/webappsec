@@ -1,39 +1,33 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { authenticateMcpRequest, hasScope } from '@/lib/mcp/auth';
 
 // POST /api/v1/targets/bulk
 //
-// Phase D — bulk-import N targets in one round-trip. JSON body shape:
+// Phase D — bulk-import N targets in one round-trip. Two auth paths:
 //
-//   {
-//     "project_slug": "payments",         // optional default project
-//     "targets": [
-//       {
-//         "name": "Payments API",
-//         "type": "repository",            // see TargetType enum
-//         "value": "https://github.com/acme/payments-api",
-//         "external_id": "cmdb-pa-001",    // optional, stable upsert key
-//         "description": "...",
-//         "metadata": { ... },             // free-shape
-//         "scan_frequency": "weekly",      // manual|daily|weekly|monthly
-//         "project_id": "uuid"             // optional per-row override
-//       },
-//       ...
-//     ]
-//   }
+//   1. Session cookie (browser → /targets/import-csv flow)
+//      Uses `bulk_upsert_targets(p_targets, p_project_slug)` which
+//      reads org_id from the user's JWT via current_org_id().
 //
-// Response: per-row outcomes from the `bulk_upsert_targets` RPC,
-// shaped as { input_index, external_id, target_id, action, error }
-// where `action` is one of created / updated / error. The endpoint
-// returns 200 even when some rows error so partial success is
-// observable; the caller inspects the per-row `error` field.
+//   2. Bearer API token (CI / CMDB sync scripts)
+//      Validates via authenticateMcpRequest, requires the `mcp:scan`
+//      scope (creating targets is a write-scope action), then calls
+//      `bulk_upsert_targets_for_org(org_id, user_id, ...)` with the
+//      org_id pulled from the resolved key. Service-role-only RPC;
+//      route invokes via the admin client.
+//
+// Both paths return the same response shape so callers don't care
+// which auth they used.
 //
 // Idempotency: re-submitting the same body is a no-op for existing
-// rows. The CMDB sync script doesn't need to maintain state.
+// rows (the underlying RPCs upsert on (org_id, external_id) when
+// external_id is set, else on (org_id, value)).
 //
-// Versioning: this is the v1 contract. New optional fields can be
-// added without bumping; field renames require a /v2 path.
+// Versioning: this is the v1 contract. New optional fields land
+// without bumping; field renames require /v2.
 
 export const dynamic = 'force-dynamic';
 
@@ -71,14 +65,6 @@ interface OutcomeRow {
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-  }
-
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
@@ -87,10 +73,30 @@ export async function POST(req: Request) {
     );
   }
 
+  // --- Auth path resolution -------------------------------------
+  // We check for a Bearer header first because that's the explicit
+  // signal a machine-to-machine caller sends. Session-cookie auth
+  // is the fallback for browser-originated submissions.
+  const authHeader = req.headers.get('authorization');
+  if (authHeader && /^bearer\s+/i.test(authHeader)) {
+    return await handleApiToken(req, parsed.data);
+  }
+  return await handleSession(parsed.data);
+}
+
+async function handleSession(input: z.infer<typeof Body>): Promise<Response> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  }
+
   const { data, error } = (await supabase.rpc('bulk_upsert_targets', {
-    p_targets: parsed.data.targets,
-    p_project_slug: parsed.data.project_slug ?? null,
-  })) as unknown as {
+    p_targets: input.targets,
+    p_project_slug: input.project_slug ?? null,
+  } as never)) as unknown as {
     data: OutcomeRow[] | null;
     error: { message: string } | null;
   };
@@ -101,13 +107,63 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+  return buildSuccess(data ?? []);
+}
 
-  const rows = data ?? [];
+async function handleApiToken(
+  req: Request,
+  input: z.infer<typeof Body>,
+): Promise<Response> {
+  const ctx = await authenticateMcpRequest(req.headers);
+  if (!ctx) {
+    return NextResponse.json(
+      { error: 'invalid or revoked API token' },
+      { status: 401 },
+    );
+  }
+  if (!hasScope(ctx, 'mcp:scan')) {
+    return NextResponse.json(
+      {
+        error:
+          'API token is missing the mcp:scan scope (required for bulk target import — creating targets is a write action)',
+      },
+      { status: 403 },
+    );
+  }
+
+  // Service-role admin client invokes the org-scoped sibling RPC.
+  // We pass a synthetic user_id of all zeros because there's no
+  // human caller — the audit_log entry the RPC writes carries
+  // source='api_token' so an auditor can still tell who acted.
+  const admin = createAdminClient();
+  const { data, error } = (await admin.rpc('bulk_upsert_targets_for_org', {
+    p_org_id: ctx.orgId,
+    p_user_id: null,
+    p_targets: input.targets,
+    p_project_slug: input.project_slug ?? null,
+  } as never)) as unknown as {
+    data: OutcomeRow[] | null;
+    error: { message: string } | null;
+  };
+
+  if (error) {
+    return NextResponse.json(
+      { error: `bulk upsert failed: ${error.message}` },
+      { status: 500 },
+    );
+  }
+  return buildSuccess(data ?? [], { auth: 'api_token', key_id: ctx.keyId });
+}
+
+function buildSuccess(
+  rows: OutcomeRow[],
+  meta: Record<string, unknown> = {},
+): Response {
   const summary = {
     total: rows.length,
     created: rows.filter((r) => r.action === 'created').length,
     updated: rows.filter((r) => r.action === 'updated').length,
     errored: rows.filter((r) => r.action === 'error').length,
   };
-  return NextResponse.json({ ok: true, summary, results: rows });
+  return NextResponse.json({ ok: true, summary, results: rows, ...meta });
 }
