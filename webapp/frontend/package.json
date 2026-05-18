@@ -21,6 +21,7 @@
     "@azure/arm-network": "^36.0.0",
     "@azure/arm-resources": "^7.0.0",
     "@azure/identity": "^4.13.1",
+    "@kubernetes/client-node": "^1.4.0",
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.0",
     "clsx": "^2.1.1",

@@ -9,6 +9,7 @@ import { azureResourcesDiscoverer } from './azure';
 import { domainSubdomainDiscoverer } from './domain';
 import { gcpResourcesDiscoverer } from './gcp';
 import { githubReposDiscoverer } from './github';
+import { k8sResourcesDiscoverer } from './k8s';
 import type { DiscovererDefinition } from './types';
 
 export const DISCOVERERS: DiscovererDefinition[] = [
@@ -16,6 +17,7 @@ export const DISCOVERERS: DiscovererDefinition[] = [
   awsResourcesDiscoverer,
   gcpResourcesDiscoverer,
   azureResourcesDiscoverer,
+  k8sResourcesDiscoverer,
   domainSubdomainDiscoverer,
 ];
 
