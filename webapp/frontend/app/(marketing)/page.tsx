@@ -98,10 +98,10 @@ function Hero() {
             </span>
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-neutral-300">
-            TensorShield is the AI security engineer you would hire if budget weren&apos;t in the way.
-            It runs continuously across your code, cloud, web apps, APIs, containers, and
-            dependencies — proves what&apos;s actually exploitable, and builds your audit
-            evidence as it goes.
+            TensorShield is the AI security engineer you&apos;d hire if budget weren&apos;t in the
+            way. It runs around the clock across your code, cloud, web apps, APIs, containers,
+            and dependencies — actually exploits the serious bugs to confirm they&apos;re real,
+            and builds your audit evidence as it goes.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
@@ -203,8 +203,8 @@ function HeroChatMockup() {
             </p>
             <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">
               SOC 2 readiness: <span className="text-emerald-300">81/100</span> (▲ 13 since Q1).
-              19 of 24 controls pass · 2 warn · 3 fail. The 3 failures are all in CC6 — root
-              account still has long-lived AWS access keys.
+              19 of 24 controls pass · 2 warn · 3 fail. All three failures are about the same
+              thing — your AWS root account still has long-lived access keys.
             </p>
             <div className="mt-3 flex flex-wrap gap-1.5">
               <Pill cyan>Show me the 3 failures</Pill>
@@ -217,7 +217,7 @@ function HeroChatMockup() {
         <div className="border-t border-neutral-800/60 bg-neutral-900/40 px-4 py-3">
           <div className="flex items-end gap-2">
             <div className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-500">
-              Ask TensorShield anything about your scans, findings, cloud posture, or compliance…
+              Ask TensorShield anything about your scans, findings, cloud health, or compliance…
             </div>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/30">
               <Send className="h-3.5 w-3.5" />
@@ -351,113 +351,122 @@ const SURFACES: SurfaceCoverage[] = [
     Icon: Code2,
     tone: 'cyan',
     surface: 'Source code',
-    tagline: 'SAST + SCA + secrets + IaC — every layer of your repository.',
+    tagline:
+      'Every layer of your repository — your code, your dependencies, your secrets, your infrastructure config.',
     catches: [
       'SQL injection',
-      'XSS · RCE · SSRF',
+      'Injection attacks',
       'Hardcoded secrets',
-      'Weak crypto',
-      'Insecure deserialisation',
-      'Dependency CVEs (with reachability)',
-      'IaC misconfig',
-      'Custom Semgrep rules',
+      'Weak encryption',
+      'Risky dependency versions',
+      'Terraform / config-as-code mistakes',
+      'Your own house rules',
     ],
-    proof: 'Reachability scoring — a CVE in code that never runs is not your problem.',
+    proof:
+      'We trace whether the vulnerable code actually runs. Bugs in code that never executes don\'t crowd out the real ones.',
   },
   {
     Icon: Globe,
     tone: 'violet',
     surface: 'Web applications',
-    tagline: 'Black-box DAST that drives a real browser and verifies every critical.',
+    tagline:
+      'We drive a real browser against your live site — just like an attacker would, just like a user does.',
     catches: [
-      'SQL injection (PoC)',
-      'XSS (reflected · stored · DOM)',
-      'IDOR & broken access',
-      'Auth bypass',
-      'CSRF',
+      'SQL injection (with proof)',
+      'Injection attacks',
+      'Users can see other users\' data',
+      'Login that can be bypassed',
+      'Session hijacking',
       'Open redirects',
       'Business-logic flaws',
-      'Session / JWT issues',
     ],
-    proof: 'Every high finds a working exploit before it reaches your inbox.',
+    proof:
+      'Every serious finding gets a working exploit before it reaches your inbox.',
   },
   {
     Icon: Webhook,
     tone: 'amber',
     surface: 'APIs',
-    tagline: 'OpenAPI-aware. The attacks scanners miss because they need context.',
+    tagline:
+      'Reads your OpenAPI spec, signs in as a real user, then probes for the bugs scanners miss without context.',
     catches: [
-      'BOLA',
-      'Mass assignment',
-      'Broken authentication',
-      'Rate-limit gaps',
-      'Server-side request forgery',
-      'GraphQL introspection abuse',
-      'API key leaks in responses',
-      'Spec drift',
+      'Users can read each other\'s data',
+      'Hidden fields editable from outside',
+      'Login that can be bypassed',
+      'No rate limiting',
+      'Server tricked into making requests',
+      'GraphQL introspection leaks',
+      'API keys leaking in responses',
+      'Spec drift from production',
     ],
-    proof: 'Authenticates as a real user before testing — finds what unauth scanners can\'t.',
+    proof:
+      'Signs in like a real user before testing — catches what unauthenticated scanners can\'t.',
   },
   {
     Icon: Cloud,
     tone: 'blue',
     surface: 'Cloud accounts',
-    tagline: 'Attack-path graph: external principal → resource. AWS / GCP / Azure.',
+    tagline:
+      'We map the chain an outside attacker would follow into your AWS / GCP / Azure — and to what data.',
     catches: [
-      'Public storage exposure',
-      'IAM sprawl (root keys, admin users)',
-      'Missing encryption at rest',
-      'Cross-account trust chains',
-      'Network exposure (open SGs / firewalls)',
-      'IaC drift vs deployed state',
-      'Unattached resources',
+      'Public S3 / GCS / Blob buckets',
+      'Too many people with admin permissions',
+      'Data stored without encryption',
+      'Trust chains between accounts',
+      'Firewalls / security groups left open',
+      'What\'s deployed doesn\'t match Terraform',
+      'Forgotten resources still running',
     ],
-    proof: 'A single open S3 bucket is not the finding. The chain to PII is.',
+    proof:
+      'A single open bucket is not the finding. The chain that leads to your customer data is.',
   },
   {
     Icon: Container,
     tone: 'emerald',
     surface: 'Container images',
-    tagline: 'Layer-by-layer scan with secret discovery + base-image health.',
+    tagline:
+      'Layer by layer. Every package, every secret hiding in a previous COPY, every risky base image.',
     catches: [
-      'OS package CVEs',
-      'Vulnerable base images',
-      'Secret leaks in layers',
-      'Dockerfile anti-patterns',
-      'Excessive privileges',
-      'Outdated runtimes',
+      'Vulnerable OS packages',
+      'Risky base images',
+      'Secrets leaking in image layers',
+      'Dockerfile mistakes',
+      'Containers running as root',
+      'Outdated language runtimes',
     ],
-    proof: 'Same fingerprint family as code — one finding, one fix, every image affected.',
+    proof:
+      'Same fix-once-everywhere model as code findings — one root cause, every image affected.',
   },
   {
     Icon: Network,
     tone: 'fuchsia',
     surface: 'Domains & surface',
-    tagline: 'Passive recon — see what the outside world sees of you.',
+    tagline:
+      'What the outside world sees about you. Find the subdomain you forgot about before someone else does.',
     catches: [
-      'Subdomain enumeration',
-      'DNS hygiene (SPF · DKIM · DMARC · DNSSEC)',
-      'Expired certificates',
-      'Exposed admin panels',
-      'Email security (BIMI · MTA-STS)',
-      'Shadow-IT discovery',
+      'Subdomains you didn\'t know existed',
+      'Email setup gaps (SPF · DKIM · DMARC)',
+      'Expired HTTPS certificates',
+      'Admin panels visible from the internet',
+      'Shadow-IT services you never authorised',
     ],
-    proof: 'Driven from cert-transparency logs — comprehensive without DNS probes.',
+    proof:
+      'Reads public certificate-transparency logs — comprehensive without ever touching your DNS.',
   },
   {
     Icon: Server,
     tone: 'rose',
     surface: 'IP & infrastructure',
-    tagline: 'Port-level recon and certificate hygiene across registered IP space.',
+    tagline:
+      'Port-level scanning across the IP space you own. Find the staging port someone forgot in 2023.',
     catches: [
-      'Exposed services',
-      'TLS / SSL hygiene',
-      'Service fingerprinting',
-      'Known service CVEs',
-      'Infrastructure drift',
+      'Services exposed to the internet',
+      'Expired or weak HTTPS certs',
+      'What\'s actually running on each port',
+      'Known bugs in those services',
       'Outdated SSH / RDP',
     ],
-    proof: 'Catches the staging port someone forgot was open in 2023.',
+    proof: 'Catches the staging port someone forgot was open three years ago.',
   },
 ];
 
@@ -621,9 +630,8 @@ function ProofItRail() {
             </span>
           </h2>
           <p className="mt-4 text-base leading-relaxed text-neutral-400">
-            Scanners ship you a backlog of &ldquo;potentially exploitable&rdquo; pattern matches.
-            TensorShield runs a verification pipeline against every high-severity finding before
-            it reaches your inbox.
+            Most scanners ship a backlog of &ldquo;might be exploitable&rdquo; pattern matches.
+            TensorShield tries to actually exploit the serious ones before alerting you.
           </p>
         </div>
 
@@ -631,30 +639,30 @@ function ProofItRail() {
           <ProofItCard
             Icon={FlaskConical}
             tone="violet"
-            chip="Live exploit verification"
-            title="Every critical gets a working PoC — or it gets downgraded."
-            body="For each candidate vulnerability, an agent builds the exploit, runs it against your real (sandboxed) target, and only escalates if it succeeded. The flag you see has receipts."
+            chip="Working proof, every time"
+            title="Every serious finding comes with a working exploit — or it gets downgraded."
+            body="For each potential bug, an agent writes the exploit code, runs it against a sandboxed copy of your app, and only flags it if the attack actually succeeded. The finding you see has receipts."
           />
           <ProofItCard
             Icon={Crosshair}
             tone="cyan"
-            chip="Reachability scoring"
-            title="A dep CVE you don't import is not your problem."
-            body="For SCA and SAST, we trace whether the vulnerable code is actually invoked by your application. Unreachable findings get a chip so they don't crowd out the ones that matter."
+            chip="Reachable code only"
+            title="A vulnerable dependency you never call is not your problem."
+            body="For code and dependency findings, we trace whether the buggy function actually runs in your app. Unreachable bugs get marked so they don't drown the ones that matter."
           />
           <ProofItCard
             Icon={Network}
             tone="emerald"
-            chip="Cloud attack-path graph"
-            title="A single open S3 bucket is not the finding. The chain is."
-            body="The cloud scanner builds a graph: external principal → role assumption → resource access → data sensitivity. You see the attack as a path, not as 47 disconnected misconfigurations."
+            chip="Attack chains, not lone misconfigs"
+            title="A single open bucket isn't the finding. The chain is."
+            body="The cloud scanner draws the map: someone on the internet → a role they can assume → the data they\'d reach. You see the attack as a path, not 47 disconnected red flags."
           />
         </div>
 
         <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-neutral-500">
-          Result: the average team sees{' '}
-          <span className="text-neutral-200">10–20 real findings</span> in the first scan instead
-          of a dump of 300 lines they&apos;ll never triage.
+          The average team sees{' '}
+          <span className="text-neutral-200">10–20 real things to look at</span>{' '}
+          in the first scan instead of 300 they\'ll never get through.
         </p>
       </div>
     </section>
@@ -746,8 +754,8 @@ function ClosedLoop() {
           n={2}
           tone="emerald"
           title="You dismiss with a reason"
-          chip='"Behind Cloudflare WAF — header injected at the edge"'
-          quote="TensorShield records the rule (fingerprint + reason, confidence 0.75)."
+          chip='"Cloudflare adds this header at the edge — handled."'
+          quote="TensorShield saves the rule with your reason and a confidence score."
         />
       </div>
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
@@ -762,13 +770,14 @@ function ClosedLoop() {
           wide
           title="Next scan: suppressed before you see it"
           chip="Suppressed · Missing X-Frame-Options on /pricing"
-          quote='Your rule from 4 days ago covers this (dismissed 3 times, "Behind Cloudflare WAF").'
+          quote='Your rule from 4 days ago covers this. (Dismissed 3 times. "Cloudflare adds it at the edge.")'
         />
       </div>
 
       <p className="mx-auto mt-12 max-w-xl text-center text-sm text-neutral-500">
-        Your dismissal lives in your workspace. Rules apply only to your assets and are verifiable
-        in every scan&apos;s audit trail. No pooled training — your decisions stay yours.
+        Your dismissals stay in your workspace. Rules only apply to your assets, and every
+        scan&apos;s audit trail shows what got suppressed and why. No data shared across customers
+        — your decisions stay yours.
       </p>
     </section>
   );
@@ -843,18 +852,18 @@ function ComplianceProduct() {
             <span className="text-neutral-400">Not a spreadsheet.</span>
           </h2>
           <p className="mt-4 text-base leading-relaxed text-neutral-300">
-            Every scan emits per-control evidence across SOC 2, ISO 27001, PCI DSS 4.0, HIPAA,
-            and NIST 800-53. Continuous collectors poll GitHub, AWS, GCP, and Okta for the
-            org-level controls auditors actually ask about — MFA enforcement, key rotation,
-            admin sprawl. One observation credits every framework it maps to.
+            Every scan gives you control-by-control evidence across SOC 2, ISO 27001, PCI DSS 4.0,
+            HIPAA, and NIST 800-53. We continuously check GitHub, AWS, GCP, and Okta for the
+            things auditors actually ask about — two-factor auth, key rotation, who has admin
+            access. One check counts for every framework it applies to.
           </p>
           <ul className="mt-6 space-y-2.5 text-sm text-neutral-300">
-            <ComplianceBullet text="Per-control verdicts ingested from every scan and posted to a live readiness score." />
-            <ComplianceBullet text="Continuous evidence collectors for GitHub, AWS IAM, GCP IAM, Okta — set once, runs forever." />
-            <ComplianceBullet text="One observation credits five frameworks via cross-framework mappings — no duplicate work." />
-            <ComplianceBullet text="Public Trust Page for prospects. Time-bounded auditor portal with JSON export for the rest." />
-            <ComplianceBullet text="SBOM export in CycloneDX or SPDX for procurement diligence." />
-            <ComplianceBullet text="Tamper-evident HMAC signature chain on every scan&apos;s evidence." />
+            <ComplianceBullet text="A live readiness score for each framework — updated after every scan." />
+            <ComplianceBullet text="Continuous checks against GitHub, AWS, GCP, and Okta. Set once, runs forever." />
+            <ComplianceBullet text="One observation counts toward five frameworks. No duplicate evidence work." />
+            <ComplianceBullet text="A public trust page for prospects. A time-bounded portal you share with auditors — they get a downloadable JSON of everything." />
+            <ComplianceBullet text="A complete list of every component in your build (in the two formats procurement teams ask for)." />
+            <ComplianceBullet text="Every scan&apos;s evidence is cryptographically signed so it can&apos;t be tampered with after the fact." />
           </ul>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
@@ -1005,42 +1014,42 @@ function Capabilities() {
       Icon: MessageSquare,
       title: 'In-app chat that knows your stack',
       body:
-        'Ask "what was the SSRF we found last quarter?" or "how ready am I for SOC 2?" — answered from your workspace memory, with citations to scans and findings.',
+        'Ask &ldquo;what was that server-side bug we found last quarter?&rdquo; or &ldquo;how ready am I for SOC 2?&rdquo; — answered from your workspace memory, with links to the scans and findings it cites.',
       tone: 'cyan',
     },
     {
       Icon: Activity,
-      title: 'Continuous scanning, not on-demand',
+      title: 'Always-on scanning, not once-a-quarter',
       body:
-        'Register an asset with a cadence. Daily, weekly, or on-push. Drift gets flagged the moment it lands — no dashboard to refresh.',
+        'Add an asset with a cadence — daily, weekly, or every push. New issues surface the moment they appear. No dashboard to refresh.',
       tone: 'blue',
     },
     {
       Icon: Repeat,
-      title: 'Closed-loop suppression learning',
+      title: 'It learns from your dismissals',
       body:
-        'Dismiss once with a reason. The pattern is suppressed on the next scan with a chat note citing your rule. Fingerprint-precise, fully auditable.',
+        'Dismiss something once with a reason. The same finding gets suppressed on the next scan with a note citing your reason. Precise to the line, fully auditable.',
       tone: 'emerald',
     },
     {
       Icon: Wand2,
-      title: 'Custom rules per workspace',
+      title: 'Your own rules, per workspace',
       body:
-        'Author your own Semgrep rules for stack-specific patterns — framework misuse, internal naming, deprecated APIs. They run alongside the built-in pack.',
+        'Write rules for things specific to your stack — framework misuse, internal naming, APIs you deprecated. They run alongside our defaults.',
       tone: 'violet',
     },
     {
       Icon: FileLock,
-      title: 'Compliance as a living document',
+      title: 'Compliance is automatic, not a spreadsheet',
       body:
-        'SOC 2, ISO 27001, PCI DSS 4.0, HIPAA, NIST 800-53 — evidence collected continuously. Live Trust Page for prospects. Read-only auditor portal with JSON export.',
+        'SOC 2, ISO 27001, PCI DSS 4.0, HIPAA, NIST 800-53 — evidence collected continuously. A live trust page for prospects. A read-only portal you share with auditors.',
       tone: 'amber',
     },
     {
       Icon: Workflow,
-      title: 'Autonomy slider per category',
+      title: 'Set how much you want to do yourself',
       body:
-        '&ldquo;Auto-fix critical dep-CVEs but ask me on medium.&rdquo; Tell TensorShield in chat. The slider scales with your trust — no clicking &ldquo;Apply Fix&rdquo; 47 times.',
+        '&ldquo;Auto-fix urgent dependency issues, but ask me on the medium ones.&rdquo; Tell TensorShield in chat. As you trust it more, you can hand off more — without clicking &ldquo;Apply Fix&rdquo; 47 times.',
       tone: 'rose',
     },
   ];
@@ -1141,10 +1150,10 @@ function Personas() {
           chip="AppSec / Security engineer"
           title="50–500 person org. Three scanners. None of them learn."
           bullets={[
-            'Register every asset once — cadence-driven scans run themselves',
-            'Closed-loop suppression cuts your inbox 80% in two weeks',
-            'Cloud attack-path graph replaces 47 disconnected CSPM rows',
-            'Per-team workspaces; signed audit trail per scan',
+            'Add every asset once — scheduled scans run themselves',
+            'Inbox drops 80% within two weeks as the tool learns your dismissals',
+            'See cloud attacks as a chain, not 47 disconnected red flags',
+            'Per-team workspaces. Signed audit trail on every scan.',
           ]}
           cta="See pricing"
           ctaHref="/pricing"
@@ -1154,10 +1163,10 @@ function Personas() {
           chip="Compliance / GRC lead"
           title="Your auditor is asking. You don&apos;t want to update spreadsheets."
           bullets={[
-            'Per-control verdicts across SOC 2 / ISO / PCI / HIPAA / NIST',
-            'Continuous collectors for GitHub, AWS, GCP, Okta — no manual screenshots',
-            'Read-only auditor portal with JSON export — share, then revoke',
-            'Quarterly readiness snapshots show the improvement narrative',
+            'Control-by-control evidence across SOC 2 / ISO / PCI / HIPAA / NIST',
+            'Continuous checks against GitHub / AWS / GCP / Okta — no manual screenshots',
+            'A read-only portal you share with auditors. Downloadable. Revokable.',
+            'Quarterly snapshots show "we improved from 65 → 81" — proof of trajectory',
           ]}
           cta="Talk to us"
           ctaHref="/contact"
@@ -1226,20 +1235,20 @@ function ComparisonTable() {
     {
       label: 'Coverage',
       Icon: Layers,
-      others: 'One product per surface (SAST, DAST, CSPM, SCA)',
+      others: 'One product per surface (code · live app · cloud · dependencies)',
       tensorshield: 'Seven surfaces under one workspace and one memory',
     },
     {
       label: 'Signal shape',
       Icon: AlertTriangle,
       others: '300 findings, 285 noise',
-      tensorshield: 'The 10–20 that have a verified exploit, surfaced in chat',
+      tensorshield: 'The 10–20 with a working exploit, surfaced in chat',
     },
     {
       label: 'Severity claim',
       Icon: FlaskConical,
       others: 'CVSS rating from a static rule',
-      tensorshield: 'Live PoC built and run before the finding lands',
+      tensorshield: 'Actual exploit built and run before the finding lands',
     },
     {
       label: 'Continuity',
@@ -1333,28 +1342,28 @@ function HowItWorks() {
       n: 1,
       title: 'Create your workspace',
       body:
-        '30 seconds. Each workspace gets an isolated scan sandbox, an encrypted vault for credentials, and an evidence chain signed with your own key.',
+        '30 seconds. Your workspace gets an isolated scan sandbox, an encrypted vault for credentials, and a signed evidence trail for everything.',
       Icon: Lock,
     },
     {
       n: 2,
       title: 'Connect your stack',
       body:
-        'Install the GitHub App. Paste production URLs. Connect AWS, GCP, or Azure. Add domains, container registries, OpenAPI specs. We auto-discover what you have.',
+        'Install the GitHub App. Paste your production URL. Connect AWS, GCP, or Azure. Add a domain. We discover what you have automatically.',
       Icon: TargetIcon,
     },
     {
       n: 3,
       title: 'First scans run end-to-end',
       body:
-        'Each scan runs in its own sandbox. Every critical-severity finding gets a verified exploit attempt before it reaches you. PR comments land in scope.',
+        'Each scan runs in its own sandbox. Every serious finding gets an actual exploit attempt before it reaches you. PR comments land within the GitHub App\'s scope.',
       Icon: Activity,
     },
     {
       n: 4,
-      title: 'Triage in chat — and let it learn',
+      title: 'Review in chat — and let it learn',
       body:
-        'Dismiss with a reason. &ldquo;Fix the critical.&rdquo; &ldquo;How ready am I for SOC 2?&rdquo; — answered from your workspace memory. Continuous scans take over from here.',
+        'Dismiss things with a reason. &ldquo;Fix the urgent one.&rdquo; &ldquo;How ready am I for SOC 2?&rdquo; — TensorShield answers from your workspace memory. After this, scans run themselves.',
       Icon: Brain,
     },
   ];
@@ -1457,12 +1466,12 @@ function FinalCta() {
             <span>·</span>
             <span className="inline-flex items-center gap-1.5">
               <ShieldOff className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Reachability scoring
+              Only flags reachable bugs
             </span>
             <span>·</span>
             <span className="inline-flex items-center gap-1.5">
               <Repeat className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Continuous scanning
+              Always-on scanning
             </span>
           </div>
         </div>
