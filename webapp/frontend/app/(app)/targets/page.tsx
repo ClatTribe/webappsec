@@ -129,6 +129,15 @@ export default async function TargetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Phase B — target templates settings link. Discoverable
+              from /targets so the path "I have many targets" →
+              "I want one template they share" is one click. */}
+          <Link
+            href="/settings/target-templates"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-900/40 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800/60"
+          >
+            Templates
+          </Link>
           {/* Phase D — bulk CSV import for orgs with an existing CMDB /
               Terraform state / spreadsheet inventory. Idempotent
               re-import via external_id; per-row outcomes surface
