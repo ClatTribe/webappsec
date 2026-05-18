@@ -5,6 +5,7 @@
 // patterns are interchangeable from a maintenance standpoint.
 
 import { awsResourcesDiscoverer } from './aws';
+import { azureResourcesDiscoverer } from './azure';
 import { domainSubdomainDiscoverer } from './domain';
 import { gcpResourcesDiscoverer } from './gcp';
 import { githubReposDiscoverer } from './github';
@@ -14,6 +15,7 @@ export const DISCOVERERS: DiscovererDefinition[] = [
   githubReposDiscoverer,
   awsResourcesDiscoverer,
   gcpResourcesDiscoverer,
+  azureResourcesDiscoverer,
   domainSubdomainDiscoverer,
 ];
 
