@@ -95,7 +95,7 @@ function EmptyHome({ userName }: { userName: string }) {
       label: 'Add a web app URL',
       blurb:
         'We drive a real browser against your live site and try to actually exploit anything we find before flagging it.',
-      href: '/assets/new',
+      href: '/assets/new/web',
     },
     {
       Icon: Cloud,

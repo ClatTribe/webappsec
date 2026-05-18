@@ -589,7 +589,7 @@ function NewScanInner() {
             recognises: bearer / cookie / basic / header / login_creds.
             Plaintext goes to vault on submit; the worker decrypts at
             scan time and forwards via STRIX_AUTH_* env vars. */}
-        {selected && selected.type !== 'local_code' && selected.type !== 'ip_address' && (
+        {selected && selected.type !== 'ip_address' && (
           <section className="rounded-xl border border-neutral-800/80 bg-neutral-900/30 px-4 py-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div>

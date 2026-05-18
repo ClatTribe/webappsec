@@ -14,7 +14,6 @@ const ASSET_TYPES = [
   ['cloud_account', 'Cloud account'],
   ['domain', 'Domain'],
   ['ip_address', 'IP address'],
-  ['local_code', 'Local code upload'],
 ] as const;
 
 // Phase B — create-template form. Config is a JSONB blob the user
