@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { BrandLockup } from '@/components/marketing/marketing-shell';
 import OnboardingDialog from '@/components/onboarding/onboarding-dialog';
+import CommandPalette from '@/components/command-palette/command-palette';
+import CommandPaletteTrigger from '@/components/command-palette/command-palette-trigger';
 import {
   Home,
   MessageSquare,
@@ -126,7 +128,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         )}
 
-        <nav className="mt-6 flex flex-1 flex-col gap-0.5 px-3">
+        {/* Search trigger — visible button for users who don't know
+            the ⌘K shortcut yet. Opens the palette via custom event. */}
+        <CommandPaletteTrigger />
+
+        <nav className="mt-3 flex flex-1 flex-col gap-0.5 px-3">
           {/* Primary — the four jobs */}
           {PRIMARY_NAV.map((item) => (
             <NavLinkRow key={item.href} {...item} />
@@ -189,6 +195,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           it on a prior visit. The component fetches integration data
           via the prop list passed here. */}
       {showOnboarding && <OnboardingDialog initialIntegrations={onboardingIntegrations} />}
+
+      {/* Global ⌘K command palette — listens for the keyboard shortcut
+          and for the custom event the trigger button dispatches. */}
+      <CommandPalette />
     </div>
   );
 }
