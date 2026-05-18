@@ -95,7 +95,7 @@ function EmptyHome({ userName }: { userName: string }) {
       label: 'Add a web app URL',
       blurb:
         'Black-box DAST against your live site. Verifies every critical with a real exploit before flagging.',
-      href: '/targets/new',
+      href: '/assets/new',
     },
     {
       Icon: Cloud,
@@ -156,7 +156,7 @@ function EmptyHome({ userName }: { userName: string }) {
 
       <p className="text-xs text-neutral-500">
         Already have a CMDB, Terraform state, or spreadsheet of assets? Use{' '}
-        <Link href="/targets" className="text-cyan-300 hover:underline">
+        <Link href="/assets" className="text-cyan-300 hover:underline">
           Assets → Add
         </Link>{' '}
         for bulk paths.
@@ -267,7 +267,7 @@ async function PopulatedHome() {
           Icon={ShieldCheck}
           label="Assets monitored"
           value={targetCount ?? 0}
-          href="/targets"
+          href="/assets"
         />
         <SnapshotCard
           Icon={AlertTriangle}

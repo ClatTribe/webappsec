@@ -390,8 +390,8 @@ export default function DiscoveredAssetsClient({
           {imported.length > 20 && (
             <p className="mt-2 text-[11px] text-neutral-500">
               + {imported.length - 20} more — visit{' '}
-              <Link href="/targets" className="text-cyan-300 hover:underline">
-                /targets
+              <Link href="/assets" className="text-cyan-300 hover:underline">
+                /assets
               </Link>{' '}
               for the full list.
             </p>
@@ -506,7 +506,7 @@ function ImportedRow({
       </div>
       {asset.target_id ? (
         <Link
-          href={`/targets/${asset.target_id}`}
+          href={`/assets/${asset.target_id}`}
           className="text-[11px] text-cyan-300 hover:underline"
         >
           View target →

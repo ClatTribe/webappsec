@@ -23,6 +23,26 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Nav revamp — /targets renamed to /assets. Legacy URL is kept as
+  // a permanent (308) redirect so existing bookmarks, email links,
+  // and any third-party docs we ever wrote pointing at /targets keep
+  // resolving. The DB table + the /api/targets/* and /api/v1/targets
+  // API surfaces are intentionally unchanged — the rename is
+  // user-facing only.
+  async redirects() {
+    return [
+      {
+        source: '/targets',
+        destination: '/assets',
+        permanent: true,
+      },
+      {
+        source: '/targets/:path*',
+        destination: '/assets/:path*',
+        permanent: true,
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

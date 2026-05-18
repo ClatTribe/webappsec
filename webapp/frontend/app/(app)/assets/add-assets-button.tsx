@@ -63,7 +63,7 @@ const PATHS: Path[] = [
     blurb:
       'Paste a URL, container image, repo, or cloud account ID. Useful when the asset isn\'t in a connected system.',
     cta: 'Open the form',
-    href: '/targets/new',
+    href: '/assets/new',
   },
   {
     Icon: Upload,
@@ -72,11 +72,11 @@ const PATHS: Path[] = [
     blurb:
       'CSV from your CMDB, Terraform state file, or the public JSON API. Idempotent re-imports via stable external_id.',
     cta: 'Choose a format',
-    href: '/targets/import-csv',
+    href: '/assets/import-csv',
     secondary: [
-      { label: 'CSV upload', href: '/targets/import-csv' },
-      { label: 'Terraform state', href: '/targets/import-terraform' },
-      { label: 'GitHub repos', href: '/targets/import-github' },
+      { label: 'CSV upload', href: '/assets/import-csv' },
+      { label: 'Terraform state', href: '/assets/import-terraform' },
+      { label: 'GitHub repos', href: '/assets/import-github' },
     ],
   },
 ];

@@ -110,7 +110,7 @@ function AgentBlockView({ block }: { block: AgentBlock }) {
     case 'asset_ref':
       return (
         <Link
-          href={`/targets/${block.target_id}`}
+          href={`/assets/${block.target_id}`}
           className="inline-flex items-center gap-2 rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
         >
           📦 Open asset

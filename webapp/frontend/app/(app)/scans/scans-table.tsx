@@ -118,7 +118,7 @@ export default function ScansTable({ scans }: { scans: ScanWithTarget[] }) {
                     <td className="px-5 py-3.5">
                       {scan.targets ? (
                         <Link
-                          href={`/targets/${scan.targets.id}`}
+                          href={`/assets/${scan.targets.id}`}
                           className="inline-flex items-center gap-1.5 text-neutral-200 transition-colors hover:text-cyan-300"
                         >
                           <TargetIcon className="h-3.5 w-3.5 text-cyan-400/70" strokeWidth={2} />

@@ -93,7 +93,7 @@ export default function TargetView({ target: t, scans, findings, initialTab }: P
   return (
     <div className="space-y-6">
       <nav className="flex items-center gap-1.5 text-xs text-neutral-500">
-        <Link href="/targets" className="transition-colors hover:text-neutral-300">
+        <Link href="/assets" className="transition-colors hover:text-neutral-300">
           Targets
         </Link>
         <ChevronRight className="h-3 w-3" />

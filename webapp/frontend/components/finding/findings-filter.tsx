@@ -646,7 +646,7 @@ export default function FindingsFilter({ findings }: { findings: FindingWithScan
                       <span className="inline-flex items-center gap-1">
                         <TargetIcon className="h-3 w-3 text-cyan-400/70" strokeWidth={2.25} />
                         <Link
-                          href={`/targets/${f.target_id}`}
+                          href={`/assets/${f.target_id}`}
                           className="font-medium text-neutral-300 transition-colors hover:text-cyan-300"
                         >
                           {f.targets.name}
